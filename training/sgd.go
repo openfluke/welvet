@@ -12,6 +12,7 @@ import (
 	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/forward"
 	"github.com/openfluke/welvet/mha"
+	"github.com/openfluke/welvet/layernorm"
 	"github.com/openfluke/welvet/rmsnorm"
 	"github.com/openfluke/welvet/swiglu"
 )
@@ -104,6 +105,8 @@ func applyCell[T core.Numeric](op any, dW *core.Tensor[T], lr float64) error {
 		return swiglu.ApplyGradSGD(v, dW, lr)
 	case *rmsnorm.Layer:
 		return rmsnorm.ApplyGradSGD(v, dW, lr)
+	case *layernorm.Layer:
+		return layernorm.ApplyGradSGD(v, dW, lr)
 	case GradApplier[T]:
 		return v.ApplyGradSGD(dW, lr)
 	default:

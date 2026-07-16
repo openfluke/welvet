@@ -9,6 +9,7 @@ import (
 	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/forward"
 	"github.com/openfluke/welvet/mha"
+	"github.com/openfluke/welvet/layernorm"
 	"github.com/openfluke/welvet/rmsnorm"
 	"github.com/openfluke/welvet/swiglu"
 )
@@ -78,6 +79,12 @@ func dispatchBwd[T core.Numeric](st forward.Step[T], gradOut *core.Tensor[T]) (g
 			return nil, nil, fmt.Errorf("rmsnorm cell Op is %T", st.Cell.Op)
 		}
 		return rmsnorm.Backward(rl, gradOut, st.Input, st.Pre)
+	case core.LayerLayerNorm:
+		ll, ok := st.Cell.Op.(*layernorm.Layer)
+		if !ok || ll == nil {
+			return nil, nil, fmt.Errorf("layernorm cell Op is %T", st.Cell.Op)
+		}
+		return layernorm.Backward(ll, gradOut, st.Input, st.Pre)
 	default:
 		return nil, nil, fmt.Errorf("unsupported layer type %s", st.Cell.Layer.Type)
 	}

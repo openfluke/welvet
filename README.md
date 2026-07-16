@@ -33,9 +33,9 @@
 | **Dense** FormatNone × 34 × CPU/SIMD/WebGPU fwd+bwd | ✅ |
 | **Dense** block-quant × SIMD/WebGPU (all 20 formats on-device fwd+bwd) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
-| `forward/` / `backward/` volumetric Dense + MHA + SwiGLU + RMSNorm walk | ✅ |
-| `training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm) | ✅ |
-| Remaining layers (Embedding, LayerNorm, …) | ⬜ |
+| `forward/` / `backward/` volumetric Dense + MHA + SwiGLU + RMSNorm + LayerNorm walk | ✅ |
+| `training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm + LayerNorm) | ✅ |
+| Remaining layers (Embedding, …) | ⬜ |
 | Model IO / transformer / entity / tokenizer / hf | ⬜ |
 | Accel / donate / fountain / dna / … | ⬜ |
 | Full v1 matrix | ⬜ |
@@ -46,6 +46,7 @@ cd w2a && go test ./tests/dense -v
 cd w2a && go test ./tests/mha -v
 cd w2a && go test ./tests/swiglu -v
 cd w2a && go test ./tests/rmsnorm -v
+cd w2a && go test ./tests/layernorm -v
 ```
 
 ---
@@ -180,10 +181,11 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `mha/` | Causal+RoPE+GQA; Q/K/V/O via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `swiglu/` | SiLU-gated FFN; Gate/Up/Down via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `rmsnorm/` | RMSNorm; γ store FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layernorm/` | LayerNorm; γ+β stores FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | ✅ |
-| `forward/` | Grid walk z→y→x→l; Dense + MHA + SwiGLU + RMSNorm dispatch | ✅ |
-| `backward/` | Reverse tape over Dense + MHA + SwiGLU + RMSNorm | ✅ |
-| `training/` | MSE + SGD; ApplyGradSGD for Dense / MHA / SwiGLU / RMSNorm | ✅ |
+| `forward/` | Grid walk z→y→x→l; Dense + MHA + SwiGLU + RMSNorm + LayerNorm dispatch | ✅ |
+| `backward/` | Reverse tape over Dense + MHA + SwiGLU + RMSNorm + LayerNorm | ✅ |
+| `training/` | MSE + SGD; ApplyGradSGD for Dense / MHA / SwiGLU / RMSNorm / LayerNorm | ✅ |
 
 ### Layers (each needs CPU + SIMD + WebGPU × all dtype × all quant × fwd/bwd)
 
@@ -195,7 +197,7 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `seqmix/` | Sequence-mixer kinds (attention / SSM / linear / conv) — contract only | ✅ |
 | `mamba/` | SSM / Mamba (KindSSM) | ⬜ |
 | `rmsnorm/` | RMSNorm; γ FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `layernorm/` | LayerNorm | ⬜ |
+| `layernorm/` | LayerNorm; γ+β FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
 | `cnn1/` | 1D convolution | ⬜ |
 | `cnn2/` | 2D convolution | ⬜ |
 | `cnn3/` | 3D convolution | ⬜ |
@@ -278,6 +280,20 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/`
 | Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
 | On-device RMSNorm shader | ⬜ | ⬜ | ⬜ |
 
+### LayerNorm detail
+
+| Feature | CPU | SIMD | WebGPU |
+|---------|:---:|:----:|:------:|
+| Per-token mean+var + γ/β (eps=1e-5) | ✅ | ✅ DotTile Σx/Σx² | ✅ device required; host ALU |
+| γ+β FormatNone × 34 — fwd+bwd | ✅ | ✅ | ✅ |
+| γ+β all 20 quants — fwd+bwd | ✅ | ✅ | ✅ |
+| Activation `Tensor[T]` × all 15 `core.Numeric` kinds | ✅ | ✅ | ✅ |
+| Timed FormatNone + quant matrices in `w2a` | ✅ | ✅ | ✅ |
+| Gap census 34×20×3 | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
+| On-device LayerNorm shader | ⬜ | ⬜ | ⬜ |
+
 ### Model / IO / runtime
 
 | Package | Features | Status |
@@ -309,7 +325,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/`
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `w2a/` | Interactive menu, dense + mha + swiglu + rmsnorm suites, timed matrices, gap census | 🚧 |
+| `w2a/` | Interactive menu, dense + mha + swiglu + rmsnorm + layernorm suites, timed matrices, gap census | 🚧 |
 
 ---
 
@@ -353,6 +369,7 @@ go test ./tests/dense -v # FormatNone timed matrix + gap census
 go test ./tests/mha -v   # causal+RoPE+GQA; same coverage axes as Dense
 go test ./tests/swiglu -v # SiLU-gated FFN; same coverage axes as Dense
 go test ./tests/rmsnorm -v # RMSNorm γ; same coverage axes as Dense
+go test ./tests/layernorm -v # LayerNorm γ+β; same coverage axes as Dense
 ```
 
 Docs: `w2a/docs/`.
