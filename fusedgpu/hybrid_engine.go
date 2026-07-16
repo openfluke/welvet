@@ -66,9 +66,6 @@ type hybridEngine struct {
 	stagingLogits       *wgpu.Buffer
 	outTok              *wgpu.Buffer
 	stagingTok          *wgpu.Buffer
-	lmPartVal           *wgpu.Buffer
-	lmPartIdx           *wgpu.Buffer
-	lmPartN             int
 
 	qGate, qBuf, gateBuf, kBuf, vBuf, attnOut *wgpu.Buffer
 
@@ -81,7 +78,6 @@ type hybridEngine struct {
 	uGemvVocabH              *wgpu.Buffer
 	uGemvHInter, uGemvInterH *wgpu.Buffer
 	uArgMax                  *wgpu.Buffer
-	uArgMaxReduce            *wgpu.Buffer
 	uZero                    *wgpu.Buffer
 
 	hiddenN, vocabN, interN, maxSeq int
@@ -127,29 +123,24 @@ func newHybridEngine(spec *HybridSpec) (*hybridEngine, error) {
 	e.queue = queue
 
 	shaders := map[string]string{
-		"bingemv":      shaderBinG128GEMV,
-		"bingemv_add":  shaderBinG128GEMVAdd,
-		"binqkv":       shaderBinG128QKV,
-		"binswiglu":    shaderBinG128SwiGLU,
-		"binembed":     shaderBinEmbed,
-		"binembed_p":   shaderBinEmbedPrompt,
-		"rmsnorm":      shaderHybridRMS,
-		"resid":        shaderHybridResid,
-		"gdn_conv":     shaderGDNConv,
-		"gdn_prep":     shaderGDNPrepFused,
-		"gdn_step":     shaderGDNStepGNorm,
-		"head_rms":     shaderHeadRMS,
-		"head_rmsrope": shaderHeadRMSRoPE,
-		"split_qg":     shaderSplitQGate,
-		"prope":        shaderPartialRoPE,
-		"kv":           shaderHybridKVUpdate,
-		"attn":         shaderHybridAttn,
-		"outgate":      shaderOutGate,
-		"inc_pos":      shaderIncPosHybrid,
-		"zero":         shaderZeroF32,
-		"argmax":       shaderHybridArgMax,
-		"lm_amax":      shaderBinLMArgMaxPartial,
-		"amax_red":     shaderArgMaxReduce,
+		"bingemv":     shaderBinG128GEMV,
+		"bingemv_add": shaderBinG128GEMVAdd,
+		"binswiglu":   shaderBinG128SwiGLU,
+		"binembed":    shaderBinEmbed,
+		"binembed_p":  shaderBinEmbedPrompt,
+		"rmsnorm":     shaderHybridRMS,
+		"gdn_conv":    shaderGDNConv,
+		"gdn_prep":    shaderGDNPrepFused,
+		"gdn_step":    shaderGDNStepGNorm,
+		"head_rms":    shaderHeadRMS,
+		"split_qg":    shaderSplitQGate,
+		"prope":       shaderPartialRoPE,
+		"kv":          shaderHybridKVUpdate,
+		"attn":        shaderHybridAttn,
+		"outgate":     shaderOutGate,
+		"inc_pos":     shaderIncPosHybrid,
+		"zero":        shaderZeroF32,
+		"argmax":      shaderHybridArgMax,
 	}
 	for name, src := range shaders {
 		p, err := e.createPipeline(src)
@@ -171,7 +162,7 @@ func newHybridEngine(spec *HybridSpec) (*hybridEngine, error) {
 	e.initUniforms()
 	e.buildBindGroups()
 	nbytes := e.estimateVRAM()
-	fmt.Printf("✅ Hybrid GPU fuse ready (fused QKV/resid/LM-argmax, ~%.1f GiB)\n", float64(nbytes)/(1<<30))
+	fmt.Printf("✅ Hybrid GPU fuse ready (wg128 GEMV/SwiGLU + resid-fuse + GDN step/norm, ~%.1f GiB)\n", float64(nbytes)/(1<<30))
 	return e, nil
 }
 
@@ -476,13 +467,6 @@ func (e *hybridEngine) allocScratch() error {
 	if e.stagingTok, err = e.mkBuf("stageTok", 64, wgpu.BufferUsageMapRead, nil); err != nil {
 		return err
 	}
-	e.lmPartN = (e.vocabN + 63) / 64
-	if e.lmPartVal, err = e.mkBuf("lmPartVal", uint64(e.lmPartN*4), wgpu.BufferUsageStorage, nil); err != nil {
-		return err
-	}
-	if e.lmPartIdx, err = e.mkBuf("lmPartIdx", uint64(e.lmPartN*4), wgpu.BufferUsageStorage, nil); err != nil {
-		return err
-	}
 
 	if e.maxQGate > 0 {
 		if e.qGate, err = e.mkBuf("qgate", uint64(e.maxQGate*4), wgpu.BufferUsageStorage, nil); err != nil {
@@ -558,7 +542,6 @@ func (e *hybridEngine) initUniforms() {
 	e.uGemvHInter = e.uni("uDown", packU32(uint32(e.interN), uint32(e.hiddenN), 0, 0))
 	e.uGemvInterH = e.uni("uGate", packU32(uint32(e.hiddenN), uint32(e.interN), 0, 0))
 	e.uArgMax = e.uni("uAM", packU32(uint32(e.vocabN), 0, 0, 0))
-	e.uArgMaxReduce = e.uni("uAMR", packU32(uint32(e.lmPartN), 0, 0, 0))
 	e.uZero = e.uni("uZero", packU32(0, 0, 0, 0))
 }
 
@@ -594,8 +577,6 @@ func (e *hybridEngine) buildBindGroups() {
 	e.mkBG("embed_p", p["binembed_p"], whole(e.uEmbed), whole(e.step), whole(e.promptBuf), whole(e.embed.scales), whole(e.embed.weights), whole(e.hidden))
 	e.mkBG("fnorm", p["rmsnorm"], whole(e.uRMS), whole(e.hidden), whole(e.finalNorm), whole(e.normed))
 	e.mkBG("lm", p["bingemv"], whole(e.uGemvVocabH), whole(e.normed), whole(e.lmHead.scales), whole(e.lmHead.weights), whole(e.logits))
-	e.mkBG("lm_amax", p["lm_amax"], whole(e.uGemvVocabH), whole(e.normed), whole(e.lmHead.scales), whole(e.lmHead.weights), whole(e.lmPartVal), whole(e.lmPartIdx))
-	e.mkBG("amax_red", p["amax_red"], whole(e.uArgMaxReduce), whole(e.lmPartVal), whole(e.lmPartIdx), whole(e.outTok))
 	e.mkBG("argmax", p["argmax"], whole(e.uArgMax), whole(e.logits), whole(e.outTok))
 	e.mkBG("inc_pos", p["inc_pos"], whole(e.step))
 
@@ -609,7 +590,7 @@ func (e *hybridEngine) buildBindGroups() {
 		e.mkBG(tag+"_sw", p["binswiglu"], whole(uSW), whole(e.normed),
 			whole(b.gate.scales), whole(b.gate.weights),
 			whole(b.up.scales), whole(b.up.weights), whole(e.inter))
-		// down + residual into hidden
+		// FFN down projects straight into residual (skips separate resid pass).
 		e.mkBG(tag+"_down", p["bingemv_add"], whole(uDown), whole(e.inter), whole(b.down.scales), whole(b.down.weights), whole(e.hidden))
 
 		switch b.layerType {
@@ -625,24 +606,27 @@ func (e *hybridEngine) buildAttnBGs(tag string, b *hybridBlockGPU) {
 	p := e.pipe
 	qDim := b.numHeads * b.headDim
 	kvDim := b.numKVHeads * b.headDim
-	qRows := b.q.rows
-	uQKV := e.uni(tag+"_uQKV", packU32(uint32(b.q.cols), uint32(qRows), uint32(kvDim), 0))
+	uQ := e.gemvU(tag+"_uQ", b.q.cols, b.q.rows)
+	uK := e.gemvU(tag+"_uK", b.k.cols, b.k.rows)
+	uV := e.gemvU(tag+"_uV", b.v.cols, b.v.rows)
 	uO := e.gemvU(tag+"_uO", b.o.cols, b.o.rows)
 
 	qOut := e.qBuf
 	if b.outputGate {
 		qOut = e.qGate
 	}
-	e.mkBG(tag+"_qkv", p["binqkv"], whole(uQKV), whole(e.normed),
-		whole(b.q.scales), whole(b.q.weights),
-		whole(b.k.scales), whole(b.k.weights),
-		whole(b.v.scales), whole(b.v.weights),
-		whole(qOut), whole(e.kBuf), whole(e.vBuf))
+	e.mkBG(tag+"_q", p["bingemv"], whole(uQ), whole(e.normed), whole(b.q.scales), whole(b.q.weights), whole(qOut))
+	e.mkBG(tag+"_k", p["bingemv"], whole(uK), whole(e.normed), whole(b.k.scales), whole(b.k.weights), whole(e.kBuf))
+	e.mkBG(tag+"_v", p["bingemv"], whole(uV), whole(e.normed), whole(b.v.scales), whole(b.v.weights), whole(e.vBuf))
 
 	if b.outputGate {
 		uSplit := e.uni(tag+"_uSplit", packU32(uint32(b.numHeads), uint32(b.headDim), 0, 0))
 		e.mkBG(tag+"_split", p["split_qg"], whole(uSplit), whole(e.qGate), whole(e.qBuf), whole(e.gateBuf))
 	}
+	uHQ := e.uni(tag+"_uHQ", packU32(uint32(b.numHeads), uint32(b.headDim), mathFloat32bits(e.eps), 0))
+	uHK := e.uni(tag+"_uHK", packU32(uint32(b.numKVHeads), uint32(b.headDim), mathFloat32bits(e.eps), 0))
+	e.mkBG(tag+"_hrmsq", p["head_rms"], whole(uHQ), whole(e.qBuf), whole(b.qNorm))
+	e.mkBG(tag+"_hrmsk", p["head_rms"], whole(uHK), whole(e.kBuf), whole(b.kNorm))
 
 	rotDim := int(float64(b.headDim) * float64(b.partialRotary))
 	if rotDim <= 0 {
@@ -655,14 +639,10 @@ func (e *hybridEngine) buildAttnBGs(tag string, b *hybridBlockGPU) {
 	if theta <= 0 {
 		theta = 10000
 	}
-	uRQ := e.uni(tag+"_uHRQ", packU32(
-		uint32(b.numHeads), uint32(b.headDim), uint32(rotDim), mathFloat32bits(e.eps),
-		mathFloat32bits(theta), 0, 0, 0))
-	uRK := e.uni(tag+"_uHRK", packU32(
-		uint32(b.numKVHeads), uint32(b.headDim), uint32(rotDim), mathFloat32bits(e.eps),
-		mathFloat32bits(theta), 0, 0, 0))
-	e.mkBG(tag+"_hrmsq", p["head_rmsrope"], whole(uRQ), whole(e.step), whole(e.qBuf), whole(b.qNorm))
-	e.mkBG(tag+"_hrmsk", p["head_rmsrope"], whole(uRK), whole(e.step), whole(e.kBuf), whole(b.kNorm))
+	uRQ := e.uni(tag+"_uRQ", packU32(uint32(b.numHeads), uint32(b.headDim), uint32(rotDim), mathFloat32bits(theta)))
+	uRK := e.uni(tag+"_uRK", packU32(uint32(b.numKVHeads), uint32(b.headDim), uint32(rotDim), mathFloat32bits(theta)))
+	e.mkBG(tag+"_ropeq", p["prope"], whole(uRQ), whole(e.step), whole(e.qBuf))
+	e.mkBG(tag+"_ropek", p["prope"], whole(uRK), whole(e.step), whole(e.kBuf))
 
 	uKV := e.uni(tag+"_uKV", packU32(uint32(kvDim), uint32(e.maxSeq), uint32(b.headDim), 0))
 	e.mkBG(tag+"_kv", p["kv"], whole(uKV), whole(e.step), whole(e.kBuf), whole(e.vBuf), whole(b.kCache), whole(b.vCache))
@@ -673,7 +653,7 @@ func (e *hybridEngine) buildAttnBGs(tag string, b *hybridBlockGPU) {
 		uOG := e.uni(tag+"_uOG", packU32(uint32(qDim), 0, 0, 0))
 		e.mkBG(tag+"_ogate", p["outgate"], whole(uOG), whole(e.attnOut), whole(e.gateBuf))
 	}
-	// O + residual into hidden
+	// Attn out-proj accumulates into residual.
 	e.mkBG(tag+"_o", p["bingemv_add"], whole(uO), whole(e.attnOut), whole(b.o.scales), whole(b.o.weights), whole(e.hidden))
 }
 
@@ -701,13 +681,14 @@ func (e *hybridEngine) buildGDNBGs(tag string, b *hybridBlockGPU) {
 	e.mkBG(tag+"_gprep", p["gdn_prep"], whole(uPrep), whole(e.gdnMixed), whole(e.gdnQRep), whole(e.gdnKRep),
 		whole(e.gdnBetaRaw), whole(e.gdnARaw), whole(b.gdnALog), whole(b.gdnDtBias), whole(e.gdnBeta), whole(e.gdnG))
 
+	// Fused recurrent step + gate/RMSNorm (skips a second dispatch).
 	uStep := e.uni(tag+"_uStep", packU32(uint32(b.numValueHeads), uint32(b.keyHeadDim), uint32(b.valueHeadDim), mathFloat32bits(e.eps)))
 	vOff := uint64(keyDim * 2 * 4)
 	vSize := uint64(valDim * 4)
 	e.mkBG(tag+"_gstep", p["gdn_step"], whole(uStep), whole(e.gdnQRep), whole(e.gdnKRep),
 		bufSlice{e.gdnMixed, vOff, vSize}, whole(e.gdnBeta), whole(e.gdnG), whole(b.gdnState), whole(e.gdnCore),
 		whole(e.gdnZ), whole(b.gdnNorm))
-	// out + residual into hidden
+	// GDN out-proj accumulates into residual.
 	e.mkBG(tag+"_gout", p["bingemv_add"], whole(uOut), whole(e.gdnCore), whole(b.gdnOut.scales), whole(b.gdnOut.weights), whole(e.hidden))
 }
 
@@ -717,15 +698,11 @@ func (e *hybridEngine) disp(pass *wgpu.ComputePassEncoder, pipe *wgpu.ComputePip
 	pass.DispatchWorkgroups(x, y, z)
 }
 
-func (e *hybridEngine) recordLMSample(pass *wgpu.ComputePassEncoder) {
-	p := e.pipe
-	e.disp(pass, p["lm_amax"], e.bg["lm_amax"], uint32(e.lmPartN), 1, 1)
-	e.disp(pass, p["amax_red"], e.bg["amax_red"], 1, 1, 1)
-}
+func binWG(rows int) uint32 { return (uint32(rows) + 127) / 128 }
 
 func (e *hybridEngine) recordLayers(pass *wgpu.ComputePassEncoder) {
 	p := e.pipe
-	iWG := (uint32(e.interN) + 63) / 64
+	iWG := binWG(e.interN)
 	for i := range e.blocks {
 		b := &e.blocks[i]
 		tag := fmt.Sprintf("L%d", i)
@@ -735,19 +712,22 @@ func (e *hybridEngine) recordLayers(pass *wgpu.ComputePassEncoder) {
 		case "full_attention":
 			qDim := b.numHeads * b.headDim
 			kvDim := b.numKVHeads * b.headDim
-			qkvTotal := uint32(b.q.rows + kvDim + kvDim)
-			e.disp(pass, p["binqkv"], e.bg[tag+"_qkv"], (qkvTotal+63)/64, 1, 1)
+			e.disp(pass, p["bingemv"], e.bg[tag+"_q"], binWG(b.q.rows), 1, 1)
+			e.disp(pass, p["bingemv"], e.bg[tag+"_k"], binWG(b.k.rows), 1, 1)
+			e.disp(pass, p["bingemv"], e.bg[tag+"_v"], binWG(b.v.rows), 1, 1)
 			if b.outputGate {
 				e.disp(pass, p["split_qg"], e.bg[tag+"_split"], (uint32(qDim)+63)/64, 1, 1)
 			}
-			e.disp(pass, p["head_rmsrope"], e.bg[tag+"_hrmsq"], uint32(b.numHeads), 1, 1)
-			e.disp(pass, p["head_rmsrope"], e.bg[tag+"_hrmsk"], uint32(b.numKVHeads), 1, 1)
+			e.disp(pass, p["head_rms"], e.bg[tag+"_hrmsq"], uint32(b.numHeads), 1, 1)
+			e.disp(pass, p["head_rms"], e.bg[tag+"_hrmsk"], uint32(b.numKVHeads), 1, 1)
+			e.disp(pass, p["prope"], e.bg[tag+"_ropeq"], (uint32(b.numHeads)+63)/64, 1, 1)
+			e.disp(pass, p["prope"], e.bg[tag+"_ropek"], (uint32(b.numKVHeads)+63)/64, 1, 1)
 			e.disp(pass, p["kv"], e.bg[tag+"_kv"], (uint32(kvDim)+63)/64, 1, 1)
 			e.disp(pass, p["attn"], e.bg[tag+"_attn"], uint32(b.numHeads), 1, 1)
 			if b.outputGate {
 				e.disp(pass, p["outgate"], e.bg[tag+"_ogate"], (uint32(qDim)+63)/64, 1, 1)
 			}
-			e.disp(pass, p["bingemv_add"], e.bg[tag+"_o"], (uint32(b.o.rows)+63)/64, 1, 1)
+			e.disp(pass, p["bingemv_add"], e.bg[tag+"_o"], binWG(b.o.rows), 1, 1)
 		case "linear_attention":
 			keyDim := b.numKeyHeads * b.keyHeadDim
 			convDim := keyDim*2 + b.numValueHeads*b.valueHeadDim
@@ -755,19 +735,19 @@ func (e *hybridEngine) recordLayers(pass *wgpu.ComputePassEncoder) {
 			if uint32(b.numKeyHeads) > prepWG {
 				prepWG = uint32(b.numKeyHeads)
 			}
-			e.disp(pass, p["bingemv"], e.bg[tag+"_gqkv"], (uint32(b.gdnQKV.rows)+63)/64, 1, 1)
-			e.disp(pass, p["bingemv"], e.bg[tag+"_gz"], (uint32(b.gdnZ.rows)+63)/64, 1, 1)
-			e.disp(pass, p["bingemv"], e.bg[tag+"_gb"], (uint32(b.gdnB.rows)+63)/64, 1, 1)
-			e.disp(pass, p["bingemv"], e.bg[tag+"_ga"], (uint32(b.gdnA.rows)+63)/64, 1, 1)
+			e.disp(pass, p["bingemv"], e.bg[tag+"_gqkv"], binWG(b.gdnQKV.rows), 1, 1)
+			e.disp(pass, p["bingemv"], e.bg[tag+"_gz"], binWG(b.gdnZ.rows), 1, 1)
+			e.disp(pass, p["bingemv"], e.bg[tag+"_gb"], binWG(b.gdnB.rows), 1, 1)
+			e.disp(pass, p["bingemv"], e.bg[tag+"_ga"], binWG(b.gdnA.rows), 1, 1)
 			e.disp(pass, p["gdn_conv"], e.bg[tag+"_gconv"], (uint32(convDim)+63)/64, 1, 1)
 			e.disp(pass, p["gdn_prep"], e.bg[tag+"_gprep"], prepWG, 1, 1)
 			e.disp(pass, p["gdn_step"], e.bg[tag+"_gstep"], uint32(b.numValueHeads), 1, 1)
-			e.disp(pass, p["bingemv_add"], e.bg[tag+"_gout"], (uint32(b.gdnOut.rows)+63)/64, 1, 1)
+			e.disp(pass, p["bingemv_add"], e.bg[tag+"_gout"], binWG(b.gdnOut.rows), 1, 1)
 		}
 
 		e.disp(pass, p["rmsnorm"], e.bg[tag+"_rms2"], 1, 1, 1)
 		e.disp(pass, p["binswiglu"], e.bg[tag+"_sw"], iWG, 1, 1)
-		e.disp(pass, p["bingemv_add"], e.bg[tag+"_down"], (uint32(b.down.rows)+63)/64, 1, 1)
+		e.disp(pass, p["bingemv_add"], e.bg[tag+"_down"], binWG(b.down.rows), 1, 1)
 	}
 	e.disp(pass, p["rmsnorm"], e.bg["fnorm"], 1, 1, 1)
 }
@@ -797,7 +777,7 @@ func (e *hybridEngine) stepToken(id uint32, wantLogits bool, logits []float32) e
 	e.disp(pass, e.pipe["binembed"], e.bg["embed"], (uint32(e.hiddenN)+63)/64, 1, 1)
 	e.recordLayers(pass)
 	if wantLogits {
-		e.disp(pass, e.pipe["bingemv"], e.bg["lm"], (uint32(e.vocabN)+63)/64, 1, 1)
+		e.disp(pass, e.pipe["bingemv"], e.bg["lm"], binWG(e.vocabN), 1, 1)
 	}
 	e.disp(pass, e.pipe["inc_pos"], e.bg["inc_pos"], 1, 1, 1)
 	pass.End()
@@ -836,7 +816,8 @@ func (e *hybridEngine) stepTokenSample(id uint32) (uint32, error) {
 	pass := enc.BeginComputePass(nil)
 	e.disp(pass, e.pipe["binembed"], e.bg["embed"], (uint32(e.hiddenN)+63)/64, 1, 1)
 	e.recordLayers(pass)
-	e.recordLMSample(pass)
+	e.disp(pass, e.pipe["bingemv"], e.bg["lm"], binWG(e.vocabN), 1, 1)
+	e.disp(pass, e.pipe["argmax"], e.bg["argmax"], 1, 1, 1)
 	e.disp(pass, e.pipe["inc_pos"], e.bg["inc_pos"], 1, 1, 1)
 	pass.End()
 	enc.CopyBufferToBuffer(e.outTok, 0, e.stagingTok, 0, 4)
@@ -880,7 +861,8 @@ func (e *hybridEngine) prefillSample(ids []uint32) (uint32, error) {
 		e.disp(pass, e.pipe["binembed_p"], e.bg["embed_p"], (uint32(e.hiddenN)+63)/64, 1, 1)
 		e.recordLayers(pass)
 		if i+1 == n {
-			e.recordLMSample(pass)
+			e.disp(pass, e.pipe["bingemv"], e.bg["lm"], binWG(e.vocabN), 1, 1)
+			e.disp(pass, e.pipe["argmax"], e.bg["argmax"], 1, 1, 1)
 		}
 		e.disp(pass, e.pipe["inc_pos"], e.bg["inc_pos"], 1, 1, 1)
 	}
