@@ -38,6 +38,12 @@ type session struct {
 	pipeQ5       *wgpu.ComputePipeline
 	pipeK        *wgpu.ComputePipeline
 	pipeKT       *wgpu.ComputePipeline
+	pipeU8       *wgpu.ComputePipeline
+	pipeNative   *wgpu.ComputePipeline
+	pipeExt      *wgpu.ComputePipeline
+	pipeDW       *wgpu.ComputePipeline
+	pipeQ41T     *wgpu.ComputePipeline
+	pipeQ5T      *wgpu.ComputePipeline
 	name         string
 }
 

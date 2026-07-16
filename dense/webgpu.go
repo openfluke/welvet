@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"strconv"
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/quant"
@@ -85,6 +86,29 @@ func forwardWebGPUDispatch(l *Layer, xF, yF []float32, batch, in, out int) error
 			return fmt.Errorf("dense: WebGPU Int8 missing native")
 		}
 		return webgpu.DenseGEMVI8(u32, scale, xF, yF, batch, in, out)
+
+	case l.Weights.Format == quant.FormatNone && l.Weights.DType == core.DTypeUint8:
+		body, minV, scale, ok := nativeUint8AsU32(l.Weights, out*in)
+		if !ok {
+			return fmt.Errorf("dense: WebGPU Uint8 missing native")
+		}
+		return webgpu.DenseGEMVU8(body, minV, scale, xF, yF, batch, in, out)
+
+	case l.Weights.Format == quant.FormatNone && isNarrowI8(l.Weights.DType):
+		u32, scale, ok := narrowAsU32(l.Weights, out*in)
+		if !ok {
+			return fmt.Errorf("dense: WebGPU narrow %s expand failed", l.Weights.DType)
+		}
+		return webgpu.DenseGEMVI8(u32, scale, xF, yF, batch, in, out)
+
+	case l.Weights.Format == quant.FormatNone && nativeKind(l.Weights.DType) >= 0:
+		raw := bytesToU32(l.Weights.Native)
+		return webgpu.DenseGEMVNative(raw, nativeKind(l.Weights.DType), xF, yF, batch, in, out)
+
+	case l.Weights.Format == quant.FormatNone && extKind(l.Weights) >= 0:
+		k, bits, minV, scale := extMeta(l.Weights)
+		raw := bytesToU32(l.Weights.Native)
+		return webgpu.DenseGEMVExt(raw, k, bits, minV, scale, xF, yF, batch, in, out)
 
 	case l.Weights.Format == quant.FormatNone && l.Weights.DType == core.DTypeFloat32:
 		w, err := l.Weights.GPUWireF32()
@@ -173,17 +197,14 @@ func BackwardWebGPU[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T
 	}
 	core.SliceFromFloat32(gxF, gradIn.Data)
 
-	for b := 0; b < batch; b++ {
-		xRow := input.Data[b*in : (b+1)*in]
-		gy := dPreF[b*out : (b+1)*out]
-		for o := 0; o < out; o++ {
-			g := float64(gy[o])
-			dw := gradW.Data[o*in : (o+1)*in]
-			for i := 0; i < in; i++ {
-				dw[i] = core.FromFloat64[T](core.AsFloat64(dw[i]) + g*core.AsFloat64(xRow[i]))
-			}
-		}
+	// dW on device when available.
+	xF := stageActsF32(input.Data)
+	dwF := make([]float32, out*in)
+	if err := webgpu.DenseDW(xF, dPreF, dwF, batch, in, out); err != nil {
+		// Fall back to host outer product only if GPU DW unavailable — but policy is no silent fallback.
+		return nil, nil, err
 	}
+	core.SliceFromFloat32(dwF, gradW.Data)
 	return gradIn, gradW, nil
 }
 
@@ -217,6 +238,19 @@ func backwardWebGPUDispatch(l *Layer, dPreF, gxF []float32, batch, in, out int) 
 		}
 		return webgpu.DenseGEMVTBinary(scales, words, dPreF, gxF, batch, in, out)
 
+	case l.Weights.Format == quant.FormatQ4_1 && l.Weights.Packed != nil:
+		scales, mins, packed, ok := q41BlobToGPU(l.Weights.Packed)
+		if !ok {
+			return fmt.Errorf("dense: WebGPU Q4_1T projection failed")
+		}
+		return webgpu.DenseGEMVTQ4_1(scales, mins, packed, dPreF, gxF, batch, in, out)
+
+	case l.Weights.Format == quant.FormatQ5_0 && l.Weights.Packed != nil:
+		return webgpu.DenseGEMVTQ5(bytesToU32(l.Weights.Packed.Raw), 24, false, dPreF, gxF, batch, in, out)
+
+	case l.Weights.Format == quant.FormatQ5_1 && l.Weights.Packed != nil:
+		return webgpu.DenseGEMVTQ5(bytesToU32(l.Weights.Packed.Raw), 28, true, dPreF, gxF, batch, in, out)
+
 	case isIQ(l.Weights.Format) && l.Weights.Packed != nil:
 		bits, scaleGroup, nonlinear, mid, ok := iqMeta(l.Weights.Packed)
 		if !ok {
@@ -232,18 +266,6 @@ func backwardWebGPUDispatch(l *Layer, dPreF, gxF []float32, batch, in, out int) 
 		}
 		return webgpu.DenseGEMVTK(bytesToU32(l.Weights.Packed.Raw), spec.SBBytes, spec.Bits, spec.HasDmin, spec.Mid,
 			dPreF, gxF, batch, in, out)
-
-	case l.Weights.Format != quant.FormatNone && l.Weights.Packed != nil:
-		// Q4_1/Q5: host MatVecT (no f32 W upload to GPU).
-		for bat := 0; bat < batch; bat++ {
-			gy := dPreF[bat*out : (bat+1)*out]
-			gx := make([]float32, in)
-			if err := quant.MatVecT(l.Weights.Packed, gy, gx); err != nil {
-				return err
-			}
-			copy(gxF[bat*in:(bat+1)*in], gx)
-		}
-		return nil
 
 	default:
 		w, err := gpuStageF32(l.Weights)
@@ -286,14 +308,148 @@ func nativeInt8AsU32(s *weights.Store, n int) ([]uint32, float32, bool) {
 	if scale == 0 {
 		scale = 1
 	}
-	words := (n + 3) / 4
-	out := make([]uint32, words)
-	padded := make([]byte, words*4)
-	copy(padded, s.Native[:n])
-	for i := 0; i < words; i++ {
-		out[i] = binary.LittleEndian.Uint32(padded[i*4:])
+	return bytesToU32(s.Native[:n]), scale, true
+}
+
+func nativeUint8AsU32(s *weights.Store, n int) (body []uint32, minV, scale float32, ok bool) {
+	body8, minV, scale, ok := nativeUint8Affine(s, n)
+	if !ok {
+		return nil, 0, 0, false
 	}
-	return out, scale, true
+	return bytesToU32(body8), minV, scale, true
+}
+
+func isNarrowI8(dt core.DType) bool {
+	switch dt {
+	case core.DTypeInt4, core.DTypeInt2, core.DTypeTernary, core.DTypeBinary:
+		return true
+	default:
+		return false
+	}
+}
+
+func narrowAsU32(s *weights.Store, n int) ([]uint32, float32, bool) {
+	wI8, scale, ok := expandNarrowToI8(s, n)
+	if !ok {
+		return nil, 0, false
+	}
+	raw := make([]byte, n)
+	for i, v := range wI8 {
+		raw[i] = byte(v)
+	}
+	return bytesToU32(raw), scale, true
+}
+
+// nativeKind maps FormatNone low-precision dtypes to ShaderDenseNative kind codes.
+// Returns -1 when the dtype is not handled by DenseGEMVNative.
+func nativeKind(dt core.DType) int {
+	switch dt {
+	case core.DTypeFloat16:
+		return 0
+	case core.DTypeBFloat16:
+		return 1
+	case core.DTypeFP8E4M3:
+		return 2
+	case core.DTypeFP8E5M2:
+		return 3
+	case core.DTypeFP4:
+		return 4
+	default:
+		return -1
+	}
+}
+
+// extKind returns ShaderDenseExt kind or -1.
+func extKind(s *weights.Store) int {
+	if s == nil {
+		return -1
+	}
+	k, _, _, _ := extMeta(s)
+	return k
+}
+
+func extMeta(s *weights.Store) (kind, bits int, minV, scale float32) {
+	scale = s.Scale
+	if scale == 0 {
+		scale = 1
+	}
+	switch s.DType {
+	case core.DTypeUint4:
+		if len(s.Native) >= 4 {
+			minV = math.Float32frombits(binary.LittleEndian.Uint32(s.Native))
+		}
+		return 0, 4, minV, scale
+	case core.DTypeUint2:
+		if len(s.Native) >= 4 {
+			minV = math.Float32frombits(binary.LittleEndian.Uint32(s.Native))
+		}
+		return 1, 2, minV, scale
+	case core.DTypeNF4:
+		return 2, 4, 0, scale
+	case core.DTypeFP6, core.DTypeInt6:
+		return 3, 6, 0, scale
+	case core.DTypeInt5:
+		return 3, 5, 0, scale
+	case core.DTypeInt3:
+		return 3, 3, 0, scale
+	case core.DTypeUint6:
+		if len(s.Native) >= 4 {
+			minV = math.Float32frombits(binary.LittleEndian.Uint32(s.Native))
+		}
+		return 4, 6, minV, scale
+	case core.DTypeUint5:
+		if len(s.Native) >= 4 {
+			minV = math.Float32frombits(binary.LittleEndian.Uint32(s.Native))
+		}
+		return 4, 5, minV, scale
+	case core.DTypeUint3:
+		if len(s.Native) >= 4 {
+			minV = math.Float32frombits(binary.LittleEndian.Uint32(s.Native))
+		}
+		return 4, 3, minV, scale
+	case core.DTypeInt16:
+		return 5, 0, 0, scale
+	case core.DTypeInt32:
+		return 6, 0, 0, scale
+	case core.DTypeInt64:
+		return 7, 0, 0, scale
+	case core.DTypeInt:
+		if strconv.IntSize == 64 {
+			return 7, 0, 0, scale
+		}
+		return 6, 0, 0, scale
+	case core.DTypeUint16:
+		if len(s.Native) >= 4 {
+			minV = math.Float32frombits(binary.LittleEndian.Uint32(s.Native))
+		}
+		return 8, 0, minV, scale
+	case core.DTypeUint32:
+		if len(s.Native) >= 4 {
+			minV = math.Float32frombits(binary.LittleEndian.Uint32(s.Native))
+		}
+		return 9, 0, minV, scale
+	case core.DTypeUint64, core.DTypeUintptr:
+		if len(s.Native) >= 4 {
+			minV = math.Float32frombits(binary.LittleEndian.Uint32(s.Native))
+		}
+		return 10, 0, minV, scale
+	case core.DTypeUint:
+		if len(s.Native) >= 4 {
+			minV = math.Float32frombits(binary.LittleEndian.Uint32(s.Native))
+		}
+		if strconv.IntSize == 64 {
+			return 10, 0, minV, scale
+		}
+		return 9, 0, minV, scale
+	case core.DTypeFloat64:
+		return 11, 0, 0, 1
+	case core.DTypeComplex64:
+		return 12, 0, 0, 1
+	case core.DTypeComplex128:
+		return 13, 0, 0, 1
+	default:
+		return -1, 0, 0, 0
+	}
 }
 
 func q8BlobToGPU(b *quant.Blob) (scales []float32, packed []uint32, ok bool) {

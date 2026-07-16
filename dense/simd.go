@@ -55,10 +55,12 @@ func forwardSIMDByWire[T core.Numeric](l *Layer, x, y []T, batch, in, out int) e
 		core.DTypeUint, core.DTypeUintptr, core.DTypeUint3, core.DTypeUint5, core.DTypeUint6:
 		return forwardSIMDUintAffine(l, x, y, batch, in, out)
 	case core.DTypeFloat16, core.DTypeBFloat16, core.DTypeFP8E4M3, core.DTypeFP8E5M2,
-		core.DTypeFP4, core.DTypeNF4, core.DTypeFP6,
+		core.DTypeFP4:
+		return forwardSIMDLowpPacked(l, x, y, batch, in, out)
+	case core.DTypeNF4, core.DTypeFP6,
 		core.DTypeInt3, core.DTypeInt5, core.DTypeInt6:
-		// Per-dtype native stream decode → DotTile (no full Wire cache).
-		return forwardSIMDF32(l, x, y, batch, in, out)
+		// Stream DecodeRow → DotTile (no Wire/GPUWireF32 full-matrix cache).
+		return forwardSIMDStreamF32(l, x, y, batch, in, out)
 	}
 	switch weights.SelectWire(l.Weights) {
 	case weights.WireI8:
@@ -167,6 +169,57 @@ func forwardSIMDF32[T core.Numeric](l *Layer, x, y []T, batch, in, out int) erro
 				return err
 			}
 			yRow[o] = float32(simd.DotTile(xRow, wRow, 0, in, 0))
+		}
+		core.SliceFromFloat32(yRow, y[b*out:(b+1)*out])
+	}
+	return nil
+}
+
+// forwardSIMDStreamF32 — DecodeRow per output row (no full-matrix wire cache) + DotTile.
+func forwardSIMDStreamF32[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
+	wRow := make([]float32, in)
+	for b := 0; b < batch; b++ {
+		xRow := core.SliceAsFloat32(x[b*in : (b+1)*in])
+		yRow := make([]float32, out)
+		for o := 0; o < out; o++ {
+			if err := weights.DecodeRow(l.Weights, o, wRow); err != nil {
+				return err
+			}
+			yRow[o] = float32(simd.DotTile(xRow, wRow, 0, in, 0))
+		}
+		core.SliceFromFloat32(yRow, y[b*out:(b+1)*out])
+	}
+	return nil
+}
+
+// forwardSIMDLowpPacked — Float16/BF16/FP8/FP4 from native bytes; HW DotTile MAC, no Wire cache.
+func forwardSIMDLowpPacked[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
+	raw := l.Weights.Native
+	if len(raw) == 0 {
+		return fmt.Errorf("dense: SIMD lowp missing native %s", l.Weights.DType)
+	}
+	dt := l.Weights.DType
+	for b := 0; b < batch; b++ {
+		xRow := core.SliceAsFloat32(x[b*in : (b+1)*in])
+		yRow := make([]float32, out)
+		for o := 0; o < out; o++ {
+			i0 := o * in
+			var sum float64
+			switch dt {
+			case core.DTypeFloat16:
+				sum = simd.DotF16Packed(xRow, raw, i0, in, 0)
+			case core.DTypeBFloat16:
+				sum = simd.DotBF16Packed(xRow, raw, i0, in, 0)
+			case core.DTypeFP8E4M3:
+				sum = simd.DotFP8Packed(xRow, raw, i0, in, 0, 0)
+			case core.DTypeFP8E5M2:
+				sum = simd.DotFP8Packed(xRow, raw, i0, in, 1, 0)
+			case core.DTypeFP4:
+				sum = simd.DotFP4Packed(xRow, raw, i0, in, 0)
+			default:
+				return fmt.Errorf("dense: SIMD lowp unexpected %s", dt)
+			}
+			yRow[o] = float32(sum)
 		}
 		core.SliceFromFloat32(yRow, y[b*out:(b+1)*out])
 	}
