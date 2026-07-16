@@ -151,13 +151,23 @@ func PackFromQwen3MLX(snapshotDir, outPath string, opts PackOptions) error {
 		return err
 	}
 
-	lmBlob, err := hf.LoadMLX1BitMatrix(stPath, index, lmPrefix)
-	if err != nil {
-		return fmt.Errorf("lm_head: %w", err)
+	tied := false
+	if v, ok := cfg["tie_word_embeddings"].(bool); ok {
+		tied = v
 	}
-	if err := appendBlob("transformer.lm_head.packed", lmBlob); err != nil {
-		return err
+	if _, hasLM := index[lmPrefix+".weight"]; hasLM {
+		lmBlob, err := hf.LoadMLX1BitMatrix(stPath, index, lmPrefix)
+		if err != nil {
+			return fmt.Errorf("lm_head: %w", err)
+		}
+		if err := appendBlob("transformer.lm_head.packed", lmBlob); err != nil {
+			return err
+		}
+		tied = false
+	} else if !tied {
+		return fmt.Errorf("missing %s.weight (and tie_word_embeddings=false)", lmPrefix)
 	}
+	// else tied: LM head reuses embeddings.packed at load time
 
 	for i := 0; i < dims.NumLayers; i++ {
 		report(i+1, dims.NumLayers, fmt.Sprintf("layer %d (full_attention)", i))
@@ -230,7 +240,7 @@ func PackFromQwen3MLX(snapshotDir, outPath string, opts PackOptions) error {
 		Architecture: "qwen3_dense",
 		HiddenSize:   dims.HiddenSize,
 		VocabSize:    dims.VocabSize,
-		LMHeadTied:   false,
+		LMHeadTied:   tied,
 		HasFinalNorm: true,
 		WeightDType:  "PACKED",
 		PackFormat:   quant.FormatBinaryPacked.String(),

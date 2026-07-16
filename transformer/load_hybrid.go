@@ -270,7 +270,12 @@ func unbakeHybridNormsIfNeeded(m *Model) {
 func loadLMHeadPacked(ef *entity.File, m *Model) error {
 	b, err := ef.LoadQuantBlob("transformer.lm_head.packed")
 	if err != nil {
-		// try untied path name without .packed
+		// Tied embeddings: reuse packed embed table (Bonsai 4B / 1.7B).
+		if m.embedPacked != nil {
+			m.lmHeadPacked = m.embedPacked
+			m.LMHeadTied = true
+			return nil
+		}
 		ws, err2 := loadWeightStore(ef, "transformer.lm_head", m.VocabSize, m.HiddenSize, quant.FormatBinaryPacked)
 		if err2 != nil {
 			return err
