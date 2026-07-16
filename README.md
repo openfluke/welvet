@@ -235,6 +235,7 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | Presets: Decoder / Encoder / Diffusion self+cross / PrefixLM / Local / ALiBi | ✅ | ✅ | ✅ |
 | Q/K/V/O FormatNone × 34 — fwd+bwd | ✅ Dense projs | ✅ Dense projs | ✅ Dense projs |
 | Q/K/V/O all 20 quants — fwd+bwd | ✅ | ✅ | ✅ |
+| Activation `Tensor[T]` × all 15 `core.Numeric` kinds | ✅ | ✅ | ✅ |
 | Attention / RoPE ALU | ✅ f64 host | ✅ f64 host | ✅ f64 host |
 | Timed FormatNone + quant matrices in `w2a` | ✅ | ✅ | ✅ |
 | Gap census 34×20×3 | ✅ | ✅ | ✅ |
