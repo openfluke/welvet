@@ -14,6 +14,7 @@ import (
 	"github.com/openfluke/welvet/cnn3"
 	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/layernorm"
+	"github.com/openfluke/welvet/lstm"
 	"github.com/openfluke/welvet/mha"
 	"github.com/openfluke/welvet/rmsnorm"
 	"github.com/openfluke/welvet/rnn"
@@ -136,6 +137,12 @@ func dispatch[T core.Numeric](cell *architecture.Cell, input *core.Tensor[T]) (p
 			return nil, nil, fmt.Errorf("rnn cell Op is %T, want *rnn.Layer", cell.Op)
 		}
 		return rnn.Forward(rl, input)
+	case core.LayerLSTM:
+		ll, ok := cell.Op.(*lstm.Layer)
+		if !ok || ll == nil {
+			return nil, nil, fmt.Errorf("lstm cell Op is %T, want *lstm.Layer", cell.Op)
+		}
+		return lstm.Forward(ll, input)
 	default:
 		return nil, nil, fmt.Errorf("unsupported layer type %s", cell.Layer.Type)
 	}

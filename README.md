@@ -33,9 +33,9 @@
 | **Dense** FormatNone × 34 × CPU/SIMD/WebGPU fwd+bwd | ✅ |
 | **Dense** block-quant × SIMD/WebGPU (all 20 formats on-device fwd+bwd) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
-| `forward/` / `backward/` volumetric Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN walk | ✅ |
-| `training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN) | ✅ |
-| Remaining layers (Embedding, LSTM, …) | ⬜ |
+| `forward/` / `backward/` volumetric Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM walk | ✅ |
+| `training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM) | ✅ |
+| Remaining layers (Embedding, …) | ⬜ |
 | Model IO / transformer / entity / tokenizer / hf | ⬜ |
 | Accel / donate / fountain / dna / … | ⬜ |
 | Full v1 matrix | ⬜ |
@@ -51,6 +51,7 @@ cd w2a && go test ./tests/cnn1 -v
 cd w2a && go test ./tests/cnn2 -v
 cd w2a && go test ./tests/cnn3 -v
 cd w2a && go test ./tests/rnn -v
+cd w2a && go test ./tests/lstm -v
 ```
 
 ---
@@ -190,10 +191,11 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `cnn2/` | Conv2d (im2col→Dense); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `cnn3/` | Conv3d (im2col→Dense); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `rnn/` | Vanilla tanh RNN; IH/HH via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `lstm/` | LSTM i/f/g/o via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | ✅ |
-| `forward/` | Grid walk z→y→x→l; Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN dispatch | ✅ |
-| `backward/` | Reverse tape over Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN | ✅ |
-| `training/` | MSE + SGD; ApplyGradSGD for Dense / MHA / SwiGLU / RMSNorm / LayerNorm / CNN1–3 / RNN | ✅ |
+| `forward/` | Grid walk z→y→x→l; Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM dispatch | ✅ |
+| `backward/` | Reverse tape over Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM | ✅ |
+| `training/` | MSE + SGD; ApplyGradSGD for Dense / MHA / SwiGLU / RMSNorm / LayerNorm / CNN1–3 / RNN / LSTM | ✅ |
 
 ### Layers (each needs CPU + SIMD + WebGPU × all dtype × all quant × fwd/bwd)
 
@@ -210,10 +212,10 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `cnn2/` | Conv2d im2col→Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
 | `cnn3/` | Conv3d im2col→Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
 | `rnn/` | Vanilla tanh RNN; IH/HH via Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
+| `lstm/` | LSTM i/f/g/o via Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
 | `convt1/` | 1D transposed conv | ⬜ |
 | `convt2/` | 2D transposed conv | ⬜ |
 | `convt3/` | 3D transposed conv | ⬜ |
-| `lstm/` | LSTM | ⬜ |
 | `embedding/` | Embedding | ⬜ |
 | `kmeans/` | K-means | ⬜ |
 | `softmax/` | Softmax variants | ⬜ |
@@ -358,6 +360,20 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/`
 | Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
 | Fused on-device RNN recurrence shader | ⬜ | ⬜ | ⬜ |
 
+### LSTM detail
+
+| Feature | CPU | SIMD | WebGPU |
+|---------|:---:|:----:|:------:|
+| LSTM [B,T,In]→[B,T,Hid]; i/f/g/o + BPTT | ✅ | ✅ via Dense | ✅ device required; host ALU |
+| Gate W_ih/W_hh FormatNone × 34 — fwd+bwd | ✅ | ✅ | ✅ |
+| Gate W_ih/W_hh all 20 quants — fwd+bwd | ✅ | ✅ | ✅ |
+| Activation `Tensor[T]` × all 15 `core.Numeric` kinds | ✅ | ✅ | ✅ |
+| Timed FormatNone + quant matrices in `w2a` | ✅ | ✅ | ✅ |
+| Gap census 34×20×3 | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
+| Fused on-device LSTM recurrence shader | ⬜ | ⬜ | ⬜ |
+
 ### Model / IO / runtime
 
 | Package | Features | Status |
@@ -389,7 +405,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/`
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `w2a/` | Interactive menu, dense + mha + swiglu + rmsnorm + layernorm + cnn1–3 + rnn suites, timed matrices, gap census | 🚧 |
+| `w2a/` | Interactive menu, dense + mha + swiglu + rmsnorm + layernorm + cnn1–3 + rnn + lstm suites, timed matrices, gap census | 🚧 |
 
 ---
 
@@ -438,6 +454,7 @@ go test ./tests/cnn1 -v    # Conv1d im2col→Dense; same coverage axes as Dense
 go test ./tests/cnn2 -v    # Conv2d im2col→Dense; same coverage axes as Dense
 go test ./tests/cnn3 -v    # Conv3d im2col→Dense; same coverage axes as Dense
 go test ./tests/rnn -v     # vanilla tanh RNN; same coverage axes as Dense
+go test ./tests/lstm -v    # LSTM i/f/g/o; same coverage axes as Dense
 ```
 
 Docs: `w2a/docs/`.
