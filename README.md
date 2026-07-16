@@ -30,7 +30,7 @@
 | `quant` Pack/Unpack/MatVec all 20 formats (CPU) | ✅ |
 | `simd` Plan 9 kernels linked (amd64/arm64) | ✅ |
 | webgpu | Real device; all FormatNone + all quant fwd; GEMVT; DenseDW | ✅ |
-| **Dense** FormatNone × 34 × CPU/SIMD/WebGPU fwd+bwd | 🚧 |
+| **Dense** FormatNone × 34 × CPU/SIMD/WebGPU fwd+bwd | ✅ |
 | **Dense** block-quant × SIMD/WebGPU (all 20 formats on-device fwd+bwd) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
 | All other layers | ⬜ |
@@ -74,19 +74,19 @@ Storage / weight element types. Dense **FormatNone** coverage today:
 
 | # | DType | CPU tiled | SIMD | WebGPU | Notes |
 |--:|-------|:---------:|:----:|:------:|-------|
-| 0 | Float64 | ✅ | ✅ WireF64 | ✅ on-device f64→f32 | SIMD DotTileF64 |
-| 1 | Float32 | ✅ | ✅ | ✅ FP32 WGSL | |
+| 0 | Float64 | ✅ | ✅ DecodeRowF64+DotTileF64 | ✅ on-device f64→f32 | |
+| 1 | Float32 | ✅ | ✅ Master+DotTile | ✅ FP32 WGSL | |
 | 2 | Float16 | ✅ | ✅ F16C+DotTile | ✅ native decode | no Wire cache |
 | 3 | BFloat16 | ✅ | ✅ packed+DotTile | ✅ native decode | |
 | 4 | FP8E4M3 | ✅ native codec | ✅ packed+DotTile | ✅ native decode | real E4M3 |
 | 5 | FP8E5M2 | ✅ native codec | ✅ packed+DotTile | ✅ native decode | real E5M2 |
-| 6 | Int64 | ✅ | 🚧 WireF64 | ✅ on-device | |
-| 7 | Int32 | ✅ | 🚧 WireF64 | ✅ on-device | |
-| 8 | Int16 | ✅ | 🚧 WireF64 | ✅ on-device | |
+| 6 | Int64 | ✅ | ✅ DecodeRowF64+DotTileF64 | ✅ on-device | |
+| 7 | Int32 | ✅ | ✅ DecodeRowF64+DotTileF64 | ✅ on-device | |
+| 8 | Int16 | ✅ | ✅ DecodeRowF64+DotTileF64 | ✅ on-device | |
 | 9 | Int8 | ✅ | ✅ DotI8 | ✅ on-device I8 | |
-| 10 | Uint64 | ✅ | 🚧 WireF64 | ✅ on-device affine | |
-| 11 | Uint32 | ✅ | 🚧 WireF64 | ✅ on-device affine | |
-| 12 | Uint16 | ✅ | 🚧 WireF64 | ✅ on-device affine | |
+| 10 | Uint64 | ✅ | ✅ DecodeRow+DotTile | ✅ on-device affine | |
+| 11 | Uint32 | ✅ | ✅ DecodeRow+DotTile | ✅ on-device affine | |
+| 12 | Uint16 | ✅ | ✅ DecodeRow+DotTile | ✅ on-device affine | |
 | 13 | Uint8 | ✅ | ✅ affine+DotTile | ✅ on-device affine | |
 | 14 | Int4 | ✅ | ✅ expand→DotI8 | ✅ expand→I8 GEMV | |
 | 15 | Uint4 | ✅ | ✅ DecodeRow+DotTile | ✅ on-device affine | |
@@ -95,23 +95,23 @@ Storage / weight element types. Dense **FormatNone** coverage today:
 | 18 | Uint2 | ✅ | ✅ DecodeRow+DotTile | ✅ on-device affine | |
 | 19 | Ternary | ✅ | ✅ expand→DotI8 | ✅ expand→I8 GEMV | |
 | 20 | Binary | ✅ | ✅ expand→DotI8 | ✅ expand→I8 GEMV | |
-| 21 | Int | ✅ | 🚧 WireF64 | ✅ on-device | Go native width |
-| 22 | Uint | ✅ | 🚧 WireF64 | ✅ on-device affine | |
-| 23 | Uintptr | ✅ | 🚧 WireF64 | ✅ on-device affine | |
-| 24 | Complex64 | ✅ | 🚧 WireF64 | ✅ real-part GEMV | |
-| 25 | Complex128 | ✅ | 🚧 WireF64 | ✅ real-part GEMV | |
-| 26 | NF4 | ✅ | ✅ DecodeRow+DotTile | ✅ on-device table | QLoRA |
-| 27 | FP6 | ✅ | ✅ DecodeRow+DotTile | ✅ on-device signed-6 | |
-| 28 | Int6 | ✅ | ✅ DecodeRow+DotTile | ✅ on-device signed-6 | |
+| 21 | Int | ✅ | ✅ DecodeRowF64+DotTileF64 | ✅ on-device | Go native width |
+| 22 | Uint | ✅ | ✅ DecodeRow+DotTile | ✅ on-device affine | |
+| 23 | Uintptr | ✅ | ✅ DecodeRow+DotTile | ✅ on-device affine | |
+| 24 | Complex64 | ✅ | ✅ DecodeRowF64+DotTileF64 | ✅ real-part GEMV | |
+| 25 | Complex128 | ✅ | ✅ DecodeRowF64+DotTileF64 | ✅ real-part GEMV | |
+| 26 | NF4 | ✅ | ✅ DecodeRowF64+DotTileF64 | ✅ on-device table | QLoRA |
+| 27 | FP6 | ✅ | ✅ DecodeRowF64+DotTileF64 | ✅ on-device signed-6 | |
+| 28 | Int6 | ✅ | ✅ DecodeRowF64+DotTileF64 | ✅ on-device signed-6 | |
 | 29 | Uint6 | ✅ | ✅ DecodeRow+DotTile | ✅ on-device affine | |
-| 30 | Int5 | ✅ | ✅ DecodeRow+DotTile | ✅ on-device signed-5 | |
+| 30 | Int5 | ✅ | ✅ DecodeRowF64+DotTileF64 | ✅ on-device signed-5 | |
 | 31 | Uint5 | ✅ | ✅ DecodeRow+DotTile | ✅ on-device affine | |
-| 32 | Int3 | ✅ | ✅ DecodeRow+DotTile | ✅ on-device signed-3 | |
+| 32 | Int3 | ✅ | ✅ DecodeRowF64+DotTileF64 | ✅ on-device signed-3 | |
 | 33 | Uint3 | ✅ | ✅ DecodeRow+DotTile | ✅ on-device affine | |
 
-**SIMD:** Float16 uses F16C convert + AVX2/NEON DotTile; FP8/FP4/BF16 packed decode→DotTile (no `GPUWireF32` cache). Wide ints still WireF64.  
-**WebGPU:** all 34 FormatNone dtypes on-device (Native / Ext / I8 / U8 / FP32 shaders).  
-**✅** = dtype-specific path; 🚧 = host widen wire still used for that backend.
+**SIMD:** no `GPUWireF32` / `WireF64` full-matrix cache — Master / DecodeRow / packed native → DotTile.  
+**WebGPU:** all 34 FormatNone dtypes on-device fwd+GEMVT + DenseDW.  
+**✅** = dtype-specific path end-to-end for that backend.
 
 ---
 
@@ -121,7 +121,7 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 
 | Format | CPU pack+MatVec | Dense SIMD | Dense WebGPU |
 |--------|:---------------:|:----------:|:------------:|
-| None | ✅ (via `weights`) | 🚧 FormatNone matrix (+ F16C/FP8 packed) | ✅ all 34 dtypes on-device |
+| None | ✅ (via `weights`) | ✅ FormatNone packed/stream | ✅ all 34 fwd+GEMVT |
 | Q8_0 | ✅ | ✅ fused DotI8×scale | ✅ on-device Q8 GEMV (in%32) |
 | Q4_0 | ✅ | ✅ fused DotQ4_0 fwd | ✅ on-device Q4 GEMV (in%32) |
 | Q4_1 | ✅ | ✅ block decode+DotTile | ✅ on-device Q4_1 |
@@ -150,9 +150,9 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 
 | Backend | Status | Requirement |
 |---------|:------:|-------------|
-| CPU tiled | 🚧 | SC+MC; stream native dtype; block quants via `quant.MatVec` |
-| Plan 9 SIMD | 🚧 | amd64 AVX2+FMA / arm64 NEON; unsupported arch → hard error |
-| WebGPU | 🚧 | Real `openfluke/webgpu` device; no host fake-GPU |
+| CPU tiled | ✅ | SC+MC; `weights.MatVec` / `MatVecT` stream native + packed |
+| Plan 9 SIMD | ✅ | amd64 AVX2+FMA / arm64 NEON; unsupported arch → hard error |
+| WebGPU | ✅ | Real device; FormatNone+quant GEMV/GEMVT + DenseDW; no host fake-GPU |
 
 ---
 
@@ -168,7 +168,7 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `simd/` | DotTile, DotI8/U8, DotQ4_0, Saxpy, BitNet helpers (amd64/arm64 `.s`) | 🚧 |
 | `webgpu/` | All FormatNone + all quant GEMV/GEMVT + DenseDW | ✅ |
 | `tiling/` | Tile size / SC / MC / GPU workgroup caps | ✅ |
-| `dense/` | FormatNone×34 + all quants × 3 backends; packed fwd/bwd; grad verify | 🚧 |
+| `dense/` | FormatNone×34 + all quants × 3 backends; packed fwd/bwd; grad verify | ✅ |
 | `architecture/` | Volumetric grid, cells, hops, remote links | ✅ |
 | `forward/` | Global forward dispatch | ⬜ |
 | `backward/` | Global backward dispatch | ⬜ |
@@ -178,7 +178,7 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `dense/` | FormatNone×34 + all quants × 3 backends; Q4/Q8/Ternary/Binary packed; packed SIMD bwd; grad verify | 🚧 |
+| `dense/` | FormatNone×34 + all quants × 3 backends; packed SIMD/GPU; grad verify | ✅ |
 | `mha/` | Multi-head attention | ⬜ |
 | `swiglu/` | SwiGLU FFN | ⬜ |
 | `rmsnorm/` | RMSNorm | ⬜ |
@@ -203,11 +203,11 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 
 | Feature | CPU | SIMD | WebGPU |
 |---------|:---:|:----:|:------:|
-| FormatNone × 34 dtypes — forward | ✅ | 🚧 | ✅ on-device (all 34) |
-| FormatNone × 34 dtypes — backward | ✅ | 🚧 | 🚧 GEMVT f32/stage + DenseDW |
+| FormatNone × 34 dtypes — forward | ✅ | ✅ | ✅ |
+| FormatNone × 34 dtypes — backward | ✅ | ✅ | ✅ native GEMVT + DenseDW |
 | All 20 quants — forward | ✅ | ✅ block/bit fused | ✅ on-device (all formats) |
 | All 20 quants — backward | ✅ | ✅ packed MatVecT + Saxpy | ✅ GEMVT all formats + DenseDW |
-| True packed dtype/quant kernels (no f32 wire) | ⬜ | ✅ f16/fp8/fp4 packed | ✅ FormatNone+quant |
+| True packed dtype/quant kernels (no f32 wire) | ✅ MatVec stream | ✅ | ✅ |
 | SC + MC tiling | ✅ | 🚧 | ✅ workgroup caps |
 | Timed FormatNone + quant matrices in `w2a` | ✅ | ✅ | ✅ |
 | Grad verify (CPU↔SIMD↔GPU + finite-diff) | ✅ | ✅ | ✅ |

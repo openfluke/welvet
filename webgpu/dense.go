@@ -44,6 +44,11 @@ type session struct {
 	pipeDW       *wgpu.ComputePipeline
 	pipeQ41T     *wgpu.ComputePipeline
 	pipeQ5T      *wgpu.ComputePipeline
+	pipeFP32T    *wgpu.ComputePipeline
+	pipeI8T      *wgpu.ComputePipeline
+	pipeU8T      *wgpu.ComputePipeline
+	pipeNativeT  *wgpu.ComputePipeline
+	pipeExtT     *wgpu.ComputePipeline
 	name         string
 }
 
@@ -218,7 +223,7 @@ func DenseGEMVI8(weightsU32 []uint32, scale float32, x, y []float32, batch, in, 
 	return sess.gemvI8(weightsU32, scale, x, y, batch, in, out)
 }
 
-// DenseGEMVT: gx = W^T @ gy on device (FP32). No host fallback.
+// DenseGEMVT: gx = W^T @ gy on device (FP32), no host transpose.
 func DenseGEMVT(w []float32, gy, gx []float32, batch, in, out int) error {
 	ensure()
 	if !haveGPU || sess == nil {
@@ -227,18 +232,10 @@ func DenseGEMVT(w []float32, gy, gx []float32, batch, in, out int) error {
 		}
 		return fmt.Errorf("webgpu DenseGEMVT: %w", initErr)
 	}
-	wt := make([]float32, in*out)
-	for o := 0; o < out; o++ {
-		for i := 0; i < in; i++ {
-			wt[i*out+o] = w[o*in+i]
-		}
-	}
-	tmp := make([]float32, batch*in)
-	if err := sess.gemvFP32(wt, gy, tmp, batch, out, in); err != nil {
+	if err := sess.ensureFormatNoneTPipes(); err != nil {
 		return err
 	}
-	copy(gx, tmp)
-	return nil
+	return sess.gemvtFP32(w, gy, gx, batch, in, out)
 }
 
 func (s *session) gemvFP32(w, x, y []float32, batch, in, out int) error {

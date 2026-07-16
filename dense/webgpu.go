@@ -118,6 +118,9 @@ func forwardWebGPUDispatch(l *Layer, xF, yF []float32, batch, in, out int) error
 		return webgpu.DenseGEMV(w, xF, yF, batch, in, out)
 
 	default:
+		if l.Weights.Format == quant.FormatNone {
+			return fmt.Errorf("dense: WebGPU FormatNone unsupported dtype %s", l.Weights.DType)
+		}
 		w, err := gpuStageF32(l.Weights)
 		if err != nil {
 			return err
@@ -267,7 +270,47 @@ func backwardWebGPUDispatch(l *Layer, dPreF, gxF []float32, batch, in, out int) 
 		return webgpu.DenseGEMVTK(bytesToU32(l.Weights.Packed.Raw), spec.SBBytes, spec.Bits, spec.HasDmin, spec.Mid,
 			dPreF, gxF, batch, in, out)
 
+	case l.Weights.Format == quant.FormatNone && l.Weights.DType == core.DTypeFloat32:
+		w, err := l.Weights.GPUWireF32()
+		if err != nil {
+			return err
+		}
+		return webgpu.DenseGEMVT(w, dPreF, gxF, batch, in, out)
+
+	case l.Weights.Format == quant.FormatNone && l.Weights.DType == core.DTypeInt8:
+		u32, scale, ok := nativeInt8AsU32(l.Weights, out*in)
+		if !ok {
+			return fmt.Errorf("dense: WebGPU Int8T missing native")
+		}
+		return webgpu.DenseGEMVTI8(u32, scale, dPreF, gxF, batch, in, out)
+
+	case l.Weights.Format == quant.FormatNone && l.Weights.DType == core.DTypeUint8:
+		body, minV, scale, ok := nativeUint8AsU32(l.Weights, out*in)
+		if !ok {
+			return fmt.Errorf("dense: WebGPU Uint8T missing native")
+		}
+		return webgpu.DenseGEMVTU8(body, minV, scale, dPreF, gxF, batch, in, out)
+
+	case l.Weights.Format == quant.FormatNone && isNarrowI8(l.Weights.DType):
+		u32, scale, ok := narrowAsU32(l.Weights, out*in)
+		if !ok {
+			return fmt.Errorf("dense: WebGPU narrow T %s expand failed", l.Weights.DType)
+		}
+		return webgpu.DenseGEMVTI8(u32, scale, dPreF, gxF, batch, in, out)
+
+	case l.Weights.Format == quant.FormatNone && nativeKind(l.Weights.DType) >= 0:
+		raw := bytesToU32(l.Weights.Native)
+		return webgpu.DenseGEMVTNative(raw, nativeKind(l.Weights.DType), dPreF, gxF, batch, in, out)
+
+	case l.Weights.Format == quant.FormatNone && extKind(l.Weights) >= 0:
+		k, bits, minV, scale := extMeta(l.Weights)
+		raw := bytesToU32(l.Weights.Native)
+		return webgpu.DenseGEMVTExt(raw, k, bits, minV, scale, dPreF, gxF, batch, in, out)
+
 	default:
+		if l.Weights.Format == quant.FormatNone {
+			return fmt.Errorf("dense: WebGPU FormatNone T unsupported dtype %s", l.Weights.DType)
+		}
 		w, err := gpuStageF32(l.Weights)
 		if err != nil {
 			return err

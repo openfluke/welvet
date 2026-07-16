@@ -58,9 +58,11 @@ func forwardSIMDByWire[T core.Numeric](l *Layer, x, y []T, batch, in, out int) e
 		core.DTypeFP4:
 		return forwardSIMDLowpPacked(l, x, y, batch, in, out)
 	case core.DTypeNF4, core.DTypeFP6,
-		core.DTypeInt3, core.DTypeInt5, core.DTypeInt6:
-		// Stream DecodeRow → DotTile (no Wire/GPUWireF32 full-matrix cache).
-		return forwardSIMDStreamF32(l, x, y, batch, in, out)
+		core.DTypeInt3, core.DTypeInt5, core.DTypeInt6,
+		core.DTypeInt16, core.DTypeInt32, core.DTypeInt64, core.DTypeInt,
+		core.DTypeComplex64, core.DTypeComplex128, core.DTypeFloat64:
+		// Stream DecodeRow(F64) → DotTile(F64) — no WireF64 full-matrix cache.
+		return forwardSIMDStreamF64(l, x, y, batch, in, out)
 	}
 	switch weights.SelectWire(l.Weights) {
 	case weights.WireI8:
@@ -68,9 +70,13 @@ func forwardSIMDByWire[T core.Numeric](l *Layer, x, y []T, batch, in, out int) e
 	case weights.WireU8:
 		return forwardSIMDUint8(l, x, y, batch, in, out)
 	case weights.WireF32:
-		return forwardSIMDF32(l, x, y, batch, in, out)
+		// Float32 Master or DecodeRow stream — never GPUWireF32 cache.
+		if l.Weights.DType == core.DTypeFloat32 {
+			return forwardSIMDMasterF32(l, x, y, batch, in, out)
+		}
+		return forwardSIMDStreamF32(l, x, y, batch, in, out)
 	default:
-		return forwardSIMDF64(l, x, y, batch, in, out)
+		return forwardSIMDStreamF64(l, x, y, batch, in, out)
 	}
 }
 
@@ -160,15 +166,19 @@ func expandNarrowToI8(s *weights.Store, n int) ([]int8, float32, bool) {
 }
 
 func forwardSIMDF32[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
-	wRow := make([]float32, in)
+	return forwardSIMDStreamF32(l, x, y, batch, in, out)
+}
+
+func forwardSIMDMasterF32[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
+	w, ok := l.Weights.MasterF32()
+	if !ok || len(w) < out*in {
+		return forwardSIMDStreamF32(l, x, y, batch, in, out)
+	}
 	for b := 0; b < batch; b++ {
 		xRow := core.SliceAsFloat32(x[b*in : (b+1)*in])
 		yRow := make([]float32, out)
 		for o := 0; o < out; o++ {
-			if err := weights.WireRow(l.Weights, o, wRow); err != nil {
-				return err
-			}
-			yRow[o] = float32(simd.DotTile(xRow, wRow, 0, in, 0))
+			yRow[o] = float32(simd.DotTile(xRow, w[o*in:(o+1)*in], 0, in, 0))
 		}
 		core.SliceFromFloat32(yRow, y[b*out:(b+1)*out])
 	}
@@ -188,6 +198,23 @@ func forwardSIMDStreamF32[T core.Numeric](l *Layer, x, y []T, batch, in, out int
 			yRow[o] = float32(simd.DotTile(xRow, wRow, 0, in, 0))
 		}
 		core.SliceFromFloat32(yRow, y[b*out:(b+1)*out])
+	}
+	return nil
+}
+
+// forwardSIMDStreamF64 — DecodeRowF64 per row (no WireF64 cache) + DotTileF64.
+func forwardSIMDStreamF64[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
+	wRow := make([]float64, in)
+	for b := 0; b < batch; b++ {
+		xRow := core.SliceAsFloat64(x[b*in : (b+1)*in])
+		yRow := make([]float64, out)
+		for o := 0; o < out; o++ {
+			if err := weights.DecodeRowF64(l.Weights, o, wRow); err != nil {
+				return err
+			}
+			yRow[o] = simd.DotTileF64(xRow, wRow, 0, in, 0)
+		}
+		core.SliceFromFloat64(yRow, y[b*out:(b+1)*out])
 	}
 	return nil
 }
@@ -227,19 +254,7 @@ func forwardSIMDLowpPacked[T core.Numeric](l *Layer, x, y []T, batch, in, out in
 }
 
 func forwardSIMDF64[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
-	wRow := make([]float64, in)
-	for b := 0; b < batch; b++ {
-		xRow := core.SliceAsFloat64(x[b*in : (b+1)*in])
-		yRow := make([]float64, out)
-		for o := 0; o < out; o++ {
-			if err := weights.WireRowF64(l.Weights, o, wRow); err != nil {
-				return err
-			}
-			yRow[o] = simd.DotTileF64(xRow, wRow, 0, in, 0)
-		}
-		core.SliceFromFloat64(yRow, y[b*out:(b+1)*out])
-	}
-	return nil
+	return forwardSIMDStreamF64(l, x, y, batch, in, out)
 }
 
 func forwardSIMDQ4_0[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
@@ -410,7 +425,7 @@ func BackwardSIMD[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 			wRow := make([]float32, in)
 			for o := 0; o < out; o++ {
 				g := gy[o]
-				if err := weights.WireRow(l.Weights, o, wRow); err != nil {
+				if err := weights.DecodeRow(l.Weights, o, wRow); err != nil {
 					return nil, nil, err
 				}
 				simd.SaxpyF32AccF64(gx64, g, wRow, in)
@@ -454,7 +469,7 @@ func BackwardSIMD[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 			wRow := make([]float64, in)
 			for o := 0; o < out; o++ {
 				g := gy[o]
-				if err := weights.WireRowF64(l.Weights, o, wRow); err != nil {
+				if err := weights.DecodeRowF64(l.Weights, o, wRow); err != nil {
 					return nil, nil, err
 				}
 				simd.SaxpyF64AccF64(gx64, g, wRow, in)
