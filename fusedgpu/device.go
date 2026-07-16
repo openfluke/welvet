@@ -2,12 +2,15 @@ package fusedgpu
 
 import (
 	"fmt"
+	"os"
+	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/openfluke/webgpu/wgpu"
 )
 
-// Shared Vulkan device across sequential gpu_fuse loads so VRAM is not
+// Shared GPU device across sequential gpu_fuse loads so VRAM is not
 // fragmented by create/destroy of Instance+Device per format.
 var (
 	devMu        sync.Mutex
@@ -18,13 +21,38 @@ var (
 	sharedName   string
 )
 
+// resolveBackends picks a native wgpu backend (Metal on macOS/iOS, DX12 on
+// Windows, Vulkan elsewhere). Matches welvet/webgpu so gpu_fuse works on ARM Mac.
+func resolveBackends() *wgpu.InstanceDescriptor {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("WELVET_WGPU_BACKEND"))) {
+	case "all":
+		return nil
+	case "dx12", "d3d12":
+		return &wgpu.InstanceDescriptor{Backends: wgpu.InstanceBackendDX12}
+	case "vulkan", "vk":
+		return &wgpu.InstanceDescriptor{Backends: wgpu.InstanceBackendVulkan}
+	case "metal":
+		return &wgpu.InstanceDescriptor{Backends: wgpu.InstanceBackendMetal}
+	case "gl", "opengl":
+		return &wgpu.InstanceDescriptor{Backends: wgpu.InstanceBackendGL}
+	}
+	switch runtime.GOOS {
+	case "darwin", "ios":
+		return &wgpu.InstanceDescriptor{Backends: wgpu.InstanceBackendMetal}
+	case "windows":
+		return &wgpu.InstanceDescriptor{Backends: wgpu.InstanceBackendDX12}
+	default:
+		return &wgpu.InstanceDescriptor{Backends: wgpu.InstanceBackendVulkan}
+	}
+}
+
 func acquireDevice() (inst *wgpu.Instance, adapt *wgpu.Adapter, dev *wgpu.Device, q *wgpu.Queue, name string, err error) {
 	devMu.Lock()
 	defer devMu.Unlock()
 	if sharedDevice != nil {
 		return sharedInst, sharedAdapt, sharedDevice, sharedQueue, sharedName, nil
 	}
-	inst = wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: wgpu.InstanceBackendVulkan})
+	inst = wgpu.CreateInstance(resolveBackends())
 	if inst == nil {
 		return nil, nil, nil, nil, "", fmt.Errorf("CreateInstance failed")
 	}
@@ -59,7 +87,7 @@ func acquireDevice() (inst *wgpu.Instance, adapt *wgpu.Adapter, dev *wgpu.Device
 }
 
 // releaseModelGPU frees this engine's buffers/pipelines/bind-groups but keeps
-// the shared Vulkan device. Destroying the device each SyncGPU leaks ~150–200MB
+// the shared GPU device. Destroying the device each SyncGPU leaks ~150–200MB
 // host/driver state on this stack and OOMs late in multi-format benches.
 func (e *engine) releaseModelGPU() {
 	if e == nil {
