@@ -13,6 +13,7 @@ import (
 	"github.com/openfluke/welvet/cnn2"
 	"github.com/openfluke/welvet/cnn3"
 	"github.com/openfluke/welvet/dense"
+	"github.com/openfluke/welvet/embedding"
 	"github.com/openfluke/welvet/forward"
 	"github.com/openfluke/welvet/layernorm"
 	"github.com/openfluke/welvet/lstm"
@@ -122,6 +123,8 @@ func applyCell[T core.Numeric](op any, dW *core.Tensor[T], lr float64) error {
 		return rnn.ApplyGradSGD(v, dW, lr)
 	case *lstm.Layer:
 		return lstm.ApplyGradSGD(v, dW, lr)
+	case *embedding.Layer:
+		return embedding.ApplyGradSGD(v, dW, lr)
 	case GradApplier[T]:
 		return v.ApplyGradSGD(dW, lr)
 	default:

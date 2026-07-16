@@ -13,6 +13,7 @@ import (
 	"github.com/openfluke/welvet/cnn2"
 	"github.com/openfluke/welvet/cnn3"
 	"github.com/openfluke/welvet/dense"
+	"github.com/openfluke/welvet/embedding"
 	"github.com/openfluke/welvet/layernorm"
 	"github.com/openfluke/welvet/lstm"
 	"github.com/openfluke/welvet/mha"
@@ -143,6 +144,12 @@ func dispatch[T core.Numeric](cell *architecture.Cell, input *core.Tensor[T]) (p
 			return nil, nil, fmt.Errorf("lstm cell Op is %T, want *lstm.Layer", cell.Op)
 		}
 		return lstm.Forward(ll, input)
+	case core.LayerEmbedding:
+		el, ok := cell.Op.(*embedding.Layer)
+		if !ok || el == nil {
+			return nil, nil, fmt.Errorf("embedding cell Op is %T, want *embedding.Layer", cell.Op)
+		}
+		return embedding.Forward(el, input)
 	default:
 		return nil, nil, fmt.Errorf("unsupported layer type %s", cell.Layer.Type)
 	}
