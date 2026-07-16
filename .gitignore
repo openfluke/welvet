@@ -10,3 +10,5 @@ bin/
 dist/
 .DS_Store
 w2a
+w2a/logs/
+**/logs/
