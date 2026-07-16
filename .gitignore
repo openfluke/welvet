@@ -1,0 +1,12 @@
+*.exe
+*.test
+*.out
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+bin/
+dist/
+.DS_Store
+w2a
