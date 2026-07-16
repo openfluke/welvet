@@ -10,6 +10,7 @@ import (
 	"github.com/openfluke/welvet/backward"
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/cnn1"
+	"github.com/openfluke/welvet/cnn2"
 	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/forward"
 	"github.com/openfluke/welvet/layernorm"
@@ -110,6 +111,8 @@ func applyCell[T core.Numeric](op any, dW *core.Tensor[T], lr float64) error {
 		return layernorm.ApplyGradSGD(v, dW, lr)
 	case *cnn1.Layer:
 		return cnn1.ApplyGradSGD(v, dW, lr)
+	case *cnn2.Layer:
+		return cnn2.ApplyGradSGD(v, dW, lr)
 	case GradApplier[T]:
 		return v.ApplyGradSGD(dW, lr)
 	default:

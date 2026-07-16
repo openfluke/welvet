@@ -33,9 +33,9 @@
 | **Dense** FormatNone × 34 × CPU/SIMD/WebGPU fwd+bwd | ✅ |
 | **Dense** block-quant × SIMD/WebGPU (all 20 formats on-device fwd+bwd) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
-| `forward/` / `backward/` volumetric Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1 walk | ✅ |
-| `training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1) | ✅ |
-| Remaining layers (Embedding, CNN2, …) | ⬜ |
+| `forward/` / `backward/` volumetric Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1 + CNN2 walk | ✅ |
+| `training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1 + CNN2) | ✅ |
+| Remaining layers (Embedding, CNN3, …) | ⬜ |
 | Model IO / transformer / entity / tokenizer / hf | ⬜ |
 | Accel / donate / fountain / dna / … | ⬜ |
 | Full v1 matrix | ⬜ |
@@ -48,6 +48,7 @@ cd w2a && go test ./tests/swiglu -v
 cd w2a && go test ./tests/rmsnorm -v
 cd w2a && go test ./tests/layernorm -v
 cd w2a && go test ./tests/cnn1 -v
+cd w2a && go test ./tests/cnn2 -v
 ```
 
 ---
@@ -184,10 +185,11 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `rmsnorm/` | RMSNorm; γ store FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `layernorm/` | LayerNorm; γ+β stores FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `cnn1/` | Conv1d (im2col→Dense); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `cnn2/` | Conv2d (im2col→Dense); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | ✅ |
-| `forward/` | Grid walk z→y→x→l; Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1 dispatch | ✅ |
-| `backward/` | Reverse tape over Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1 | ✅ |
-| `training/` | MSE + SGD; ApplyGradSGD for Dense / MHA / SwiGLU / RMSNorm / LayerNorm / CNN1 | ✅ |
+| `forward/` | Grid walk z→y→x→l; Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1 + CNN2 dispatch | ✅ |
+| `backward/` | Reverse tape over Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1 + CNN2 | ✅ |
+| `training/` | MSE + SGD; ApplyGradSGD for Dense / MHA / SwiGLU / RMSNorm / LayerNorm / CNN1 / CNN2 | ✅ |
 
 ### Layers (each needs CPU + SIMD + WebGPU × all dtype × all quant × fwd/bwd)
 
@@ -201,7 +203,7 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `rmsnorm/` | RMSNorm; γ FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
 | `layernorm/` | LayerNorm; γ+β FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
 | `cnn1/` | Conv1d im2col→Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `cnn2/` | 2D convolution | ⬜ |
+| `cnn2/` | Conv2d im2col→Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
 | `cnn3/` | 3D convolution | ⬜ |
 | `convt1/` | 1D transposed conv | ⬜ |
 | `convt2/` | 2D transposed conv | ⬜ |
@@ -310,6 +312,20 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/`
 | Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
 | Fused on-device Conv1d shader (no im2col host) | ⬜ | ⬜ | ⬜ |
 
+### CNN2 detail
+
+| Feature | CPU | SIMD | WebGPU |
+|---------|:---:|:----:|:------:|
+| Conv2d [B,C,H,W] + im2col → Dense GEMV | ✅ | ✅ via Dense | ✅ via Dense GEMV |
+| Weights FormatNone × 34 — fwd+bwd | ✅ | ✅ | ✅ |
+| Weights all 20 quants — fwd+bwd | ✅ | ✅ | ✅ |
+| Activation `Tensor[T]` × all 15 `core.Numeric` kinds | ✅ | ✅ | ✅ |
+| Timed FormatNone + quant matrices in `w2a` | ✅ | ✅ | ✅ |
+| Gap census 34×20×3 | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
+| Fused on-device Conv2d shader (no im2col host) | ⬜ | ⬜ | ⬜ |
+
 ### Model / IO / runtime
 
 | Package | Features | Status |
@@ -341,7 +357,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/`
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `w2a/` | Interactive menu, dense + mha + swiglu + rmsnorm + layernorm + cnn1 suites, timed matrices, gap census | 🚧 |
+| `w2a/` | Interactive menu, dense + mha + swiglu + rmsnorm + layernorm + cnn1 + cnn2 suites, timed matrices, gap census | 🚧 |
 
 ---
 
@@ -387,6 +403,7 @@ go test ./tests/swiglu -v # SiLU-gated FFN; same coverage axes as Dense
 go test ./tests/rmsnorm -v # RMSNorm γ; same coverage axes as Dense
 go test ./tests/layernorm -v # LayerNorm γ+β; same coverage axes as Dense
 go test ./tests/cnn1 -v    # Conv1d im2col→Dense; same coverage axes as Dense
+go test ./tests/cnn2 -v    # Conv2d im2col→Dense; same coverage axes as Dense
 ```
 
 Docs: `w2a/docs/`.
