@@ -71,12 +71,45 @@ func (m *Model) clearFloatCaches() {
 	}
 }
 
+// SyncHybridFused uploads the full BinaryG128 hybrid decoder to GPU (all weights on device).
+// Needs ~entity size + scratch VRAM (Bonsai 27B ≈ 5–8+ GiB). No host GEMV fallback.
+func (m *Model) SyncHybridFused() error {
+	if m == nil {
+		return fmt.Errorf("transformer: nil model")
+	}
+	if m.gpu != nil {
+		if _, ok := m.gpu.(*fusedgpu.HybridEngine); ok {
+			return nil
+		}
+		m.CloseGPU()
+	}
+	m.CloseHybridGPU()
+	runtime.GC()
+	debug.FreeOSMemory()
+
+	spec, err := m.ExportHybridFusedGPUSpec()
+	if err != nil {
+		return err
+	}
+	runtime.GC()
+
+	eng, err := fusedgpu.NewHybridFromSpec(spec)
+	if err != nil {
+		return fmt.Errorf("fusedgpu hybrid: %w", err)
+	}
+	m.gpu = eng
+	return nil
+}
+
 // CloseGPU releases the fused GPU engine and encourages VRAM reclaim.
 func (m *Model) CloseGPU() {
 	if m == nil || m.gpu == nil {
 		return
 	}
-	if eng, ok := m.gpu.(*fusedgpu.Engine); ok {
+	switch eng := m.gpu.(type) {
+	case *fusedgpu.Engine:
+		eng.Close()
+	case *fusedgpu.HybridEngine:
 		eng.Close()
 	}
 	m.gpu = nil
@@ -87,16 +120,30 @@ func (m *Model) ForwardTokensGPU(ids []uint32) ([]float32, error) {
 	if m == nil {
 		return nil, fmt.Errorf("transformer: nil model")
 	}
-	if eng, ok := m.gpu.(*fusedgpu.Engine); ok && eng != nil {
-		return eng.AppendTokens(ids)
+	switch eng := m.gpu.(type) {
+	case *fusedgpu.Engine:
+		if eng != nil {
+			return eng.AppendTokens(ids)
+		}
+	case *fusedgpu.HybridEngine:
+		if eng != nil {
+			return eng.AppendTokens(ids)
+		}
 	}
-	return m.ForwardTokens(ids)
+	return m.forwardTokensHost(ids)
 }
 
 // GPUAdapterName returns the fused GPU adapter name when active.
 func (m *Model) GPUAdapterName() string {
-	if eng, ok := m.gpu.(*fusedgpu.Engine); ok && eng != nil {
-		return eng.AdapterName()
+	switch eng := m.gpu.(type) {
+	case *fusedgpu.Engine:
+		if eng != nil {
+			return eng.AdapterName()
+		}
+	case *fusedgpu.HybridEngine:
+		if eng != nil {
+			return eng.AdapterName()
+		}
 	}
 	return ""
 }
@@ -122,7 +169,14 @@ func (m *Model) ResetKV() {
 			b.GDN.Reset()
 		}
 	}
-	if eng, ok := m.gpu.(*fusedgpu.Engine); ok && eng != nil {
-		_ = eng.Reset()
+	switch eng := m.gpu.(type) {
+	case *fusedgpu.Engine:
+		if eng != nil {
+			_ = eng.Reset()
+		}
+	case *fusedgpu.HybridEngine:
+		if eng != nil {
+			_ = eng.Reset()
+		}
 	}
 }

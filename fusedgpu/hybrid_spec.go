@@ -37,12 +37,18 @@ type HybridBlockSpec struct {
 // HybridSpec is the full on-device BinaryG128 hybrid decoder bundle.
 type HybridSpec struct {
 	Hidden, Vocab, Layers int
+	Intermediate          int
 	Eps                   float32
 	MaxSeq                int
 	Embed                 BinarySpec // vocab × hidden
 	FinalNorm             []float32
 	LMHead                BinarySpec // vocab × hidden
 	Blocks                []HybridBlockSpec
+}
+
+// HybridEngine is the full BinaryG128 hybrid decoder on WebGPU (no host GEMV).
+type HybridEngine struct {
+	e *hybridEngine
 }
 
 // NewHybridFromSpec uploads every weight to GPU and builds the fused hybrid engine.
@@ -54,11 +60,48 @@ func NewHybridFromSpec(spec *HybridSpec) (*HybridEngine, error) {
 	if spec.Layers <= 0 || len(spec.Blocks) != spec.Layers {
 		return nil, fmt.Errorf("fusedgpu: hybrid block count mismatch")
 	}
+	if spec.Intermediate <= 0 {
+		return nil, fmt.Errorf("fusedgpu: hybrid Intermediate unset")
+	}
 	e, err := newHybridEngine(spec)
 	if err != nil {
 		return nil, err
 	}
+	spec.clearPayloads()
 	return &HybridEngine{e: e}, nil
+}
+
+// Close releases GPU resources for this engine (shared device kept).
+func (eng *HybridEngine) Close() {
+	if eng == nil || eng.e == nil {
+		return
+	}
+	eng.e.release()
+	eng.e = nil
+}
+
+// Reset clears GDN/KV state and position for a new prompt.
+func (eng *HybridEngine) Reset() error {
+	if eng == nil || eng.e == nil {
+		return fmt.Errorf("fusedgpu: nil hybrid engine")
+	}
+	return eng.e.resetState()
+}
+
+// AppendTokens runs one or more forward steps; returns logits for the last token.
+func (eng *HybridEngine) AppendTokens(ids []uint32) ([]float32, error) {
+	if eng == nil || eng.e == nil {
+		return nil, fmt.Errorf("fusedgpu: nil hybrid engine")
+	}
+	return eng.e.appendTokens(ids)
+}
+
+// AdapterName returns the bound GPU adapter name.
+func (eng *HybridEngine) AdapterName() string {
+	if eng == nil || eng.e == nil || eng.e.adapter == nil {
+		return ""
+	}
+	return eng.e.adapter.GetInfo().Name
 }
 
 func (s *BinarySpec) nbytes() uint64 {

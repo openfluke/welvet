@@ -81,20 +81,19 @@ type Model struct {
 	Quiet bool
 }
 
-// FusedGPUReady reports whether the full fused GPU decoder can run.
-// Hybrid Qwen3.5 / Bonsai uses per-GEMV WebGPU BinaryG128 (gpu_fuse → hybrid GPU matvecs),
-// not the monolithic Q4 fusedgpu engine.
+// FusedGPUReady reports whether the Q4 monolithic fused GPU decoder can run.
+// Hybrid Qwen3.5 / Bonsai uses HybridEngine (SyncHybridFused) instead.
 func (m *Model) FusedGPUReady() bool {
 	if m == nil || !m.FusedPack || m.PackFormat == quant.FormatNone {
 		return false
 	}
 	if m.isHybrid() {
-		return false // SyncGPU/fusedgpu path off; ApplyExec uses WebGPU dense GEMV instead
+		return false
 	}
 	return true
 }
 
-// HybridGPUFuse reports gpu_fuse on a Qwen3.5/Bonsai entity (BinaryG128 WebGPU GEMVs).
+// HybridGPUFuse reports gpu_fuse on a Qwen3.5/Bonsai entity (full BinaryG128 fuse).
 func (m *Model) HybridGPUFuse() bool {
 	return m != nil && m.isHybrid() && m.Exec.Backend == core.BackendWebGPU && m.Fused
 }

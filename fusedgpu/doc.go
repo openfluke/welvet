@@ -1,4 +1,7 @@
-// Package fusedgpu runs a full Q4_0 decoder on WebGPU (Lucy-style single-pass/token).
+// Package fusedgpu runs a full decoder on WebGPU:
+//   - Q4_0 (Lucy-style) via Engine / NewFromSpec
+//   - BinaryG128 hybrid (Qwen3.5 / Bonsai) via HybridEngine / NewHybridFromSpec
 //
-// Requires a welvet transformer.Model with baked FormatQ4_0 weights and lm_head.packed.
+// Hybrid fuse keeps every weight + GDN/attn/FFN scratch on device; host only
+// supplies token IDs and reads back logits. Needs enough VRAM for the full entity.
 package fusedgpu

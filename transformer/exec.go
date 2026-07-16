@@ -90,7 +90,7 @@ func (p ExecProfile) FusedNote() string {
 	case "simd_fuse":
 		return "packed fused GEMV (Q4/Q8/Q4_1/Q5 asm; k/IQ inflate-once + DotTile)"
 	case "gpu_fuse":
-		return "full on-device fused decoder (native Q4_0, or project other quants → Q4 for upload); Bonsai hybrid: resident BinaryG128 GEMVs (weights stay on GPU)"
+		return "full on-device fused decoder (Q4 Lucy, or BinaryG128 hybrid — all weights on GPU; ~8GB+ VRAM for Bonsai)"
 	default:
 		return ""
 	}
@@ -159,10 +159,15 @@ func (m *Model) ApplyExec(p ExecProfile) error {
 			m.CloseGPU()
 			m.CloseHybridGPU()
 			m.Fused = true
-			if err := m.SyncHybridGPU(); err != nil {
-				return fmt.Errorf("hybrid gpu: %w", err)
+			if err := m.SyncHybridFused(); err != nil {
+				return fmt.Errorf("hybrid gpu fuse: %w", err)
 			}
-			fmt.Printf("  gpu_fuse (hybrid): resident BinaryG128 GEMV + host GDN/attn ALU\n")
+			name := m.GPUAdapterName()
+			if name != "" {
+				fmt.Printf("  gpu_fuse (hybrid): full BinaryG128 on-device fuse on %s (needs ~8GB+ VRAM)\n", name)
+			} else {
+				fmt.Printf("  gpu_fuse (hybrid): full BinaryG128 on-device fuse (needs ~8GB+ VRAM)\n")
+			}
 		} else {
 			return fmt.Errorf("gpu_fuse requires a baked packed entity (got %s)", m.PackFormat.String())
 		}
