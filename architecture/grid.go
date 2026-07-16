@@ -17,7 +17,11 @@ type Coord struct {
 type Cell struct {
 	Layer core.Layer
 
-	// Spatial hop: when IsRemoteLink, inputs come from Target* instead of local prior.
+	// Op is the executable payload (e.g. *dense.Layer). Kept as any so architecture
+	// stays topology-only and layer packages attach themselves without import cycles.
+	Op any
+
+	// Spatial hop: when IsRemoteLink, inputs come from Target* post-activation.
 	IsRemoteLink bool
 	TargetZ      int
 	TargetY      int

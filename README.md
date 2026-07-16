@@ -33,6 +33,7 @@
 | **Dense** FormatNone × 34 × CPU/SIMD/WebGPU fwd+bwd | ✅ |
 | **Dense** block-quant × SIMD/WebGPU (all 20 formats on-device fwd+bwd) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
+| `forward/` / `backward/` volumetric Dense walk | ✅ |
 | All other layers | ⬜ |
 | Model IO / transformer / entity / tokenizer / hf | ⬜ |
 | Accel / donate / fountain / dna / … | ⬜ |
@@ -169,9 +170,9 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `webgpu/` | All FormatNone + all quant GEMV/GEMVT + DenseDW | ✅ |
 | `tiling/` | Tile size / SC / MC / GPU workgroup caps | ✅ |
 | `dense/` | FormatNone×34 + all quants × 3 backends; packed fwd/bwd; grad verify | ✅ |
-| `architecture/` | Volumetric grid, cells, hops, remote links | ✅ |
-| `forward/` | Global forward dispatch | ⬜ |
-| `backward/` | Global backward dispatch | ⬜ |
+| `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | ✅ |
+| `forward/` | Grid walk z→y→x→l; Dense dispatch; remote hops | ✅ |
+| `backward/` | Reverse tape over Dense cells | ✅ |
 | `training/` | Optimizers, graphs, native train | ⬜ |
 
 ### Layers (each needs CPU + SIMD + WebGPU × all dtype × all quant × fwd/bwd)
