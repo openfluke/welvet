@@ -19,6 +19,7 @@ import (
 	"github.com/openfluke/welvet/mha"
 	"github.com/openfluke/welvet/rmsnorm"
 	"github.com/openfluke/welvet/rnn"
+	"github.com/openfluke/welvet/sequential"
 	"github.com/openfluke/welvet/softmax"
 	"github.com/openfluke/welvet/swiglu"
 )
@@ -157,6 +158,12 @@ func dispatch[T core.Numeric](cell *architecture.Cell, input *core.Tensor[T]) (p
 			return nil, nil, fmt.Errorf("softmax cell Op is %T, want *softmax.Layer", cell.Op)
 		}
 		return softmax.Forward(sl, input)
+	case core.LayerSequential:
+		ql, ok := cell.Op.(*sequential.Layer)
+		if !ok || ql == nil {
+			return nil, nil, fmt.Errorf("sequential cell Op is %T, want *sequential.Layer", cell.Op)
+		}
+		return sequential.Forward(ql, input)
 	default:
 		return nil, nil, fmt.Errorf("unsupported layer type %s", cell.Layer.Type)
 	}

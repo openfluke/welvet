@@ -33,9 +33,9 @@
 | **Dense** FormatNone × 34 × CPU/SIMD/WebGPU fwd+bwd | ✅ |
 | **Dense** block-quant × SIMD/WebGPU (all 20 formats on-device fwd+bwd) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
-| `forward/` / `backward/` volumetric Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax walk | ✅ |
-| `training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax) | ✅ |
-| Remaining layers (residual, …) | ⬜ |
+| `forward/` / `backward/` volumetric Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential walk | ✅ |
+| `training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential) | ✅ |
+| Remaining layers (residual, parallel, …) | ⬜ |
 | Model IO / transformer / entity / tokenizer / hf | ⬜ |
 | Accel / donate / fountain / dna / … | ⬜ |
 | Full v1 matrix | ⬜ |
@@ -54,6 +54,7 @@ cd w2a && go test ./tests/rnn -v
 cd w2a && go test ./tests/lstm -v
 cd w2a && go test ./tests/embedding -v
 cd w2a && go test ./tests/softmax -v
+cd w2a && go test ./tests/sequential -v
 ```
 
 ---
@@ -196,10 +197,11 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `lstm/` | LSTM i/f/g/o via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `embedding/` | Token gather/scatter; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `softmax/` | Weightless Softmax (last-axis/Grid); ALU × backends; harness dtype/quant axes | ✅ |
+| `sequential/` | Dense→Dense Sequential compose; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | ✅ |
-| `forward/` | Grid walk z→y→x→l; Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax dispatch | ✅ |
-| `backward/` | Reverse tape over Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax | ✅ |
-| `training/` | MSE + SGD; ApplyGradSGD for Dense / MHA / SwiGLU / RMSNorm / LayerNorm / CNN1–3 / RNN / LSTM / Embedding / Softmax | ✅ |
+| `forward/` | Grid walk z→y→x→l; Dense … Softmax + Sequential dispatch | ✅ |
+| `backward/` | Reverse tape over Dense … Softmax + Sequential | ✅ |
+| `training/` | MSE + SGD; ApplyGradSGD for Dense … Softmax / Sequential | ✅ |
 
 ### Layers (each needs CPU + SIMD + WebGPU × all dtype × all quant × fwd/bwd)
 
@@ -219,12 +221,12 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `lstm/` | LSTM i/f/g/o via Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
 | `embedding/` | Token gather/scatter; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
 | `softmax/` | Weightless Softmax last-axis/Grid + temp; ALU × backends; act sweep; train grids | ✅ |
+| `sequential/` | Dense→Dense Sequential compose; FormatNone×34 + quants × backends; act sweep; train grids | ✅ |
 | `convt1/` | 1D transposed conv | ⬜ |
 | `convt2/` | 2D transposed conv | ⬜ |
 | `convt3/` | 3D transposed conv | ⬜ |
 | `kmeans/` | K-means | ⬜ |
 | `parallel/` | Parallel compose | ⬜ |
-| `sequential/` | Sequential compose | ⬜ |
 | `residual/` | Residual | ⬜ |
 | `metacognition/` | Metacognition | ⬜ |
 
@@ -407,6 +409,20 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/`
 | Sparsemax / Entmax / Gumbel / Masked variants | ⬜ | ⬜ | ⬜ |
 | Fused on-device Softmax shader | ⬜ | ⬜ | ⬜ |
 
+### Sequential detail
+
+| Feature | CPU | SIMD | WebGPU |
+|---------|:---:|:----:|:------:|
+| Dense→Dense chain in one cell (not grid hops) | ✅ | ✅ via Dense | ✅ via Dense |
+| Child weights FormatNone × 34 — fwd+bwd | ✅ | ✅ | ✅ |
+| Child weights all 20 quants — fwd+bwd | ✅ | ✅ | ✅ |
+| Activation `Tensor[T]` × all 15 `core.Numeric` kinds | ✅ | ✅ | ✅ |
+| Timed FormatNone + quant matrices in `w2a` | ✅ | ✅ | ✅ |
+| Gap census 34×20×3 | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
+| Nested non-Dense children (Softmax/Residual/…) | ⬜ | ⬜ | ⬜ |
+
 ### Model / IO / runtime
 
 | Package | Features | Status |
@@ -438,7 +454,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/`
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `w2a/` | Interactive menu, dense + mha + swiglu + rmsnorm + layernorm + cnn1–3 + rnn + lstm + embedding + softmax suites, timed matrices, gap census | 🚧 |
+| `w2a/` | Interactive menu, dense + mha + swiglu + rmsnorm + layernorm + cnn1–3 + rnn + lstm + embedding + softmax + sequential suites, timed matrices, gap census | 🚧 |
 
 ---
 
@@ -490,6 +506,7 @@ go test ./tests/rnn -v     # vanilla tanh RNN; same coverage axes as Dense
 go test ./tests/lstm -v    # LSTM i/f/g/o; same coverage axes as Dense
 go test ./tests/embedding -v # token gather/scatter; same coverage axes as Dense
 go test ./tests/softmax -v   # weightless Softmax; ALU harness (no weight store)
+go test ./tests/sequential -v # Dense→Dense Sequential compose; same coverage axes as Dense
 ```
 
 Docs: `w2a/docs/`.
