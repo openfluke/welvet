@@ -71,8 +71,8 @@ func (m *Model) clearFloatCaches() {
 	}
 }
 
-// SyncHybridFused uploads the full BinaryG128 hybrid decoder to GPU (all weights on device).
-// Needs ~entity size + scratch VRAM (Bonsai 27B ≈ 5–8+ GiB). No host GEMV fallback.
+// SyncHybridFused uploads the full BinaryG128 hybrid/dense decoder to GPU (all weights on device).
+// Bonsai-27B hybrid needs ~5–8+ GiB VRAM; dense Bonsai-8B is ~1.3GB weights + scratch (~2–3 GiB).
 func (m *Model) SyncHybridFused() error {
 	if m == nil {
 		return fmt.Errorf("transformer: nil model")

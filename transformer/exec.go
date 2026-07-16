@@ -163,10 +163,14 @@ func (m *Model) ApplyExec(p ExecProfile) error {
 				return fmt.Errorf("hybrid gpu fuse: %w", err)
 			}
 			name := m.GPUAdapterName()
+			vramHint := "needs ~8GB+ VRAM for 27B; ~2–3GB for dense 8B"
+			if m.Architecture == "qwen3_dense" {
+				vramHint = "dense BinaryG128 (~2–3GB VRAM)"
+			}
 			if name != "" {
-				fmt.Printf("  gpu_fuse (hybrid): full BinaryG128 on-device fuse on %s (needs ~8GB+ VRAM)\n", name)
+				fmt.Printf("  gpu_fuse (BinaryG128): full on-device fuse on %s (%s)\n", name, vramHint)
 			} else {
-				fmt.Printf("  gpu_fuse (hybrid): full BinaryG128 on-device fuse (needs ~8GB+ VRAM)\n")
+				fmt.Printf("  gpu_fuse (BinaryG128): full on-device fuse (%s)\n", vramHint)
 			}
 		} else {
 			return fmt.Errorf("gpu_fuse requires a baked packed entity (got %s)", m.PackFormat.String())

@@ -14,7 +14,7 @@ import (
 )
 
 func (m *Model) isHybrid() bool {
-	return m != nil && (m.Architecture == "qwen35_hybrid" || m.embedPacked != nil)
+	return m != nil && (m.Architecture == "qwen35_hybrid" || m.Architecture == "qwen3_dense" || m.embedPacked != nil)
 }
 
 // IsHybrid reports Qwen3.5 / Bonsai GDN+full-attn architecture.

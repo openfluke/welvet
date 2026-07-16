@@ -36,8 +36,8 @@ func LoadEntity(path string) (*Model, error) {
 		return nil, fmt.Errorf("entity: invalid dims")
 	}
 
-	// Qwen3.5 / Bonsai hybrid path
-	if spec.Architecture == "qwen35_hybrid" || len(d.LayerTypes) > 0 {
+	// Qwen3.5 hybrid / dense Qwen3 BinaryPacked (Bonsai) path
+	if spec.Architecture == "qwen35_hybrid" || spec.Architecture == "qwen3_dense" || len(d.LayerTypes) > 0 {
 		m := &Model{
 			HiddenSize:    spec.HiddenSize,
 			VocabSize:     spec.VocabSize,

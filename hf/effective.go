@@ -42,6 +42,8 @@ func LayerTypes(config map[string]any) []string {
 }
 
 // IsQwen35Hybrid reports Qwen3.5 / Bonsai hybrid (Gated DeltaNet + full attn).
+// Dense Qwen3 (e.g. Bonsai-8B) often ships layer_types of all "full_attention" —
+// that alone must not count as hybrid.
 func IsQwen35Hybrid(config map[string]any) bool {
 	mt := strings.ToLower(ConfigStringDefault(config, "model_type", ""))
 	if mt == "qwen3_5" || mt == "qwen3_5_text" {
@@ -53,7 +55,14 @@ func IsQwen35Hybrid(config map[string]any) bool {
 			return true
 		}
 	}
-	return len(LayerTypes(config)) > 0 && strings.Contains(mt, "qwen3")
+	hasLinear := false
+	for _, t := range LayerTypes(config) {
+		if t == "linear_attention" {
+			hasLinear = true
+			break
+		}
+	}
+	return hasLinear && strings.Contains(mt, "qwen3")
 }
 
 // LinearAttnDims holds Gated DeltaNet shape knobs from text_config.
