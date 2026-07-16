@@ -1,5 +1,12 @@
-// Package rmsnorm is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package rmsnorm is Welvet RMSNorm (Llama / loom semantics).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Math (per token / last dim):
+//
+//	rms = sqrt(mean(x²) + eps)
+//	y   = (x / rms) ⊙ γ
+//
+// γ lives in weights.Store (FormatNone×34 + all quants × CPU/SIMD/WebGPU decode).
+// Norm ALU is f64-accurate host; SIMD uses DotTile for Σx² when BackendSIMD.
+// Activations are core.Tensor[T] (not hardcoded float32). No QAT.
+// Tests live in github.com/openfluke/w2a only.
 package rmsnorm

@@ -11,6 +11,7 @@ import (
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/mha"
+	"github.com/openfluke/welvet/rmsnorm"
 	"github.com/openfluke/welvet/swiglu"
 )
 
@@ -94,6 +95,12 @@ func dispatch[T core.Numeric](cell *architecture.Cell, input *core.Tensor[T]) (p
 			return nil, nil, fmt.Errorf("swiglu cell Op is %T, want *swiglu.Layer", cell.Op)
 		}
 		return swiglu.Forward(sl, input)
+	case core.LayerRMSNorm:
+		rl, ok := cell.Op.(*rmsnorm.Layer)
+		if !ok || rl == nil {
+			return nil, nil, fmt.Errorf("rmsnorm cell Op is %T, want *rmsnorm.Layer", cell.Op)
+		}
+		return rmsnorm.Forward(rl, input)
 	default:
 		return nil, nil, fmt.Errorf("unsupported layer type %s", cell.Layer.Type)
 	}
