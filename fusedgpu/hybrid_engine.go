@@ -60,6 +60,8 @@ type hybridEngine struct {
 
 	step, token         *wgpu.Buffer
 	promptBuf           *wgpu.Buffer
+	histBuf             *wgpu.Buffer
+	stagingHist         *wgpu.Buffer
 	hidden, normed, mix *wgpu.Buffer
 	inter, upBuf        *wgpu.Buffer
 	logits              *wgpu.Buffer
@@ -139,6 +141,7 @@ func newHybridEngine(spec *HybridSpec) (*hybridEngine, error) {
 		"attn":        shaderHybridAttn,
 		"outgate":     shaderOutGate,
 		"inc_pos":     shaderIncPosHybrid,
+		"advance":     shaderAdvance,
 		"zero":        shaderZeroF32,
 		"argmax":      shaderHybridArgMax,
 	}
@@ -162,7 +165,7 @@ func newHybridEngine(spec *HybridSpec) (*hybridEngine, error) {
 	e.initUniforms()
 	e.buildBindGroups()
 	nbytes := e.estimateVRAM()
-	fmt.Printf("✅ Hybrid GPU fuse ready (wg128 GEMV/SwiGLU + resid-fuse + GDN step/norm, ~%.1f GiB)\n", float64(nbytes)/(1<<30))
+	fmt.Printf("✅ Hybrid GPU fuse ready (wg128 + resid-fuse + decode chunks, ~%.1f GiB)\n", float64(nbytes)/(1<<30))
 	return e, nil
 }
 
@@ -467,6 +470,12 @@ func (e *hybridEngine) allocScratch() error {
 	if e.stagingTok, err = e.mkBuf("stageTok", 64, wgpu.BufferUsageMapRead, nil); err != nil {
 		return err
 	}
+	if e.histBuf, err = e.mkBuf("hist", uint64(e.maxSeq*4), wgpu.BufferUsageStorage, nil); err != nil {
+		return err
+	}
+	if e.stagingHist, err = e.mkBuf("stageHist", uint64(e.maxSeq*4), wgpu.BufferUsageMapRead, nil); err != nil {
+		return err
+	}
 
 	if e.maxQGate > 0 {
 		if e.qGate, err = e.mkBuf("qgate", uint64(e.maxQGate*4), wgpu.BufferUsageStorage, nil); err != nil {
@@ -579,6 +588,7 @@ func (e *hybridEngine) buildBindGroups() {
 	e.mkBG("lm", p["bingemv"], whole(e.uGemvVocabH), whole(e.normed), whole(e.lmHead.scales), whole(e.lmHead.weights), whole(e.logits))
 	e.mkBG("argmax", p["argmax"], whole(e.uArgMax), whole(e.logits), whole(e.outTok))
 	e.mkBG("inc_pos", p["inc_pos"], whole(e.step))
+	e.mkBG("advance", p["advance"], whole(e.step), whole(e.outTok), whole(e.histBuf), whole(e.token))
 
 	for i := range e.blocks {
 		b := &e.blocks[i]
@@ -804,10 +814,17 @@ func (e *hybridEngine) stepToken(id uint32, wantLogits bool, logits []float32) e
 	return nil
 }
 
-// stepTokenSample runs one forward + LM head + on-device argmax; maps 4 bytes.
+func (e *hybridEngine) recordSample(pass *wgpu.ComputePassEncoder) {
+	p := e.pipe
+	e.disp(pass, p["bingemv"], e.bg["lm"], binWG(e.vocabN), 1, 1)
+	e.disp(pass, p["argmax"], e.bg["argmax"], 1, 1, 1)
+	e.disp(pass, p["advance"], e.bg["advance"], 1, 1, 1)
+}
+
+// stepTokenSample runs one forward + LM + argmax + advance; maps 4 bytes from hist.
 func (e *hybridEngine) stepTokenSample(id uint32) (uint32, error) {
-	e.queue.WriteBuffer(e.step, 0, packU32(uint32(e.pos), 0))
 	e.queue.WriteBuffer(e.token, 0, packU32(id))
+	e.queue.WriteBuffer(e.step, 0, packU32(uint32(e.pos), 0))
 
 	enc, err := e.device.CreateCommandEncoder(nil)
 	if err != nil {
@@ -816,25 +833,48 @@ func (e *hybridEngine) stepTokenSample(id uint32) (uint32, error) {
 	pass := enc.BeginComputePass(nil)
 	e.disp(pass, e.pipe["binembed"], e.bg["embed"], (uint32(e.hiddenN)+63)/64, 1, 1)
 	e.recordLayers(pass)
-	e.disp(pass, e.pipe["bingemv"], e.bg["lm"], binWG(e.vocabN), 1, 1)
-	e.disp(pass, e.pipe["argmax"], e.bg["argmax"], 1, 1, 1)
-	e.disp(pass, e.pipe["inc_pos"], e.bg["inc_pos"], 1, 1, 1)
+	e.recordSample(pass)
 	pass.End()
-	enc.CopyBufferToBuffer(e.outTok, 0, e.stagingTok, 0, 4)
-	cmd, err := enc.Finish(nil)
-	if err != nil {
-		return 0, err
-	}
-	e.queue.Submit(cmd)
-	tok, err := e.readTok()
+	toks, err := e.runHist(enc, 1)
 	if err != nil {
 		return 0, err
 	}
 	e.pos++
-	return tok, nil
+	return toks[0], nil
 }
 
-// prefillSample runs prompt tokens in one GPU submit where possible; argmax on last.
+// decodeChunkSample runs k decode steps in one submit (embed←token, sample+advance each).
+// GPU token/pos must already be valid (typically after PrefillSample / prior chunk).
+func (e *hybridEngine) decodeChunkSample(k int) ([]uint32, error) {
+	if k < 1 {
+		return nil, fmt.Errorf("fusedgpu: decode chunk k < 1")
+	}
+	if e.pos+k > e.maxSeq {
+		return nil, fmt.Errorf("fusedgpu: decode would exceed maxSeq %d (pos=%d k=%d)", e.maxSeq, e.pos, k)
+	}
+	// Keep GPU pos; reset hist write index so this chunk packs contiguously.
+	e.queue.WriteBuffer(e.step, 0, packU32(uint32(e.pos), 0))
+
+	enc, err := e.device.CreateCommandEncoder(nil)
+	if err != nil {
+		return nil, err
+	}
+	pass := enc.BeginComputePass(nil)
+	for i := 0; i < k; i++ {
+		e.disp(pass, e.pipe["binembed"], e.bg["embed"], (uint32(e.hiddenN)+63)/64, 1, 1)
+		e.recordLayers(pass)
+		e.recordSample(pass)
+	}
+	pass.End()
+	toks, err := e.runHist(enc, k)
+	if err != nil {
+		return nil, err
+	}
+	e.pos += k
+	return toks, nil
+}
+
+// prefillSample runs prompt tokens in one GPU submit; argmax+advance on last.
 func (e *hybridEngine) prefillSample(ids []uint32) (uint32, error) {
 	if len(ids) == 0 {
 		return 0, fmt.Errorf("fusedgpu: empty ids")
@@ -843,10 +883,11 @@ func (e *hybridEngine) prefillSample(ids []uint32) (uint32, error) {
 		return 0, fmt.Errorf("fusedgpu: prompt len %d > maxSeq %d", len(ids), e.maxSeq)
 	}
 	if len(ids) == 1 {
+		// Single-token prompt: embed from token path + sample.
+		e.pos = 0
 		return e.stepTokenSample(ids[0])
 	}
 
-	// Upload full prompt; step[0] indexes into it for embed_p.
 	e.queue.WriteBuffer(e.promptBuf, 0, u32Bytes(ids))
 	e.queue.WriteBuffer(e.step, 0, packU32(0, 0))
 	e.pos = 0
@@ -860,25 +901,63 @@ func (e *hybridEngine) prefillSample(ids []uint32) (uint32, error) {
 	for i := 0; i < n; i++ {
 		e.disp(pass, e.pipe["binembed_p"], e.bg["embed_p"], (uint32(e.hiddenN)+63)/64, 1, 1)
 		e.recordLayers(pass)
-		if i+1 == n {
-			e.disp(pass, e.pipe["bingemv"], e.bg["lm"], binWG(e.vocabN), 1, 1)
-			e.disp(pass, e.pipe["argmax"], e.bg["argmax"], 1, 1, 1)
+		if i+1 < n {
+			e.disp(pass, e.pipe["inc_pos"], e.bg["inc_pos"], 1, 1, 1)
+		} else {
+			e.recordSample(pass)
 		}
-		e.disp(pass, e.pipe["inc_pos"], e.bg["inc_pos"], 1, 1, 1)
 	}
 	pass.End()
-	enc.CopyBufferToBuffer(e.outTok, 0, e.stagingTok, 0, 4)
-	cmd, err := enc.Finish(nil)
-	if err != nil {
-		return 0, err
-	}
-	e.queue.Submit(cmd)
-	tok, err := e.readTok()
+	toks, err := e.runHist(enc, 1)
 	if err != nil {
 		return 0, err
 	}
 	e.pos = n
-	return tok, nil
+	return toks[0], nil
+}
+
+func (e *hybridEngine) runHist(enc *wgpu.CommandEncoder, histCount int) ([]uint32, error) {
+	bytes := uint64(histCount * 4)
+	if bytes < 4 {
+		bytes = 4
+	}
+	enc.CopyBufferToBuffer(e.histBuf, 0, e.stagingHist, 0, bytes)
+	cmd, err := enc.Finish(nil)
+	if err != nil {
+		return nil, err
+	}
+	e.queue.Submit(cmd)
+
+	done := make(chan struct{})
+	var st wgpu.BufferMapAsyncStatus
+	if err := e.stagingHist.MapAsync(wgpu.MapModeRead, 0, bytes, func(status wgpu.BufferMapAsyncStatus) {
+		st = status
+		close(done)
+	}); err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(120 * time.Second)
+	for {
+		e.device.Poll(false, nil)
+		select {
+		case <-done:
+			if st != wgpu.BufferMapAsyncStatusSuccess {
+				return nil, fmt.Errorf("fusedgpu hybrid hist MapAsync %v", st)
+			}
+			raw := e.stagingHist.GetMappedRange(0, uint(bytes))
+			out := make([]uint32, histCount)
+			for i := 0; i < histCount; i++ {
+				out[i] = binary.LittleEndian.Uint32(raw[i*4 : i*4+4])
+			}
+			e.stagingHist.Unmap()
+			return out, nil
+		default:
+			if time.Now().After(deadline) {
+				return nil, fmt.Errorf("fusedgpu hybrid hist MapAsync timeout")
+			}
+			runtime.Gosched()
+		}
+	}
 }
 
 func (e *hybridEngine) readTok() (uint32, error) {

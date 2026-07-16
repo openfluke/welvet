@@ -112,6 +112,31 @@ func (eng *HybridEngine) DecodeSample(tok uint32) (uint32, error) {
 	return eng.e.stepTokenSample(tok)
 }
 
+// DecodeChunk runs k decode steps in one GPU submit (one MapAsync for k tokens).
+// Requires GPU token/pos already set (after PrefillSample or a prior chunk).
+func (eng *HybridEngine) DecodeChunk(k int) ([]uint32, error) {
+	if eng == nil || eng.e == nil {
+		return nil, fmt.Errorf("fusedgpu: nil hybrid engine")
+	}
+	return eng.e.decodeChunkSample(k)
+}
+
+// Pos returns the current sequence position (prompt tokens processed + decode advances).
+func (eng *HybridEngine) Pos() int {
+	if eng == nil || eng.e == nil {
+		return 0
+	}
+	return eng.e.pos
+}
+
+// MaxSeq returns the engine context limit.
+func (eng *HybridEngine) MaxSeq() int {
+	if eng == nil || eng.e == nil {
+		return 0
+	}
+	return eng.e.maxSeq
+}
+
 // AdapterName returns the bound GPU adapter name.
 func (eng *HybridEngine) AdapterName() string {
 	if eng == nil || eng.e == nil || eng.e.adapter == nil {
