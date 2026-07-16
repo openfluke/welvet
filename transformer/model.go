@@ -53,7 +53,8 @@ type Model struct {
 	// gpu holds *fusedgpu.Engine when gpu_fuse profile synced (see gpu.go).
 	gpu any
 
-	scratch *fwdScratch
+	scratch       *fwdScratch
+	logitsScratch []float32 // reused LM-head output
 }
 
 // FusedGPUReady reports whether the full fused GPU decoder can run.

@@ -2,7 +2,6 @@ package dense
 
 import (
 	"fmt"
-	"math"
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/quant"
@@ -37,45 +36,15 @@ func forwardSIMDQ8_0[T core.Numeric](l *Layer, x, y []T, batch, in, out int) err
 	if b == nil || b.Format != quant.FormatQ8_0 {
 		return fmt.Errorf("dense: Q8_0 packed missing")
 	}
-	const bw, bb = 32, 36
-	n := out * in
-	blocks := (n + bw - 1) / bw
-	if len(b.Raw) < blocks*bb {
-		return fmt.Errorf("dense: Q8_0 raw short")
+	quant.EnsureQ8SIMDCache(b)
+	if len(b.Scales) == 0 || len(b.Int8QS) < out*in {
+		return fmt.Errorf("dense: Q8_0 SIMD cache missing")
 	}
-	xq := make([]int8, in)
-	wBlk := make([]int8, bw)
 	for bat := 0; bat < batch; bat++ {
-		xF := core.SliceAsFloat32(x[bat*in : (bat+1)*in])
-		actScale := quantizeActsI8(xF, xq)
-		yF := make([]float32, out)
-		for o := 0; o < out; o++ {
-			sum := 0.0
-			if in%bw == 0 {
-				for c0 := 0; c0 < in; c0 += bw {
-					ii := o*in + c0
-					boff := (ii / bw) * bb
-					sc := math.Float32frombits(uint32(b.Raw[boff]) | uint32(b.Raw[boff+1])<<8 |
-						uint32(b.Raw[boff+2])<<16 | uint32(b.Raw[boff+3])<<24)
-					for j := 0; j < bw; j++ {
-						wBlk[j] = int8(b.Raw[boff+4+j])
-					}
-					acc := simd.DotI8Tile(xq[c0:], wBlk, 0, 0, bw, 0)
-					sum += float64(acc) * float64(sc) * float64(actScale)
-				}
-			} else {
-				for c := 0; c < in; c++ {
-					ii := o*in + c
-					boff := (ii / bw) * bb
-					sc := math.Float32frombits(uint32(b.Raw[boff]) | uint32(b.Raw[boff+1])<<8 |
-						uint32(b.Raw[boff+2])<<16 | uint32(b.Raw[boff+3])<<24)
-					q := int8(b.Raw[boff+4+(ii%bw)])
-					sum += float64(int32(xq[c])*int32(q)) * float64(sc) * float64(actScale)
-				}
-			}
-			yF[o] = float32(sum)
-		}
-		core.SliceFromFloat32(yF, y[bat*out:(bat+1)*out])
+		xRow := core.SliceAsFloat32(x[bat*in : (bat+1)*in])
+		writeGemvF32(y[bat*out:(bat+1)*out], out, func(dst []float32) {
+			gemvQ8ParallelF32(b.Scales, b.Int8QS, xRow, dst, out, in)
+		})
 	}
 	return nil
 }

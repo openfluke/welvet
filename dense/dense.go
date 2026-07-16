@@ -13,6 +13,9 @@ type Layer struct {
 	Core    core.Layer
 	Weights *weights.Store
 	Exec    core.ExecConfig
+
+	// Reusable forward buffers (float32 LM path) — avoids NewTensor per GEMV.
+	fwdOut []float32
 }
 
 // New creates a Dense layer with zero weights in the given dtype (FormatNone).
@@ -112,6 +115,16 @@ func dims[T core.Numeric](l *Layer, input *core.Tensor[T]) (batch, in, out int, 
 }
 
 func applyBiasAct[T core.Numeric](pre, post []T, bias []float64, act core.ActivationType, batch, out int) {
+	n := batch * out
+	if n == 0 {
+		return
+	}
+	if act == core.ActivationLinear && (bias == nil || len(bias) == 0) {
+		if len(post) >= n && (len(pre) < 1 || len(post) < 1 || &pre[0] != &post[0]) {
+			copy(post[:n], pre[:n])
+		}
+		return
+	}
 	for b := 0; b < batch; b++ {
 		for o := 0; o < out; o++ {
 			i := b*out + o
@@ -123,4 +136,10 @@ func applyBiasAct[T core.Numeric](pre, post []T, bias []float64, act core.Activa
 			post[i] = core.Activate(core.FromFloat64[T](v), act)
 		}
 	}
+}
+
+// linearNoBias reports whether forward can alias post=pre and skip applyBiasAct work.
+func linearNoBias(l *Layer) bool {
+	return l != nil && l.Core.Activation == core.ActivationLinear &&
+		(l.Weights == nil || len(l.Weights.Bias) == 0)
 }

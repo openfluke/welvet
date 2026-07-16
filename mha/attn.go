@@ -7,11 +7,15 @@ import "math"
 // Self-attn: kvLen is the number of valid KV positions (typically seqBase+seqLen for
 // causal decode cache, or seqLen for a fresh bidirectional pass starting at 0).
 // Cross-attn: seqBase is usually 0; kvLen = context length; Q is query seq only.
+//
+// scoresScratch is optional reused buffer (grown as needed) — avoids per-head allocs
+// on the causal decode path (Lucy-style).
 func attnForward(
 	cfg Config,
 	attnOut, Q, cacheK, cacheV []float64,
 	seqLen, seqBase, kvLen, msl, qDim, kvDim int,
 	allow func(qPos, kPos int) bool,
+	scoresScratch *[]float64,
 ) {
 	numHeads, numKVHeads, headDim := cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim
 	headsPerKV := numHeads / numKVHeads
@@ -19,14 +23,50 @@ func attnForward(
 	if allow == nil {
 		allow = func(q, k int) bool { return Allow(cfg, q, k) }
 	}
+	causalFast := cfg.Mode == ModeSelf && cfg.Mask == MaskCausal && cfg.Pos != PosALiBi
+
 	for s := 0; s < seqLen; s++ {
 		qPos := seqBase + s
 		for h := 0; h < numHeads; h++ {
 			kvHead := h / headsPerKV
-			scores := make([]float64, 0, kvLen)
+			qOff := s*qDim + h*headDim
+			aOff := s*qDim + h*headDim
+
+			if causalFast {
+				need := qPos + 1
+				scores := attnScoresBuf(scoresScratch, need)
+				maxScore := float64(-1e9)
+				for kPos := 0; kPos <= qPos; kPos++ {
+					kIdx := kPos % msl
+					var dot float64
+					kBase := kIdx*kvDim + kvHead*headDim
+					for d := 0; d < headDim; d++ {
+						dot += Q[qOff+d] * cacheK[kBase+d]
+					}
+					score := dot * scale
+					scores[kPos] = score
+					if score > maxScore {
+						maxScore = score
+					}
+				}
+				var expSum float64
+				for kPos := 0; kPos <= qPos; kPos++ {
+					scores[kPos] = math.Exp(scores[kPos] - maxScore)
+					expSum += scores[kPos]
+				}
+				for d := 0; d < headDim; d++ {
+					var sum float64
+					for kPos := 0; kPos <= qPos; kPos++ {
+						sum += scores[kPos] * cacheV[(kPos%msl)*kvDim+kvHead*headDim+d]
+					}
+					attnOut[aOff+d] = sum / expSum
+				}
+				continue
+			}
+
+			scores := attnScoresBuf(scoresScratch, kvLen)[:0]
 			kPositions := make([]int, 0, kvLen)
 			maxScore := float64(-1e9)
-			qOff := s*qDim + h*headDim
 			for kPos := 0; kPos < kvLen; kPos++ {
 				if !allow(qPos, kPos) {
 					continue
@@ -45,7 +85,6 @@ func attnForward(
 				}
 			}
 			if len(scores) == 0 {
-				aOff := s*qDim + h*headDim
 				for d := 0; d < headDim; d++ {
 					attnOut[aOff+d] = 0
 				}
@@ -56,7 +95,6 @@ func attnForward(
 				scores[i] = math.Exp(scores[i] - maxScore)
 				expSum += scores[i]
 			}
-			aOff := s*qDim + h*headDim
 			for d := 0; d < headDim; d++ {
 				var sum float64
 				for i, kPos := range kPositions {
@@ -67,6 +105,17 @@ func attnForward(
 			}
 		}
 	}
+}
+
+func attnScoresBuf(scratch *[]float64, n int) []float64 {
+	if scratch == nil {
+		return make([]float64, n)
+	}
+	if cap(*scratch) < n {
+		*scratch = make([]float64, n)
+	}
+	*scratch = (*scratch)[:n]
+	return *scratch
 }
 
 // attnBackward accumulates into gQ [seq*qDim], gK/gV [msl*kvDim].

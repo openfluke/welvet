@@ -95,7 +95,10 @@ func lastRow(t *core.Tensor[float32], hidden int) []float32 {
 }
 
 func (m *Model) applyLMHead(hidden []float32) ([]float32, error) {
-	logits := make([]float32, m.VocabSize)
+	if cap(m.logitsScratch) < m.VocabSize {
+		m.logitsScratch = make([]float32, m.VocabSize)
+	}
+	logits := m.logitsScratch[:m.VocabSize]
 	store, err := m.lmHeadStore()
 	if err != nil {
 		return nil, err
@@ -104,24 +107,24 @@ func (m *Model) applyLMHead(hidden []float32) ([]float32, error) {
 		if err := dense.MatVecWebGPU(store, hidden, logits, 1, m.HiddenSize, m.VocabSize); err != nil {
 			return nil, fmt.Errorf("lm_head gpu: %w", err)
 		}
-		return logits, nil
+		out := make([]float32, m.VocabSize)
+		copy(out, logits)
+		return out, nil
 	}
-	if store.Format == quant.FormatQ4_0 && store.Packed != nil {
-		if err := dense.MatVecQ4_0Blob(store.Packed, hidden, logits); err != nil {
-			return nil, fmt.Errorf("lm_head q4: %w", err)
-		}
-		return logits, nil
-	}
-	if store.Format != quant.FormatNone && store.Packed != nil {
-		if err := weights.MatVec(store, hidden, logits); err != nil {
+	if store.Packed != nil && store.Format != quant.FormatNone {
+		if err := dense.MatVecPackedBlob(store.Packed, hidden, logits); err != nil {
 			return nil, fmt.Errorf("lm_head packed: %w", err)
 		}
-		return logits, nil
+		out := make([]float32, m.VocabSize)
+		copy(out, logits)
+		return out, nil
 	}
 	if err := weights.MatVec(store, hidden, logits); err != nil {
 		return nil, fmt.Errorf("lm_head: %w", err)
 	}
-	return logits, nil
+	out := make([]float32, m.VocabSize)
+	copy(out, logits)
+	return out, nil
 }
 
 func (m *Model) lmHeadStore() (*weights.Store, error) {

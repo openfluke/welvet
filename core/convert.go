@@ -92,8 +92,11 @@ func FromFloat64[T Numeric](v float64) T {
 	}
 }
 
-// SliceAsFloat64 copies a Numeric slice into float64.
+// SliceAsFloat64 views []float64 in place; otherwise copies Numeric → float64.
 func SliceAsFloat64[T Numeric](in []T) []float64 {
+	if f64, ok := any(in).([]float64); ok {
+		return f64
+	}
 	out := make([]float64, len(in))
 	for i, v := range in {
 		out[i] = AsFloat64(v)
@@ -103,6 +106,10 @@ func SliceAsFloat64[T Numeric](in []T) []float64 {
 
 // SliceFromFloat64 writes float64 into out[i] = FromFloat64[T](in[i]).
 func SliceFromFloat64[T Numeric](in []float64, out []T) {
+	if f64, ok := any(out).([]float64); ok {
+		copy(f64, in)
+		return
+	}
 	n := len(in)
 	if len(out) < n {
 		n = len(out)
@@ -112,8 +119,12 @@ func SliceFromFloat64[T Numeric](in []float64, out []T) {
 	}
 }
 
-// SliceAsFloat32 copies Numeric → float32 (for Plan 9 f32 / ggml pack bridges only).
+// SliceAsFloat32 views []float32 in place; otherwise copies Numeric → float32.
+// In-place view is required for LM/decode SIMD fuse (no per-GEMV alloc/copy).
 func SliceAsFloat32[T Numeric](in []T) []float32 {
+	if f32, ok := any(in).([]float32); ok {
+		return f32
+	}
 	out := make([]float32, len(in))
 	for i, v := range in {
 		out[i] = float32(AsFloat64(v))
@@ -121,8 +132,12 @@ func SliceAsFloat32[T Numeric](in []T) []float32 {
 	return out
 }
 
-// SliceFromFloat32 writes float32 into Numeric out.
+// SliceFromFloat32 writes float32 into Numeric out (copy when out is []float32).
 func SliceFromFloat32[T Numeric](in []float32, out []T) {
+	if f32, ok := any(out).([]float32); ok {
+		copy(f32, in)
+		return
+	}
 	n := len(in)
 	if len(out) < n {
 		n = len(out)

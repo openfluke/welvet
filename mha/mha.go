@@ -39,8 +39,9 @@ type Layer struct {
 	KVOffset int
 
 	// Decode scratch (reused when seqLen==1 incremental decode).
-	DecodeScratchQ    []float64
-	DecodeScratchAttn []float64
+	DecodeScratchQ      []float64
+	DecodeScratchAttn   []float64
+	DecodeScratchScores []float64 // reused softmax scores (causal decode)
 }
 
 // MixerKind identifies this layer under the seqmix contract.

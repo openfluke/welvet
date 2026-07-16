@@ -173,7 +173,7 @@ func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 
 		attnOut := l.DecodeScratchAttn[:lay.seqLen*qDim]
 		attnForward(cfg, attnOut, Q, l.KVCacheK, l.KVCacheV,
-			lay.seqLen, seqBase, kvLen, msl, qDim, kvDim, allow)
+			lay.seqLen, seqBase, kvLen, msl, qDim, kvDim, allow, &l.DecodeScratchScores)
 		for s := 0; s < lay.seqLen; s++ {
 			tok := b*lay.seqLen + s
 			for i := 0; i < qDim; i++ {

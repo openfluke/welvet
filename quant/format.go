@@ -120,6 +120,8 @@ type Blob struct {
 	BlockWeights int
 	// Q4Packed is optional u32 SIMD view (4 words / Q4_0 block); see EnsureQ4SIMDCache.
 	Q4Packed []uint32
+	// Int8QS is optional projected int8 codes for Q8_0 / Q5_* fused SIMD (one per weight).
+	Int8QS []int8
 }
 
 // ParseFormatName maps ENTITY header / blob format strings to Format.

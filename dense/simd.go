@@ -29,8 +29,35 @@ func ForwardSIMD[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 	if err != nil {
 		return nil, nil, err
 	}
+	n := batch * out
+
+	// float32 + Linear+no-bias: reuse layer scratch (Lucy-style — no NewTensor/GEMV).
+	if _, ok := any(input.Data).([]float32); ok && linearNoBias(l) {
+		if len(l.fwdOut) < n {
+			l.fwdOut = make([]float32, n)
+		}
+		dst := l.fwdOut[:n]
+		yAny := any(dst).([]T) // T must be float32 here
+		switch {
+		case l.Weights.Format != quant.FormatNone && l.Weights.Packed != nil:
+			if err := forwardSIMDPacked(l, input.Data, yAny, batch, in, out); err != nil {
+				return nil, nil, err
+			}
+		default:
+			if err := forwardSIMDByWire(l, input.Data, yAny, batch, in, out); err != nil {
+				return nil, nil, err
+			}
+		}
+		t := &core.Tensor[T]{Shape: []int{batch, out}, Data: yAny}
+		return t, t, nil
+	}
+
 	pre = core.NewTensor[T](batch, out)
-	post = core.NewTensor[T](batch, out)
+	if linearNoBias(l) {
+		post = pre
+	} else {
+		post = core.NewTensor[T](batch, out)
+	}
 
 	switch {
 	case l.Weights.Format != quant.FormatNone && l.Weights.Packed != nil:
@@ -43,7 +70,9 @@ func ForwardSIMD[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 		}
 	}
 
-	applyBiasAct(pre.Data, post.Data, l.Weights.Bias, l.Core.Activation, batch, out)
+	if post != pre {
+		applyBiasAct(pre.Data, post.Data, l.Weights.Bias, l.Core.Activation, batch, out)
+	}
 	return pre, post, nil
 }
 
@@ -264,17 +293,9 @@ func forwardSIMDQ4_0[T core.Numeric](l *Layer, x, y []T, batch, in, out int) err
 	}
 	for b := 0; b < batch; b++ {
 		xRow := core.SliceAsFloat32(x[b*in : (b+1)*in])
-		yF := make([]float32, out)
-		o := 0
-		for ; o+4 <= out && in%32 == 0; o += 4 {
-			var tmp [4]float32
-			simd.DotQ4_0Rows4(xRow, scales, packed, o*in, in, tmp[:])
-			copy(yF[o:o+4], tmp[:])
-		}
-		for ; o < out; o++ {
-			yF[o] = float32(simd.DotQ4_0Row(xRow, scales, packed, o*in, in, 0))
-		}
-		core.SliceFromFloat32(yF, y[b*out:(b+1)*out])
+		writeGemvF32(y[b*out:(b+1)*out], out, func(dst []float32) {
+			gemvQ4_0ParallelF32(scales, packed, xRow, dst, out, in)
+		})
 	}
 	return nil
 }
@@ -532,6 +553,7 @@ func q4BlobToSIMD(b *quant.Blob) (scales []float32, packed []uint32, ok bool) {
 }
 
 // MatVecQ4_0Blob computes y = W @ x using SIMD Q4_0 kernels (LM head / standalone).
+// Parallel across output rows like Lucy gemvQ4_0PackedParallelF32.
 func MatVecQ4_0Blob(b *quant.Blob, x, y []float32) error {
 	scales, packed, ok := q4BlobToSIMD(b)
 	if !ok {
@@ -541,14 +563,47 @@ func MatVecQ4_0Blob(b *quant.Blob, x, y []float32) error {
 	if len(x) < in || len(y) < out {
 		return fmt.Errorf("dense: Q4_0 matvec shape")
 	}
-	o := 0
-	for ; o+4 <= out && in%32 == 0; o += 4 {
-		var tmp [4]float32
-		simd.DotQ4_0Rows4(x, scales, packed, o*in, in, tmp[:])
-		copy(y[o:o+4], tmp[:])
-	}
-	for ; o < out; o++ {
-		y[o] = float32(simd.DotQ4_0Row(x, scales, packed, o*in, in, 0))
-	}
+	gemvQ4_0ParallelF32(scales, packed, x, y, out, in)
 	return nil
+}
+
+// MatVecPackedBlob dispatches fused parallel GEMV for baked quant LM-head / standalone.
+func MatVecPackedBlob(b *quant.Blob, x, y []float32) error {
+	if b == nil {
+		return fmt.Errorf("dense: nil packed blob")
+	}
+	in, out := b.Cols, b.Rows
+	if len(x) < in || len(y) < out {
+		return fmt.Errorf("dense: packed matvec shape")
+	}
+	switch b.Format {
+	case quant.FormatQ4_0:
+		return MatVecQ4_0Blob(b, x, y)
+	case quant.FormatQ8_0:
+		quant.EnsureQ8SIMDCache(b)
+		if len(b.Scales) == 0 || len(b.Int8QS) < out*in {
+			return fmt.Errorf("dense: Q8_0 SIMD cache missing")
+		}
+		gemvQ8ParallelF32(b.Scales, b.Int8QS, x, y, out, in)
+		return nil
+	case quant.FormatQ4_1, quant.FormatQ5_0, quant.FormatQ5_1:
+		quant.EnsureFusedSIMDCache(b)
+		switch b.Format {
+		case quant.FormatQ4_1:
+			return matVecQ4_1Fused(b, x, y)
+		case quant.FormatQ5_0:
+			return matVecQ5_0Fused(b, x, y)
+		default:
+			return matVecQ5_1Fused(b, x, y)
+		}
+	default:
+		quant.EnsureFusedSIMDCache(b)
+		if b.Format.IsKQuant() {
+			return matVecKSIMD(b, x, y)
+		}
+		if isIQ(b.Format) {
+			return matVecIQSIMD(b, x, y)
+		}
+		return fmt.Errorf("dense: MatVecPackedBlob unsupported %s", b.Format)
+	}
 }

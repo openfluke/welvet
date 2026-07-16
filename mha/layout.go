@@ -50,13 +50,25 @@ func (lay layout) idx(b, s, j int) int { return lay.base(b) + s*lay.dModel + j }
 
 func flattenTokens[T core.Numeric](input *core.Tensor[T], lay layout) *core.Tensor[T] {
 	bs := lay.batch * lay.seqLen
+	// Already [tokens, d_model] contiguous — reuse (decode / flat forwards).
+	if len(input.Shape) == 2 && input.Shape[0] == bs && input.Shape[1] == lay.dModel {
+		return input
+	}
 	out := core.NewTensor[T](bs, lay.dModel)
 	copy(out.Data, input.Data[:bs*lay.dModel])
 	return out
 }
 
 func reshapeSeq[T core.Numeric](flat *core.Tensor[T], lay layout, last int) *core.Tensor[T] {
+	n := lay.batch * lay.seqLen * last
+	// Prefer view: same backing store, new shape (avoids copy on decode).
+	if flat != nil && len(flat.Data) >= n {
+		return &core.Tensor[T]{
+			Shape: []int{lay.batch, lay.seqLen, last},
+			Data:  flat.Data[:n],
+		}
+	}
 	out := core.NewTensor[T](lay.batch, lay.seqLen, last)
-	copy(out.Data, flat.Data[:lay.batch*lay.seqLen*last])
+	copy(out.Data, flat.Data[:n])
 	return out
 }
