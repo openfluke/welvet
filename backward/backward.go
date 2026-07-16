@@ -15,6 +15,7 @@ import (
 	"github.com/openfluke/welvet/layernorm"
 	"github.com/openfluke/welvet/lstm"
 	"github.com/openfluke/welvet/mha"
+	"github.com/openfluke/welvet/residual"
 	"github.com/openfluke/welvet/rmsnorm"
 	"github.com/openfluke/welvet/rnn"
 	"github.com/openfluke/welvet/sequential"
@@ -141,6 +142,12 @@ func dispatchBwd[T core.Numeric](st forward.Step[T], gradOut *core.Tensor[T]) (g
 			return nil, nil, fmt.Errorf("sequential cell Op is %T", st.Cell.Op)
 		}
 		return sequential.Backward(ql, gradOut, st.Input, st.Pre)
+	case core.LayerResidual:
+		rl, ok := st.Cell.Op.(*residual.Layer)
+		if !ok || rl == nil {
+			return nil, nil, fmt.Errorf("residual cell Op is %T", st.Cell.Op)
+		}
+		return residual.Backward(rl, gradOut, st.Input, st.Pre)
 	default:
 		return nil, nil, fmt.Errorf("unsupported layer type %s", st.Cell.Layer.Type)
 	}

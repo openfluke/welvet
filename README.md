@@ -33,9 +33,9 @@
 | **Dense** FormatNone × 34 × CPU/SIMD/WebGPU fwd+bwd | ✅ |
 | **Dense** block-quant × SIMD/WebGPU (all 20 formats on-device fwd+bwd) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
-| `forward/` / `backward/` volumetric Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential walk | ✅ |
-| `training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential) | ✅ |
-| Remaining layers (residual, parallel, …) | ⬜ |
+| `forward/` / `backward/` volumetric Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential + Residual walk | ✅ |
+| `training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential + Residual) | ✅ |
+| Remaining layers (parallel, …) | ⬜ |
 | Model IO / transformer / entity / tokenizer / hf | ⬜ |
 | Accel / donate / fountain / dna / … | ⬜ |
 | Full v1 matrix | ⬜ |
@@ -55,6 +55,7 @@ cd w2a && go test ./tests/lstm -v
 cd w2a && go test ./tests/embedding -v
 cd w2a && go test ./tests/softmax -v
 cd w2a && go test ./tests/sequential -v
+cd w2a && go test ./tests/residual -v
 ```
 
 ---
@@ -198,10 +199,11 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `embedding/` | Token gather/scatter; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `softmax/` | Weightless Softmax (last-axis/Grid); ALU × backends; harness dtype/quant axes | ✅ |
 | `sequential/` | Dense→Dense Sequential compose; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `residual/` | Residual y=F(x)+x (Dense F); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | ✅ |
-| `forward/` | Grid walk z→y→x→l; Dense … Softmax + Sequential dispatch | ✅ |
-| `backward/` | Reverse tape over Dense … Softmax + Sequential | ✅ |
-| `training/` | MSE + SGD; ApplyGradSGD for Dense … Softmax / Sequential | ✅ |
+| `forward/` | Grid walk z→y→x→l; Dense … Sequential + Residual dispatch | ✅ |
+| `backward/` | Reverse tape over Dense … Sequential + Residual | ✅ |
+| `training/` | MSE + SGD; ApplyGradSGD for Dense … Sequential / Residual | ✅ |
 
 ### Layers (each needs CPU + SIMD + WebGPU × all dtype × all quant × fwd/bwd)
 
@@ -222,12 +224,12 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `embedding/` | Token gather/scatter; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
 | `softmax/` | Weightless Softmax last-axis/Grid + temp; ALU × backends; act sweep; train grids | ✅ |
 | `sequential/` | Dense→Dense Sequential compose; FormatNone×34 + quants × backends; act sweep; train grids | ✅ |
+| `residual/` | Residual y=F(x)+x (Dense F); FormatNone×34 + quants × backends; act sweep; train grids | ✅ |
 | `convt1/` | 1D transposed conv | ⬜ |
 | `convt2/` | 2D transposed conv | ⬜ |
 | `convt3/` | 3D transposed conv | ⬜ |
 | `kmeans/` | K-means | ⬜ |
 | `parallel/` | Parallel compose | ⬜ |
-| `residual/` | Residual | ⬜ |
 | `metacognition/` | Metacognition | ⬜ |
 
 ### Dense detail
@@ -423,6 +425,21 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/`
 | Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
 | Nested non-Dense children (Softmax/Residual/…) | ⬜ | ⬜ | ⬜ |
 
+### Residual detail
+
+| Feature | CPU | SIMD | WebGPU |
+|---------|:---:|:----:|:------:|
+| y = F(x) + x; F = Dense Dim→Dim (Depth≥1) | ✅ | ✅ via Dense | ✅ via Dense |
+| Skip grad: gradIn = ∂F/∂x + ∂L/∂y | ✅ | ✅ | ✅ |
+| F weights FormatNone × 34 — fwd+bwd | ✅ | ✅ | ✅ |
+| F weights all 20 quants — fwd+bwd | ✅ | ✅ | ✅ |
+| Activation `Tensor[T]` × all 15 `core.Numeric` kinds | ✅ | ✅ | ✅ |
+| Timed FormatNone + quant matrices in `w2a` | ✅ | ✅ | ✅ |
+| Gap census 34×20×3 | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
+| Nested non-Dense F / Parallel residual graft | ⬜ | ⬜ | ⬜ |
+
 ### Model / IO / runtime
 
 | Package | Features | Status |
@@ -454,7 +471,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/`
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `w2a/` | Interactive menu, dense + mha + swiglu + rmsnorm + layernorm + cnn1–3 + rnn + lstm + embedding + softmax + sequential suites, timed matrices, gap census | 🚧 |
+| `w2a/` | Interactive menu, dense + mha + swiglu + rmsnorm + layernorm + cnn1–3 + rnn + lstm + embedding + softmax + sequential + residual suites, timed matrices, gap census | 🚧 |
 
 ---
 
@@ -507,6 +524,7 @@ go test ./tests/lstm -v    # LSTM i/f/g/o; same coverage axes as Dense
 go test ./tests/embedding -v # token gather/scatter; same coverage axes as Dense
 go test ./tests/softmax -v   # weightless Softmax; ALU harness (no weight store)
 go test ./tests/sequential -v # Dense→Dense Sequential compose; same coverage axes as Dense
+go test ./tests/residual -v  # Residual y=F(x)+x; same coverage axes as Dense
 ```
 
 Docs: `w2a/docs/`.

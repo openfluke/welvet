@@ -1,5 +1,7 @@
-// Package residual is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package residual is Welvet Residual block (loom y = F(x) + x).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// F is an ordered list of Dense Dim→Dim children (same packing as Sequential).
+// Forward: fx = F(x); y = fx + x. Backward: gradIn = ∂F/∂x + ∂L/∂y.
+//
+// Contract: CPU tiled + SIMD + WebGPU via child Dense. No QAT. Tests in w2a.
 package residual

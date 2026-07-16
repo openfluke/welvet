@@ -18,6 +18,7 @@ import (
 	"github.com/openfluke/welvet/layernorm"
 	"github.com/openfluke/welvet/lstm"
 	"github.com/openfluke/welvet/mha"
+	"github.com/openfluke/welvet/residual"
 	"github.com/openfluke/welvet/rmsnorm"
 	"github.com/openfluke/welvet/rnn"
 	"github.com/openfluke/welvet/sequential"
@@ -131,6 +132,8 @@ func applyCell[T core.Numeric](op any, dW *core.Tensor[T], lr float64) error {
 		return softmax.ApplyGradSGD(v, dW, lr)
 	case *sequential.Layer:
 		return sequential.ApplyGradSGD(v, dW, lr)
+	case *residual.Layer:
+		return residual.ApplyGradSGD(v, dW, lr)
 	case GradApplier[T]:
 		return v.ApplyGradSGD(dW, lr)
 	default:
