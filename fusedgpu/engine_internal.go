@@ -27,23 +27,24 @@ type engine struct {
 
 	pipe map[string]*wgpu.ComputePipeline
 	bg   map[string]*wgpu.BindGroup // stable cached bind groups
+	owned []*wgpu.Buffer           // all device buffers for release()
 
 	embed, finalNorm *wgpu.Buffer
 	lmScales, lmW    *wgpu.Buffer
 	blocks           []blockGPU
 
 	// GPU control / scratch
-	step       *wgpu.Buffer // [pos, outCount]
-	token      *wgpu.Buffer // current input token
-	promptBuf  *wgpu.Buffer
-	histBuf    *wgpu.Buffer // generated tokens
+	step        *wgpu.Buffer // [pos, outCount]
+	token       *wgpu.Buffer // current input token
+	promptBuf   *wgpu.Buffer
+	histBuf     *wgpu.Buffer // generated tokens
 	stagingHist *wgpu.Buffer
 
-	hidden, normed        *wgpu.Buffer
-	qkvBuf, attnOut       *wgpu.Buffer // qkv = [Q|K|V]
-	qOff, kOff, vOff      uint64
+	hidden, normed         *wgpu.Buffer
+	qkvBuf, attnOut        *wgpu.Buffer // qkv = [Q|K|V]
+	qOff, kOff, vOff       uint64
 	qBytes, kBytes, vBytes uint64
-	inter, logits, outTok *wgpu.Buffer
+	inter, logits, outTok  *wgpu.Buffer
 
 	// Stable uniforms (shape constants — no per-step pos)
 	uGemvQDimH, uGemvHInter *wgpu.Buffer
@@ -116,9 +117,13 @@ func newEngine(m *modelCPU) (*engine, error) {
 	}
 
 	if err := e.uploadModel(); err != nil {
+		e.release()
 		return nil, err
 	}
-	e.allocScratch()
+	if err := e.allocScratch(); err != nil {
+		e.release()
+		return nil, err
+	}
 	e.initUniforms()
 	e.buildBindGroups()
 	fmt.Println("✅ GPU engine ready (chunked on-device decode)")
@@ -138,7 +143,7 @@ func (e *engine) createPipeline(wgsl string) (*wgpu.ComputePipeline, error) {
 	})
 }
 
-func (e *engine) mkBuf(label string, size uint64, usage wgpu.BufferUsage, data []byte) *wgpu.Buffer {
+func (e *engine) mkBuf(label string, size uint64, usage wgpu.BufferUsage, data []byte) (*wgpu.Buffer, error) {
 	if size < 64 {
 		size = 64
 	}
@@ -152,82 +157,148 @@ func (e *engine) mkBuf(label string, size uint64, usage wgpu.BufferUsage, data [
 	} else {
 		usage |= wgpu.BufferUsageCopyDst | wgpu.BufferUsageCopySrc
 	}
+	var b *wgpu.Buffer
+	var err error
 	if len(data) > 0 {
-		b, err := e.device.CreateBufferInit(&wgpu.BufferInitDescriptor{
+		b, err = e.device.CreateBufferInit(&wgpu.BufferInitDescriptor{
 			Label: label, Contents: data, Usage: usage,
 		})
-		if err != nil || b == nil {
-			panic(fmt.Sprintf("CreateBufferInit %s: %v", label, err))
-		}
-		return b
+	} else {
+		b, err = e.device.CreateBuffer(&wgpu.BufferDescriptor{Label: label, Size: size, Usage: usage})
 	}
-	b, err := e.device.CreateBuffer(&wgpu.BufferDescriptor{Label: label, Size: size, Usage: usage})
 	if err != nil || b == nil {
-		panic(fmt.Sprintf("CreateBuffer %s: %v", label, err))
+		return nil, fmt.Errorf("CreateBuffer %s: %w", label, err)
 	}
-	return b
+	e.owned = append(e.owned, b)
+	return b, nil
 }
 
-func (e *engine) uploadQ4(label string, m q4Mat) q4GPU {
-	return q4GPU{
-		scales:  e.mkBuf(label+"_s", uint64(len(m.scales)*4), wgpu.BufferUsageStorage, f32Bytes(m.scales)),
-		weights: e.mkBuf(label+"_w", uint64(len(m.packed)*4), wgpu.BufferUsageStorage, u32Bytes(m.packed)),
-		rows:    m.rows,
-		cols:    m.cols,
+func (e *engine) uploadQ4(label string, m q4Mat) (q4GPU, error) {
+	s, err := e.mkBuf(label+"_s", uint64(len(m.scales)*4), wgpu.BufferUsageStorage, f32Bytes(m.scales))
+	if err != nil {
+		return q4GPU{}, err
 	}
+	w, err := e.mkBuf(label+"_w", uint64(len(m.packed)*4), wgpu.BufferUsageStorage, u32Bytes(m.packed))
+	if err != nil {
+		return q4GPU{}, err
+	}
+	return q4GPU{scales: s, weights: w, rows: m.rows, cols: m.cols}, nil
 }
 
 func (e *engine) uploadModel() error {
 	m := e.m
-	e.embed = e.mkBuf("embed", uint64(len(m.embed)*4), wgpu.BufferUsageStorage, f32Bytes(m.embed))
-	e.finalNorm = e.mkBuf("fnorm", uint64(len(m.finalNorm)*4), wgpu.BufferUsageStorage, f32Bytes(m.finalNorm))
-	e.lmScales = e.mkBuf("lm_s", uint64(len(m.lmScales)*4), wgpu.BufferUsageStorage, f32Bytes(m.lmScales))
-	e.lmW = e.mkBuf("lm_w", uint64(len(m.lmPacked)*4), wgpu.BufferUsageStorage, u32Bytes(m.lmPacked))
+	var err error
+	if e.embed, err = e.mkBuf("embed", uint64(len(m.embed)*4), wgpu.BufferUsageStorage, f32Bytes(m.embed)); err != nil {
+		return err
+	}
+	if e.finalNorm, err = e.mkBuf("fnorm", uint64(len(m.finalNorm)*4), wgpu.BufferUsageStorage, f32Bytes(m.finalNorm)); err != nil {
+		return err
+	}
+	if e.lmScales, err = e.mkBuf("lm_s", uint64(len(m.lmScales)*4), wgpu.BufferUsageStorage, f32Bytes(m.lmScales)); err != nil {
+		return err
+	}
+	if e.lmW, err = e.mkBuf("lm_w", uint64(len(m.lmPacked)*4), wgpu.BufferUsageStorage, u32Bytes(m.lmPacked)); err != nil {
+		return err
+	}
 
 	e.blocks = make([]blockGPU, m.layers)
 	kvBytes := uint64(m.kvHeads * m.maxSeq * m.headDim * 4)
 	for i := range m.blocks {
 		b := &m.blocks[i]
 		g := &e.blocks[i]
-		g.attnNorm = e.mkBuf(fmt.Sprintf("n1_%d", i), uint64(len(b.attnNorm.w)*4), wgpu.BufferUsageStorage, f32Bytes(b.attnNorm.w))
-		g.mlpNorm = e.mkBuf(fmt.Sprintf("n2_%d", i), uint64(len(b.mlpNorm.w)*4), wgpu.BufferUsageStorage, f32Bytes(b.mlpNorm.w))
-		g.q = e.uploadQ4(fmt.Sprintf("q_%d", i), b.q)
-		g.k = e.uploadQ4(fmt.Sprintf("k_%d", i), b.k)
-		g.v = e.uploadQ4(fmt.Sprintf("v_%d", i), b.v)
-		g.o = e.uploadQ4(fmt.Sprintf("o_%d", i), b.o)
-		g.gate = e.uploadQ4(fmt.Sprintf("g_%d", i), b.gate)
-		g.up = e.uploadQ4(fmt.Sprintf("u_%d", i), b.up)
-		g.down = e.uploadQ4(fmt.Sprintf("d_%d", i), b.down)
-		g.kCache = e.mkBuf(fmt.Sprintf("kc_%d", i), kvBytes, wgpu.BufferUsageStorage, nil)
-		g.vCache = e.mkBuf(fmt.Sprintf("vc_%d", i), kvBytes, wgpu.BufferUsageStorage, nil)
+		if g.attnNorm, err = e.mkBuf(fmt.Sprintf("n1_%d", i), uint64(len(b.attnNorm.w)*4), wgpu.BufferUsageStorage, f32Bytes(b.attnNorm.w)); err != nil {
+			return err
+		}
+		if g.mlpNorm, err = e.mkBuf(fmt.Sprintf("n2_%d", i), uint64(len(b.mlpNorm.w)*4), wgpu.BufferUsageStorage, f32Bytes(b.mlpNorm.w)); err != nil {
+			return err
+		}
+		if g.q, err = e.uploadQ4(fmt.Sprintf("q_%d", i), b.q); err != nil {
+			return err
+		}
+		if g.k, err = e.uploadQ4(fmt.Sprintf("k_%d", i), b.k); err != nil {
+			return err
+		}
+		if g.v, err = e.uploadQ4(fmt.Sprintf("v_%d", i), b.v); err != nil {
+			return err
+		}
+		if g.o, err = e.uploadQ4(fmt.Sprintf("o_%d", i), b.o); err != nil {
+			return err
+		}
+		if g.gate, err = e.uploadQ4(fmt.Sprintf("g_%d", i), b.gate); err != nil {
+			return err
+		}
+		if g.up, err = e.uploadQ4(fmt.Sprintf("u_%d", i), b.up); err != nil {
+			return err
+		}
+		if g.down, err = e.uploadQ4(fmt.Sprintf("d_%d", i), b.down); err != nil {
+			return err
+		}
+		if g.kCache, err = e.mkBuf(fmt.Sprintf("kc_%d", i), kvBytes, wgpu.BufferUsageStorage, nil); err != nil {
+			return err
+		}
+		if g.vCache, err = e.mkBuf(fmt.Sprintf("vc_%d", i), kvBytes, wgpu.BufferUsageStorage, nil); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func (e *engine) allocScratch() {
+func (e *engine) allocScratch() error {
 	m := e.m
 	H := uint64(m.hidden * 4)
-	e.step = e.mkBuf("step", 64, wgpu.BufferUsageStorage, nil)
-	e.token = e.mkBuf("token", 64, wgpu.BufferUsageStorage, nil)
-	e.promptBuf = e.mkBuf("prompt", uint64(m.maxSeq*4), wgpu.BufferUsageStorage, nil)
-	e.histBuf = e.mkBuf("hist", uint64(m.maxSeq*4), wgpu.BufferUsageStorage, nil)
-	e.stagingHist = e.mkBuf("stageHist", uint64(m.maxSeq*4), wgpu.BufferUsageMapRead, nil)
-	e.hidden = e.mkBuf("h", H, wgpu.BufferUsageStorage, nil)
-	e.normed = e.mkBuf("norm", H, wgpu.BufferUsageStorage, nil)
+	var err error
+	if e.step, err = e.mkBuf("step", 64, wgpu.BufferUsageStorage, nil); err != nil {
+		return err
+	}
+	if e.token, err = e.mkBuf("token", 64, wgpu.BufferUsageStorage, nil); err != nil {
+		return err
+	}
+	if e.promptBuf, err = e.mkBuf("prompt", uint64(m.maxSeq*4), wgpu.BufferUsageStorage, nil); err != nil {
+		return err
+	}
+	if e.histBuf, err = e.mkBuf("hist", uint64(m.maxSeq*4), wgpu.BufferUsageStorage, nil); err != nil {
+		return err
+	}
+	if e.stagingHist, err = e.mkBuf("stageHist", uint64(m.maxSeq*4), wgpu.BufferUsageMapRead, nil); err != nil {
+		return err
+	}
+	if e.hidden, err = e.mkBuf("h", H, wgpu.BufferUsageStorage, nil); err != nil {
+		return err
+	}
+	if e.normed, err = e.mkBuf("norm", H, wgpu.BufferUsageStorage, nil); err != nil {
+		return err
+	}
 	e.qBytes = uint64(m.qDim * 4)
 	e.kBytes = uint64(m.kvDim * 4)
 	e.vBytes = uint64(m.kvDim * 4)
 	e.qOff, e.kOff, e.vOff = 0, e.qBytes, e.qBytes+e.kBytes
-	e.qkvBuf = e.mkBuf("qkv", e.qBytes+e.kBytes+e.vBytes, wgpu.BufferUsageStorage, nil)
-	e.attnOut = e.mkBuf("ao", e.qBytes, wgpu.BufferUsageStorage, nil)
-	e.inter = e.mkBuf("inter", uint64(m.intermediate*4), wgpu.BufferUsageStorage, nil)
-	e.logits = e.mkBuf("logits", uint64(m.vocab*4), wgpu.BufferUsageStorage, nil)
-	e.outTok = e.mkBuf("outTok", 64, wgpu.BufferUsageStorage, nil)
-	e.stagingLogits = e.mkBuf("stageLogits", uint64(m.vocab*4), wgpu.BufferUsageMapRead, nil)
+	if e.qkvBuf, err = e.mkBuf("qkv", e.qBytes+e.kBytes+e.vBytes, wgpu.BufferUsageStorage, nil); err != nil {
+		return err
+	}
+	if e.attnOut, err = e.mkBuf("ao", e.qBytes, wgpu.BufferUsageStorage, nil); err != nil {
+		return err
+	}
+	if e.inter, err = e.mkBuf("inter", uint64(m.intermediate*4), wgpu.BufferUsageStorage, nil); err != nil {
+		return err
+	}
+	if e.logits, err = e.mkBuf("logits", uint64(m.vocab*4), wgpu.BufferUsageStorage, nil); err != nil {
+		return err
+	}
+	if e.outTok, err = e.mkBuf("outTok", 64, wgpu.BufferUsageStorage, nil); err != nil {
+		return err
+	}
+	if e.stagingLogits, err = e.mkBuf("stageLogits", uint64(m.vocab*4), wgpu.BufferUsageMapRead, nil); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (e *engine) uniInit(label string, bytes []byte) *wgpu.Buffer {
-	return e.mkBuf(label, 256, wgpu.BufferUsageUniform, bytes)
+	b, err := e.mkBuf(label, 256, wgpu.BufferUsageUniform, bytes)
+	if err != nil {
+		panic(err) // uniforms are tiny; real OOM already hit during upload
+	}
+	return b
 }
 
 func (e *engine) initUniforms() {

@@ -9,7 +9,7 @@ type Engine struct {
 	e *engine
 }
 
-// Close releases GPU resources.
+// Close releases GPU resources (buffers, pipelines, device, adapter).
 func (eng *Engine) Close() {
 	if eng == nil || eng.e == nil {
 		return

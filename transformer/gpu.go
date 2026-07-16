@@ -3,10 +3,13 @@ package transformer
 import (
 	"fmt"
 
+	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/fusedgpu"
+	"github.com/openfluke/welvet/quant"
 )
 
-// SyncGPU uploads weights to the full fused WebGPU decoder (Q4 baked only).
+// SyncGPU uploads weights to the full fused WebGPU decoder.
+// Non-Q4 packs are projected to Q4_0 for upload; host entity format is unchanged.
 func (m *Model) SyncGPU() error {
 	if m == nil {
 		return fmt.Errorf("transformer: nil model")
@@ -23,10 +26,34 @@ func (m *Model) SyncGPU() error {
 		return fmt.Errorf("fusedgpu: %w", err)
 	}
 	m.gpu = eng
+	m.clearFloatCaches() // drop inflate scratch used for Q4 projection
 	return nil
 }
 
-// CloseGPU releases the fused GPU engine.
+// clearFloatCaches frees host F32Cache / Int8QS inflate views after GPU upload.
+func (m *Model) clearFloatCaches() {
+	clearBlob := func(b *quant.Blob) {
+		if b != nil {
+			b.F32Cache = nil
+		}
+	}
+	if m.lmHeadPacked != nil {
+		clearBlob(m.lmHeadPacked)
+	}
+	if m.lmHead != nil {
+		clearBlob(m.lmHead.Packed)
+	}
+	for i := range m.Blocks {
+		b := &m.Blocks[i]
+		for _, d := range []*dense.Layer{b.Attn.Q, b.Attn.K, b.Attn.V, b.Attn.O, b.FFN.Gate, b.FFN.Up, b.FFN.Down} {
+			if d != nil && d.Weights != nil {
+				clearBlob(d.Weights.Packed)
+			}
+		}
+	}
+}
+
+// CloseGPU releases the fused GPU engine and encourages VRAM reclaim.
 func (m *Model) CloseGPU() {
 	if m == nil || m.gpu == nil {
 		return
