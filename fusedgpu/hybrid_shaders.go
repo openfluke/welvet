@@ -11,8 +11,8 @@ struct Params { inputSize: u32, outputSize: u32, _p0: u32, _p1: u32, };
 @group(0) @binding(3) var<storage, read> weights: array<u32>;
 @group(0) @binding(4) var<storage, read_write> output: array<f32>;
 
-const TILE: u32 = 1024u;
-var<workgroup> xin: array<f32, 1024>;
+const TILE: u32 = 2048u;
+var<workgroup> xin: array<f32, 2048>;
 
 @compute @workgroup_size(64)
 fn main(
@@ -41,8 +41,8 @@ fn main(
                 var lim = 32u;
                 if (c + lim > n) { lim = n - c; }
                 for (var j: u32 = 0u; j < lim; j++) {
-                    var tw: f32 = -scale;
-                    if (((word >> j) & 1u) != 0u) { tw = scale; }
+                    let bit = (word >> j) & 1u;
+                    let tw = select(-scale, scale, bit != 0u);
                     sum += xin[c + j] * tw;
                 }
             }
@@ -65,8 +65,8 @@ struct Params { inputSize: u32, intermediate: u32, _p0: u32, _p1: u32, };
 @group(0) @binding(5) var<storage, read> upWeights: array<u32>;
 @group(0) @binding(6) var<storage, read_write> output: array<f32>;
 
-const TILE: u32 = 1024u;
-var<workgroup> xin: array<f32, 1024>;
+const TILE: u32 = 2048u;
+var<workgroup> xin: array<f32, 2048>;
 
 @compute @workgroup_size(64)
 fn main(
@@ -98,13 +98,9 @@ fn main(
                 var lim = 32u;
                 if (c + lim > n) { lim = n - c; }
                 for (var j: u32 = 0u; j < lim; j++) {
-                    var gt: f32 = -gScale;
-                    if (((gWord >> j) & 1u) != 0u) { gt = gScale; }
-                    var ut: f32 = -uScale;
-                    if (((uWord >> j) & 1u) != 0u) { ut = uScale; }
                     let xv = xin[c + j];
-                    gSum += xv * gt;
-                    uSum += xv * ut;
+                    gSum += xv * select(-gScale, gScale, ((gWord >> j) & 1u) != 0u);
+                    uSum += xv * select(-uScale, uScale, ((uWord >> j) & 1u) != 0u);
                 }
             }
         }
@@ -737,5 +733,417 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>) {
         stride = stride / 2u;
     }
     if (lane == 0u) { outTok[0] = bidx[0]; }
+}
+`
+
+// Residual fused into Binary GEMV: hidden[o] += row·x
+const shaderBinG128GEMVAdd = `
+struct Params { inputSize: u32, outputSize: u32, _p0: u32, _p1: u32, };
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> input: array<f32>;
+@group(0) @binding(2) var<storage, read> scales: array<f32>;
+@group(0) @binding(3) var<storage, read> weights: array<u32>;
+@group(0) @binding(4) var<storage, read_write> hidden: array<f32>;
+
+const TILE: u32 = 2048u;
+var<workgroup> xin: array<f32, 2048>;
+
+@compute @workgroup_size(64)
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let tid = lid.x;
+    let o = wg_id.x * 64u + tid;
+    let inN = params.inputSize;
+    let outN = params.outputSize;
+    var sum: f32 = 0.0;
+    var tile: u32 = 0u;
+    loop {
+        if (tile >= inN) { break; }
+        var n = TILE;
+        if (tile + n > inN) { n = inN - tile; }
+        for (var i = tid; i < n; i += 64u) {
+            xin[i] = input[tile + i];
+        }
+        workgroupBarrier();
+        if (o < outN) {
+            let wBase = o * inN + tile;
+            for (var c: u32 = 0u; c < n; c += 32u) {
+                let word = weights[(wBase + c) / 32u];
+                let scale = scales[(wBase + c) / 128u];
+                var lim = 32u;
+                if (c + lim > n) { lim = n - c; }
+                for (var j: u32 = 0u; j < lim; j++) {
+                    sum += xin[c + j] * select(-scale, scale, ((word >> j) & 1u) != 0u);
+                }
+            }
+        }
+        workgroupBarrier();
+        tile += TILE;
+    }
+    if (o < outN) { hidden[o] = hidden[o] + sum; }
+}
+`
+
+// Fused Q/K/V BinaryG128 — one shared xin load.
+const shaderBinG128QKV = `
+struct Params {
+    inputSize: u32,
+    qDim: u32,
+    kvDim: u32,
+    _pad: u32,
+};
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> input: array<f32>;
+@group(0) @binding(2) var<storage, read> qScales: array<f32>;
+@group(0) @binding(3) var<storage, read> qWeights: array<u32>;
+@group(0) @binding(4) var<storage, read> kScales: array<f32>;
+@group(0) @binding(5) var<storage, read> kWeights: array<u32>;
+@group(0) @binding(6) var<storage, read> vScales: array<f32>;
+@group(0) @binding(7) var<storage, read> vWeights: array<u32>;
+@group(0) @binding(8) var<storage, read_write> qOut: array<f32>;
+@group(0) @binding(9) var<storage, read_write> kOut: array<f32>;
+@group(0) @binding(10) var<storage, read_write> vOut: array<f32>;
+
+const TILE: u32 = 2048u;
+var<workgroup> xin: array<f32, 2048>;
+
+@compute @workgroup_size(64)
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let tid = lid.x;
+    let total = params.qDim + params.kvDim + params.kvDim;
+    let o = wg_id.x * 64u + tid;
+    let inN = params.inputSize;
+    var sum: f32 = 0.0;
+    var tile: u32 = 0u;
+    loop {
+        if (tile >= inN) { break; }
+        var n = TILE;
+        if (tile + n > inN) { n = inN - tile; }
+        for (var i = tid; i < n; i += 64u) {
+            xin[i] = input[tile + i];
+        }
+        workgroupBarrier();
+        if (o < total) {
+            var row: u32 = 0u;
+            var which: u32 = 2u; // 0=q 1=k 2=v
+            if (o < params.qDim) {
+                row = o; which = 0u;
+            } else if (o < params.qDim + params.kvDim) {
+                row = o - params.qDim; which = 1u;
+            } else {
+                row = o - params.qDim - params.kvDim; which = 2u;
+            }
+            let wBase = row * inN + tile;
+            for (var c: u32 = 0u; c < n; c += 32u) {
+                var word: u32 = 0u;
+                var scale: f32 = 0.0;
+                if (which == 0u) {
+                    word = qWeights[(wBase + c) / 32u];
+                    scale = qScales[(wBase + c) / 128u];
+                } else if (which == 1u) {
+                    word = kWeights[(wBase + c) / 32u];
+                    scale = kScales[(wBase + c) / 128u];
+                } else {
+                    word = vWeights[(wBase + c) / 32u];
+                    scale = vScales[(wBase + c) / 128u];
+                }
+                var lim = 32u;
+                if (c + lim > n) { lim = n - c; }
+                for (var j: u32 = 0u; j < lim; j++) {
+                    sum += xin[c + j] * select(-scale, scale, ((word >> j) & 1u) != 0u);
+                }
+            }
+        }
+        workgroupBarrier();
+        tile += TILE;
+    }
+    if (o < params.qDim) {
+        qOut[o] = sum;
+    } else if (o < params.qDim + params.kvDim) {
+        kOut[o - params.qDim] = sum;
+    } else if (o < total) {
+        vOut[o - params.qDim - params.kvDim] = sum;
+    }
+}
+`
+
+// Per-head RMSNorm + partial RoPE in one dispatch.
+const shaderHeadRMSRoPE = `
+struct Params {
+    numHeads: u32,
+    headDim: u32,
+    rotDim: u32,
+    epsBits: u32,
+    thetaBits: u32,
+    _p0: u32,
+    _p1: u32,
+    _p2: u32,
+};
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> step: array<u32>;
+@group(0) @binding(2) var<storage, read_write> x: array<f32>;
+@group(0) @binding(3) var<storage, read> gamma: array<f32>;
+
+var<workgroup> partial: array<f32, 64>;
+
+@compute @workgroup_size(64)
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let h = wg_id.x;
+    if (h >= params.numHeads) { return; }
+    let tid = lid.x;
+    let hd = params.headDim;
+    let eps = bitcast<f32>(params.epsBits);
+    let base = h * hd;
+    var local: f32 = 0.0;
+    for (var i = tid; i < hd; i += 64u) {
+        let v = x[base + i];
+        local += v * v;
+    }
+    partial[tid] = local;
+    workgroupBarrier();
+    var stride = 32u;
+    loop {
+        if (stride == 0u) { break; }
+        if (tid < stride) { partial[tid] += partial[tid + stride]; }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    let inv = inverseSqrt(partial[0] / f32(hd) + eps);
+    for (var i = tid; i < hd; i += 64u) {
+        x[base + i] = x[base + i] * inv * gamma[i];
+    }
+    workgroupBarrier();
+    if (tid == 0u) {
+        let pos = step[0];
+        let theta = bitcast<f32>(params.thetaBits);
+        let rot = params.rotDim;
+        for (var i: u32 = 0u; i < rot; i += 2u) {
+            let freq = 1.0 / pow(theta, f32(i) / f32(rot));
+            let ang = f32(pos) * freq;
+            let c = cos(ang);
+            let s = sin(ang);
+            let u = x[base + i];
+            let v = x[base + i + 1u];
+            x[base + i] = u * c - v * s;
+            x[base + i + 1u] = u * s + v * c;
+        }
+    }
+}
+`
+
+// LM head: compute 64 logits/WG, keep only WG-best (no full logits store for sample).
+const shaderBinLMArgMaxPartial = `
+struct Params { inputSize: u32, outputSize: u32, _p0: u32, _p1: u32, };
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> input: array<f32>;
+@group(0) @binding(2) var<storage, read> scales: array<f32>;
+@group(0) @binding(3) var<storage, read> weights: array<u32>;
+@group(0) @binding(4) var<storage, read_write> partVal: array<f32>;
+@group(0) @binding(5) var<storage, read_write> partIdx: array<u32>;
+
+const TILE: u32 = 2048u;
+var<workgroup> xin: array<f32, 2048>;
+var<workgroup> bval: array<f32, 64>;
+var<workgroup> bidx: array<u32, 64>;
+
+@compute @workgroup_size(64)
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let tid = lid.x;
+    let o = wg_id.x * 64u + tid;
+    let inN = params.inputSize;
+    let outN = params.outputSize;
+    var sum: f32 = 0.0;
+    var tile: u32 = 0u;
+    loop {
+        if (tile >= inN) { break; }
+        var n = TILE;
+        if (tile + n > inN) { n = inN - tile; }
+        for (var i = tid; i < n; i += 64u) {
+            xin[i] = input[tile + i];
+        }
+        workgroupBarrier();
+        if (o < outN) {
+            let wBase = o * inN + tile;
+            for (var c: u32 = 0u; c < n; c += 32u) {
+                let word = weights[(wBase + c) / 32u];
+                let scale = scales[(wBase + c) / 128u];
+                var lim = 32u;
+                if (c + lim > n) { lim = n - c; }
+                for (var j: u32 = 0u; j < lim; j++) {
+                    sum += xin[c + j] * select(-scale, scale, ((word >> j) & 1u) != 0u);
+                }
+            }
+        }
+        workgroupBarrier();
+        tile += TILE;
+    }
+    var bestV: f32 = -3.402823466e+38;
+    var bestI: u32 = 0u;
+    if (o < outN) {
+        bestV = sum;
+        bestI = o;
+    }
+    bval[tid] = bestV;
+    bidx[tid] = bestI;
+    workgroupBarrier();
+    var stride = 32u;
+    loop {
+        if (stride == 0u) { break; }
+        if (tid < stride) {
+            if (bval[tid + stride] > bval[tid]) {
+                bval[tid] = bval[tid + stride];
+                bidx[tid] = bidx[tid + stride];
+            }
+        }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    if (tid == 0u) {
+        partVal[wg_id.x] = bval[0];
+        partIdx[wg_id.x] = bidx[0];
+    }
+}
+`
+
+const shaderArgMaxReduce = `
+struct Params { n: u32, _p0: u32, _p1: u32, _p2: u32, };
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> partVal: array<f32>;
+@group(0) @binding(2) var<storage, read> partIdx: array<u32>;
+@group(0) @binding(3) var<storage, read_write> outTok: array<u32>;
+
+var<workgroup> bval: array<f32, 256>;
+var<workgroup> bidx: array<u32, 256>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(local_invocation_id) lid: vec3<u32>) {
+    let lane = lid.x;
+    var bestV: f32 = -3.402823466e+38;
+    var bestI: u32 = 0u;
+    var i = lane;
+    loop {
+        if (i >= params.n) { break; }
+        let v = partVal[i];
+        if (v > bestV) { bestV = v; bestI = partIdx[i]; }
+        i += 256u;
+    }
+    bval[lane] = bestV;
+    bidx[lane] = bestI;
+    workgroupBarrier();
+    var stride = 128u;
+    loop {
+        if (stride == 0u) { break; }
+        if (lane < stride) {
+            if (bval[lane + stride] > bval[lane]) {
+                bval[lane] = bval[lane + stride];
+                bidx[lane] = bidx[lane + stride];
+            }
+        }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    if (lane == 0u) { outTok[0] = bidx[0]; }
+}
+`
+
+const shaderGDNStepGNorm = `
+struct Params {
+    numV: u32,
+    hdK: u32,
+    hdV: u32,
+    epsBits: u32,
+};
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> q: array<f32>;
+@group(0) @binding(2) var<storage, read> k: array<f32>;
+@group(0) @binding(3) var<storage, read> v: array<f32>;
+@group(0) @binding(4) var<storage, read> beta: array<f32>;
+@group(0) @binding(5) var<storage, read> g: array<f32>;
+@group(0) @binding(6) var<storage, read_write> state: array<f32>;
+@group(0) @binding(7) var<storage, read_write> out: array<f32>;
+@group(0) @binding(8) var<storage, read> z: array<f32>;
+@group(0) @binding(9) var<storage, read> gamma: array<f32>;
+
+var<workgroup> scratch: array<f32, 512>;
+var<workgroup> partial: array<f32, 64>;
+
+@compute @workgroup_size(64)
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let h = wg_id.x;
+    if (h >= params.numV) { return; }
+    let tid = lid.x;
+    let hdK = params.hdK;
+    let hdV = params.hdV;
+    let stBase = h * hdK * hdV;
+    let gt = exp(g[h]);
+    let bt = beta[h];
+    let stN = hdK * hdV;
+
+    for (var i = tid; i < stN; i += 64u) {
+        state[stBase + i] *= gt;
+    }
+    workgroupBarrier();
+
+    for (var d = tid; d < hdV; d += 64u) {
+        var s: f32 = 0.0;
+        for (var j: u32 = 0u; j < hdK; j++) {
+            s += state[stBase + j * hdV + d] * k[h * hdK + j];
+        }
+        scratch[d] = (v[h * hdV + d] - s) * bt;
+    }
+    workgroupBarrier();
+
+    for (var j = tid; j < hdK; j += 64u) {
+        let kj = k[h * hdK + j];
+        for (var d: u32 = 0u; d < hdV; d++) {
+            state[stBase + j * hdV + d] += kj * scratch[d];
+        }
+    }
+    workgroupBarrier();
+
+    for (var d = tid; d < hdV; d += 64u) {
+        var o: f32 = 0.0;
+        for (var j: u32 = 0u; j < hdK; j++) {
+            o += state[stBase + j * hdV + d] * q[h * hdK + j];
+        }
+        out[h * hdV + d] = o;
+    }
+    workgroupBarrier();
+
+    let eps = bitcast<f32>(params.epsBits);
+    let base = h * hdV;
+    var local: f32 = 0.0;
+    for (var i = tid; i < hdV; i += 64u) {
+        let vv = out[base + i];
+        local += vv * vv;
+    }
+    partial[tid] = local;
+    workgroupBarrier();
+    var stride = 32u;
+    loop {
+        if (stride == 0u) { break; }
+        if (tid < stride) { partial[tid] += partial[tid + stride]; }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    let inv = inverseSqrt(partial[0] / f32(hdV) + eps);
+    for (var i = tid; i < hdV; i += 64u) {
+        let zi = z[base + i];
+        out[base + i] = out[base + i] * inv * gamma[i] * (zi / (1.0 + exp(-zi)));
+    }
 }
 `
