@@ -164,7 +164,8 @@ func EnsureFusedSIMDCache(b *Blob) {
 		EnsureQ5_1SIMDCache(b)
 	case FormatQ2_K, FormatQ3_K, FormatQ4_K, FormatQ5_K, FormatQ6_K,
 		FormatIQ1_S, FormatIQ2_XXS, FormatIQ2_XS, FormatIQ3_XXS, FormatIQ3_S,
-		FormatIQ4_NL, FormatIQ4_XS:
+		FormatIQ4_NL, FormatIQ4_XS,
+		FormatTernaryPacked, FormatBinaryPacked:
 		EnsureFloatCache(b)
 	}
 }

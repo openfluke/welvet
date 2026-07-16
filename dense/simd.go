@@ -596,6 +596,8 @@ func MatVecPackedBlob(b *quant.Blob, x, y []float32) error {
 		default:
 			return matVecQ5_1Fused(b, x, y)
 		}
+	case quant.FormatTernaryPacked, quant.FormatBinaryPacked:
+		return matVecBitNetF32(b, x, y)
 	default:
 		quant.EnsureFusedSIMDCache(b)
 		if b.Format.IsKQuant() {
@@ -606,4 +608,15 @@ func MatVecPackedBlob(b *quant.Blob, x, y []float32) error {
 		}
 		return fmt.Errorf("dense: MatVecPackedBlob unsupported %s", b.Format)
 	}
+}
+
+// matVecBitNetF32 — Ternary/Binary inflate-once + parallel DotTile (LM head + projections).
+func matVecBitNetF32(b *quant.Blob, x, y []float32) error {
+	quant.EnsureFloatCache(b)
+	in, out := b.Cols, b.Rows
+	if len(b.F32Cache) < out*in {
+		return fmt.Errorf("dense: %s F32Cache missing", b.Format)
+	}
+	gemvF32ParallelF32(b.F32Cache, x, y, out, in)
+	return nil
 }

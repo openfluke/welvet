@@ -89,7 +89,7 @@ func (p ExecProfile) FusedNote() string {
 	case "simd_fuse":
 		return "packed fused GEMV (Q4/Q8/Q4_1/Q5 asm; k/IQ inflate-once + DotTile)"
 	case "gpu_fuse":
-		return "full on-device fused decoder — Q4_0 only (other formats: use simd_fuse)"
+		return "full on-device fused decoder (native Q4_0, or project other quants → Q4 for upload)"
 	default:
 		return ""
 	}
@@ -155,8 +155,7 @@ func (m *Model) ApplyExec(p ExecProfile) error {
 				return fmt.Errorf("fused gpu: %w", err)
 			}
 		} else {
-			return fmt.Errorf("gpu_fuse full on-device decoder requires baked Q4_0 (got %s); use simd_fuse or reconvert",
-				m.PackFormat.String())
+			return fmt.Errorf("gpu_fuse requires a baked packed entity (got %s)", m.PackFormat.String())
 		}
 	} else if m.gpu != nil {
 		m.CloseGPU()

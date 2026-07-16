@@ -16,7 +16,7 @@ func forwardSIMDPacked[T core.Numeric](l *Layer, x, y []T, batch, in, out int) e
 	case quant.FormatQ8_0:
 		return forwardSIMDQ8_0(l, x, y, batch, in, out)
 	case quant.FormatTernaryPacked:
-		return forwardSIMDTernary(l, x, y, batch, in, out)
+		return forwardSIMDTernaryPacked(l, x, y, batch, in, out)
 	case quant.FormatBinaryPacked:
 		return forwardSIMDBinary(l, x, y, batch, in, out)
 	case quant.FormatQ4_1, quant.FormatQ5_0, quant.FormatQ5_1:
@@ -54,38 +54,25 @@ func forwardSIMDBinary[T core.Numeric](l *Layer, x, y []T, batch, in, out int) e
 	if b == nil || b.Format != quant.FormatBinaryPacked {
 		return fmt.Errorf("dense: BinaryPacked missing")
 	}
-	scales, words, ok := binaryBlobToGPU(b)
-	if !ok {
-		return fmt.Errorf("dense: BinaryPacked projection failed")
-	}
-	// Flat groups index by absolute weight index; per-row we need words covering o*in..
 	for bat := 0; bat < batch; bat++ {
 		xRow := core.SliceAsFloat32(x[bat*in : (bat+1)*in])
-		yF := make([]float32, out)
-		for o := 0; o < out; o++ {
-			sum := 0.0
-			base := o * in
-			for c0 := 0; c0 < in; {
-				flat := base + c0
-				g := flat / 32
-				if g >= len(words) {
-					break
-				}
-				bitOff := flat % 32
-				nn := 32 - bitOff
-				if c0+nn > in {
-					nn = in - c0
-				}
-				sc := float32(1)
-				if g < len(scales) {
-					sc = scales[g]
-				}
-				sum += simd.DotBinaryWordOffset(xRow[c0:], words[g], sc, bitOff, nn)
-				c0 += nn
-			}
-			yF[o] = float32(sum)
-		}
-		core.SliceFromFloat32(yF, y[bat*out:(bat+1)*out])
+		writeGemvF32(y[bat*out:(bat+1)*out], out, func(dst []float32) {
+			_ = matVecBitNetF32(b, xRow, dst)
+		})
+	}
+	return nil
+}
+
+func forwardSIMDTernaryPacked[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
+	b := l.Weights.Packed
+	if b == nil || b.Format != quant.FormatTernaryPacked {
+		return fmt.Errorf("dense: TernaryPacked missing")
+	}
+	for bat := 0; bat < batch; bat++ {
+		xRow := core.SliceAsFloat32(x[bat*in : (bat+1)*in])
+		writeGemvF32(y[bat*out:(bat+1)*out], out, func(dst []float32) {
+			_ = matVecBitNetF32(b, xRow, dst)
+		})
 	}
 	return nil
 }

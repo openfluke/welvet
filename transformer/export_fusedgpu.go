@@ -11,12 +11,14 @@ import (
 )
 
 // ExportFusedGPUSpec builds the weight bundle for the full-stack Q4 GPU decoder.
+// Non-Q4 packed entities are unpacked once and re-packed to Q4_0 for upload
+// (host entity stays in its native format; GPU always runs the Q4 fused path).
 func (m *Model) ExportFusedGPUSpec() (*fusedgpu.Spec, error) {
 	if m == nil {
 		return nil, fmt.Errorf("transformer: nil model")
 	}
 	if !m.FusedGPUReady() {
-		return nil, fmt.Errorf("transformer: need baked Q4_0 entity")
+		return nil, fmt.Errorf("transformer: need baked packed entity for gpu_fuse")
 	}
 	if len(m.Blocks) == 0 {
 		return nil, fmt.Errorf("transformer: no blocks")
@@ -126,18 +128,18 @@ func (m *Model) ExportFusedGPUSpec() (*fusedgpu.Spec, error) {
 
 func loadLMHeadSpec(m *Model, spec *fusedgpu.Spec) error {
 	if blob := m.LMHeadPackedBlob(); blob != nil {
-		scales, packed, ok := quant.Q4SIMD(blob)
-		if !ok {
-			return fmt.Errorf("lm_head packed Q4 missing SIMD cache")
+		scales, packed, err := q4ViewFromBlob(blob)
+		if err != nil {
+			return fmt.Errorf("lm_head packed: %w", err)
 		}
 		spec.LMScales = scales
 		spec.LMPacked = packed
 		return nil
 	}
-	if head := m.UntiedLMHead(); head != nil && head.Format == quant.FormatQ4_0 && head.Packed != nil {
-		scales, packed, ok := quant.Q4SIMD(head.Packed)
-		if !ok {
-			return fmt.Errorf("lm_head Q4 missing SIMD cache")
+	if head := m.UntiedLMHead(); head != nil && head.Packed != nil {
+		scales, packed, err := q4ViewFromBlob(head.Packed)
+		if err != nil {
+			return fmt.Errorf("lm_head: %w", err)
 		}
 		spec.LMScales = scales
 		spec.LMPacked = packed
@@ -165,17 +167,51 @@ func q4SpecFromDense(l *dense.Layer) (fusedgpu.Q4Spec, error) {
 	if l == nil || l.Weights == nil {
 		return fusedgpu.Q4Spec{}, fmt.Errorf("nil dense")
 	}
-	if l.Weights.Format != quant.FormatQ4_0 || l.Weights.Packed == nil {
-		return fusedgpu.Q4Spec{}, fmt.Errorf("need Q4_0 packed (got %s)", l.Weights.Format.String())
+	if l.Weights.Packed == nil {
+		return fusedgpu.Q4Spec{}, fmt.Errorf("need packed weights (got %s)", l.Weights.Format.String())
 	}
-	scales, packed, ok := quant.Q4SIMD(l.Weights.Packed)
-	if !ok {
-		return fusedgpu.Q4Spec{}, fmt.Errorf("Q4 SIMD cache missing")
+	scales, packed, err := q4ViewFromBlob(l.Weights.Packed)
+	if err != nil {
+		return fusedgpu.Q4Spec{}, err
 	}
 	return fusedgpu.Q4Spec{
 		Rows: l.Weights.Rows, Cols: l.Weights.Cols,
 		Scales: scales, Packed: packed,
 	}, nil
+}
+
+// q4ViewFromBlob returns Q4_0 SIMD scales/packed, projecting other formats via Unpack→Pack.
+func q4ViewFromBlob(b *quant.Blob) (scales []float32, packed []uint32, err error) {
+	if b == nil {
+		return nil, nil, fmt.Errorf("nil blob")
+	}
+	if b.Format == quant.FormatQ4_0 {
+		quant.EnsureQ4SIMDCache(b)
+		s, p, ok := quant.Q4SIMD(b)
+		if !ok {
+			return nil, nil, fmt.Errorf("Q4 SIMD cache missing")
+		}
+		return s, p, nil
+	}
+	quant.EnsureFloatCache(b)
+	f32 := b.F32Cache
+	if len(f32) < b.Rows*b.Cols {
+		var uerr error
+		f32, uerr = quant.Unpack(b)
+		if uerr != nil {
+			return nil, nil, uerr
+		}
+	}
+	q4, err := quant.Pack(quant.FormatQ4_0, f32[:b.Rows*b.Cols], b.Rows, b.Cols)
+	if err != nil {
+		return nil, nil, err
+	}
+	quant.EnsureQ4SIMDCache(q4)
+	s, p, ok := quant.Q4SIMD(q4)
+	if !ok {
+		return nil, nil, fmt.Errorf("Q4 project failed for %s", b.Format)
+	}
+	return s, p, nil
 }
 
 func rmsGammaF32(l *rmsnorm.Layer) ([]float32, error) {

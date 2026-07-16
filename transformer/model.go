@@ -58,8 +58,9 @@ type Model struct {
 }
 
 // FusedGPUReady reports whether the full fused GPU decoder can run.
+// Any baked packed quant can be projected to Q4_0 for the on-device stack.
 func (m *Model) FusedGPUReady() bool {
-	return m != nil && m.FusedPack && m.PackFormat == quant.FormatQ4_0
+	return m != nil && m.FusedPack && m.PackFormat != quant.FormatNone
 }
 
 // LMHeadPackedBlob returns baked tied-head logits matrix when present.
