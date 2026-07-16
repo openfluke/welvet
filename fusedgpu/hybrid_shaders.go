@@ -144,6 +144,102 @@ fn main(
 }
 `
 
+// Dual Binary GEMV (SwiGLU-style) for same-row projections, e.g. GDN B∥A.
+const shaderBinG128Dual = `
+struct Params { inputSize: u32, outputSize: u32, _p0: u32, _p1: u32, };
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> input: array<f32>;
+@group(0) @binding(2) var<storage, read> aScales: array<f32>;
+@group(0) @binding(3) var<storage, read> aWeights: array<u32>;
+@group(0) @binding(4) var<storage, read> bScales: array<f32>;
+@group(0) @binding(5) var<storage, read> bWeights: array<u32>;
+@group(0) @binding(6) var<storage, read_write> aOut: array<f32>;
+@group(0) @binding(7) var<storage, read_write> bOut: array<f32>;
+
+const TILE: u32 = 1024u;
+var<workgroup> xin: array<f32, 1024>;
+
+@compute @workgroup_size(128)
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let tid = lid.x;
+    let o = wg_id.x * 128u + tid;
+    let inN = params.inputSize;
+    let outN = params.outputSize;
+    var aSum: f32 = 0.0;
+    var bSum: f32 = 0.0;
+    var tile: u32 = 0u;
+    loop {
+        if (tile >= inN) { break; }
+        var n = TILE;
+        if (tile + n > inN) { n = inN - tile; }
+        for (var i = tid; i < n; i += 128u) {
+            xin[i] = input[tile + i];
+        }
+        workgroupBarrier();
+        if (o < outN) {
+            let wBase = o * inN + tile;
+            var c: u32 = 0u;
+            loop {
+                if (c + 32u > n) { break; }
+                let aWord = aWeights[(wBase + c) / 32u];
+                let bWord = bWeights[(wBase + c) / 32u];
+                let aScale = aScales[(wBase + c) / 128u];
+                let bScale = bScales[(wBase + c) / 128u];
+                for (var j: u32 = 0u; j < 32u; j += 8u) {
+                    let aw = aWord >> j;
+                    let bw = bWord >> j;
+                    let x0 = xin[c + j];
+                    let x1 = xin[c + j + 1u];
+                    let x2 = xin[c + j + 2u];
+                    let x3 = xin[c + j + 3u];
+                    let x4 = xin[c + j + 4u];
+                    let x5 = xin[c + j + 5u];
+                    let x6 = xin[c + j + 6u];
+                    let x7 = xin[c + j + 7u];
+                    aSum += x0 * (f32(aw & 1u) * 2.0 - 1.0) * aScale;
+                    bSum += x0 * (f32(bw & 1u) * 2.0 - 1.0) * bScale;
+                    aSum += x1 * (f32((aw >> 1u) & 1u) * 2.0 - 1.0) * aScale;
+                    bSum += x1 * (f32((bw >> 1u) & 1u) * 2.0 - 1.0) * bScale;
+                    aSum += x2 * (f32((aw >> 2u) & 1u) * 2.0 - 1.0) * aScale;
+                    bSum += x2 * (f32((bw >> 2u) & 1u) * 2.0 - 1.0) * bScale;
+                    aSum += x3 * (f32((aw >> 3u) & 1u) * 2.0 - 1.0) * aScale;
+                    bSum += x3 * (f32((bw >> 3u) & 1u) * 2.0 - 1.0) * bScale;
+                    aSum += x4 * (f32((aw >> 4u) & 1u) * 2.0 - 1.0) * aScale;
+                    bSum += x4 * (f32((bw >> 4u) & 1u) * 2.0 - 1.0) * bScale;
+                    aSum += x5 * (f32((aw >> 5u) & 1u) * 2.0 - 1.0) * aScale;
+                    bSum += x5 * (f32((bw >> 5u) & 1u) * 2.0 - 1.0) * bScale;
+                    aSum += x6 * (f32((aw >> 6u) & 1u) * 2.0 - 1.0) * aScale;
+                    bSum += x6 * (f32((bw >> 6u) & 1u) * 2.0 - 1.0) * bScale;
+                    aSum += x7 * (f32((aw >> 7u) & 1u) * 2.0 - 1.0) * aScale;
+                    bSum += x7 * (f32((bw >> 7u) & 1u) * 2.0 - 1.0) * bScale;
+                }
+                c += 32u;
+            }
+            if (c < n) {
+                let aWord = aWeights[(wBase + c) / 32u];
+                let bWord = bWeights[(wBase + c) / 32u];
+                let aScale = aScales[(wBase + c) / 128u];
+                let bScale = bScales[(wBase + c) / 128u];
+                for (var j: u32 = 0u; j < n - c; j++) {
+                    let xv = xin[c + j];
+                    aSum += xv * (f32((aWord >> j) & 1u) * 2.0 - 1.0) * aScale;
+                    bSum += xv * (f32((bWord >> j) & 1u) * 2.0 - 1.0) * bScale;
+                }
+            }
+        }
+        workgroupBarrier();
+        tile += TILE;
+    }
+    if (o < outN) {
+        aOut[o] = aSum;
+        bOut[o] = bSum;
+    }
+}
+`
+
 // Fused BinaryG128 gate+up → silu(gate)*up into intermediate.
 const shaderBinG128SwiGLU = `
 struct Params { inputSize: u32, intermediate: u32, _p0: u32, _p1: u32, };

@@ -134,39 +134,29 @@ func (m *Model) generateHybridGPUSample(
 			float64(len(ids))/math.Max(prefillElapsed.Seconds(), 1e-9))
 	}
 
-	const chunkSize = 16
+	// Chunking didn't help on M5 (compute-bound); keep 1-token sync for lower latency.
 	decodeStart := time.Now()
 	generatedCount := 0
-	pending := []uint32{tok}
-
 	for generatedCount < opts.MaxTokens {
-		if len(pending) == 0 {
-			remain := opts.MaxTokens - generatedCount
-			room := he.MaxSeq() - he.Pos()
-			if room <= 0 {
-				break
-			}
-			k := chunkSize
-			if remain < k {
-				k = remain
-			}
-			if room < k {
-				k = room
-			}
-			pending, err = he.DecodeChunk(k)
-			if err != nil {
-				metrics := buildMetrics(len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
-				return stream.String(), metrics, fmt.Errorf("decode chunk: %w", err)
-			}
-		}
-		tok = pending[0]
-		pending = pending[1:]
 		if _, stop := eos[int(tok)]; stop {
 			break
 		}
 		allTokens = append(allTokens, tok)
 		generatedCount++
 		stream.Push(allTokens, opts.Silent, opts.StreamCallback)
+
+		if generatedCount >= opts.MaxTokens {
+			break
+		}
+		if he.Pos() >= he.MaxSeq() {
+			break
+		}
+		next, err := he.DecodeChunk(1)
+		if err != nil {
+			metrics := buildMetrics(len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
+			return stream.String(), metrics, fmt.Errorf("decode step %d: %w", generatedCount, err)
+		}
+		tok = next[0]
 	}
 	decodeElapsed := time.Since(decodeStart)
 	metrics := buildMetrics(len(ids), generatedCount, prefillElapsed, decodeElapsed)

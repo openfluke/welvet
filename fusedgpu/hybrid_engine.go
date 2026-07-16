@@ -127,6 +127,7 @@ func newHybridEngine(spec *HybridSpec) (*hybridEngine, error) {
 	shaders := map[string]string{
 		"bingemv":     shaderBinG128GEMV,
 		"bingemv_add": shaderBinG128GEMVAdd,
+		"bingemv_dual": shaderBinG128Dual,
 		"binswiglu":   shaderBinG128SwiGLU,
 		"binembed":    shaderBinEmbed,
 		"binembed_p":  shaderBinEmbedPrompt,
@@ -165,7 +166,7 @@ func newHybridEngine(spec *HybridSpec) (*hybridEngine, error) {
 	e.initUniforms()
 	e.buildBindGroups()
 	nbytes := e.estimateVRAM()
-	fmt.Printf("✅ Hybrid GPU fuse ready (wg128 + resid-fuse + decode chunks, ~%.1f GiB)\n", float64(nbytes)/(1<<30))
+	fmt.Printf("✅ Hybrid GPU fuse ready (dual K∥V + GDN B∥A, ~%.1f GiB)\n", float64(nbytes)/(1<<30))
 	return e, nil
 }
 
@@ -617,8 +618,10 @@ func (e *hybridEngine) buildAttnBGs(tag string, b *hybridBlockGPU) {
 	qDim := b.numHeads * b.headDim
 	kvDim := b.numKVHeads * b.headDim
 	uQ := e.gemvU(tag+"_uQ", b.q.cols, b.q.rows)
-	uK := e.gemvU(tag+"_uK", b.k.cols, b.k.rows)
-	uV := e.gemvU(tag+"_uV", b.v.cols, b.v.rows)
+	if b.k.rows != b.v.rows || b.k.cols != b.v.cols {
+		panic(fmt.Sprintf("%s: K/V shape mismatch for dual GEMV", tag))
+	}
+	uKV := e.gemvU(tag+"_uKV2", b.k.cols, b.k.rows)
 	uO := e.gemvU(tag+"_uO", b.o.cols, b.o.rows)
 
 	qOut := e.qBuf
@@ -626,8 +629,11 @@ func (e *hybridEngine) buildAttnBGs(tag string, b *hybridBlockGPU) {
 		qOut = e.qGate
 	}
 	e.mkBG(tag+"_q", p["bingemv"], whole(uQ), whole(e.normed), whole(b.q.scales), whole(b.q.weights), whole(qOut))
-	e.mkBG(tag+"_k", p["bingemv"], whole(uK), whole(e.normed), whole(b.k.scales), whole(b.k.weights), whole(e.kBuf))
-	e.mkBG(tag+"_v", p["bingemv"], whole(uV), whole(e.normed), whole(b.v.scales), whole(b.v.weights), whole(e.vBuf))
+	// K∥V share xin (same row count under GQA).
+	e.mkBG(tag+"_kvproj", p["bingemv_dual"], whole(uKV), whole(e.normed),
+		whole(b.k.scales), whole(b.k.weights),
+		whole(b.v.scales), whole(b.v.weights),
+		whole(e.kBuf), whole(e.vBuf))
 
 	if b.outputGate {
 		uSplit := e.uni(tag+"_uSplit", packU32(uint32(b.numHeads), uint32(b.headDim), 0, 0))
@@ -654,8 +660,8 @@ func (e *hybridEngine) buildAttnBGs(tag string, b *hybridBlockGPU) {
 	e.mkBG(tag+"_ropeq", p["prope"], whole(uRQ), whole(e.step), whole(e.qBuf))
 	e.mkBG(tag+"_ropek", p["prope"], whole(uRK), whole(e.step), whole(e.kBuf))
 
-	uKV := e.uni(tag+"_uKV", packU32(uint32(kvDim), uint32(e.maxSeq), uint32(b.headDim), 0))
-	e.mkBG(tag+"_kv", p["kv"], whole(uKV), whole(e.step), whole(e.kBuf), whole(e.vBuf), whole(b.kCache), whole(b.vCache))
+	uKVc := e.uni(tag+"_uKVc", packU32(uint32(kvDim), uint32(e.maxSeq), uint32(b.headDim), 0))
+	e.mkBG(tag+"_kv", p["kv"], whole(uKVc), whole(e.step), whole(e.kBuf), whole(e.vBuf), whole(b.kCache), whole(b.vCache))
 	uAttn := e.uni(tag+"_uAttn", packU32(uint32(b.numHeads), uint32(b.numKVHeads), uint32(b.headDim), uint32(e.maxSeq)))
 	e.mkBG(tag+"_attn", p["attn"], whole(uAttn), whole(e.step), whole(e.qBuf), whole(b.kCache), whole(b.vCache), whole(e.attnOut))
 
@@ -675,14 +681,19 @@ func (e *hybridEngine) buildGDNBGs(tag string, b *hybridBlockGPU) {
 
 	uQKV := e.gemvU(tag+"_uQKV", b.gdnQKV.cols, b.gdnQKV.rows)
 	uZ := e.gemvU(tag+"_uZ", b.gdnZ.cols, b.gdnZ.rows)
-	uB := e.gemvU(tag+"_uB", b.gdnB.cols, b.gdnB.rows)
-	uA := e.gemvU(tag+"_uA", b.gdnA.cols, b.gdnA.rows)
+	if b.gdnB.rows != b.gdnA.rows || b.gdnB.cols != b.gdnA.cols {
+		panic(fmt.Sprintf("%s: GDN B/A shape mismatch for dual GEMV", tag))
+	}
+	uBA := e.gemvU(tag+"_uBA", b.gdnB.cols, b.gdnB.rows)
 	uOut := e.gemvU(tag+"_uOut", b.gdnOut.cols, b.gdnOut.rows)
 
 	e.mkBG(tag+"_gqkv", p["bingemv"], whole(uQKV), whole(e.normed), whole(b.gdnQKV.scales), whole(b.gdnQKV.weights), whole(e.gdnQKV))
 	e.mkBG(tag+"_gz", p["bingemv"], whole(uZ), whole(e.normed), whole(b.gdnZ.scales), whole(b.gdnZ.weights), whole(e.gdnZ))
-	e.mkBG(tag+"_gb", p["bingemv"], whole(uB), whole(e.normed), whole(b.gdnB.scales), whole(b.gdnB.weights), whole(e.gdnBetaRaw))
-	e.mkBG(tag+"_ga", p["bingemv"], whole(uA), whole(e.normed), whole(b.gdnA.scales), whole(b.gdnA.weights), whole(e.gdnARaw))
+	// B∥A are tiny (numV rows) but still reload full hidden — fuse like SwiGLU.
+	e.mkBG(tag+"_gba", p["bingemv_dual"], whole(uBA), whole(e.normed),
+		whole(b.gdnB.scales), whole(b.gdnB.weights),
+		whole(b.gdnA.scales), whole(b.gdnA.weights),
+		whole(e.gdnBetaRaw), whole(e.gdnARaw))
 
 	uConv := e.uni(tag+"_uConv", packU32(uint32(convDim), uint32(b.convKernel), 0, 0))
 	e.mkBG(tag+"_gconv", p["gdn_conv"], whole(uConv), whole(e.gdnQKV), whole(b.gdnConv), whole(b.gdnConvState), whole(e.gdnMixed))
@@ -723,8 +734,7 @@ func (e *hybridEngine) recordLayers(pass *wgpu.ComputePassEncoder) {
 			qDim := b.numHeads * b.headDim
 			kvDim := b.numKVHeads * b.headDim
 			e.disp(pass, p["bingemv"], e.bg[tag+"_q"], binWG(b.q.rows), 1, 1)
-			e.disp(pass, p["bingemv"], e.bg[tag+"_k"], binWG(b.k.rows), 1, 1)
-			e.disp(pass, p["bingemv"], e.bg[tag+"_v"], binWG(b.v.rows), 1, 1)
+			e.disp(pass, p["bingemv_dual"], e.bg[tag+"_kvproj"], binWG(b.k.rows), 1, 1)
 			if b.outputGate {
 				e.disp(pass, p["split_qg"], e.bg[tag+"_split"], (uint32(qDim)+63)/64, 1, 1)
 			}
@@ -747,8 +757,7 @@ func (e *hybridEngine) recordLayers(pass *wgpu.ComputePassEncoder) {
 			}
 			e.disp(pass, p["bingemv"], e.bg[tag+"_gqkv"], binWG(b.gdnQKV.rows), 1, 1)
 			e.disp(pass, p["bingemv"], e.bg[tag+"_gz"], binWG(b.gdnZ.rows), 1, 1)
-			e.disp(pass, p["bingemv"], e.bg[tag+"_gb"], binWG(b.gdnB.rows), 1, 1)
-			e.disp(pass, p["bingemv"], e.bg[tag+"_ga"], binWG(b.gdnA.rows), 1, 1)
+			e.disp(pass, p["bingemv_dual"], e.bg[tag+"_gba"], binWG(b.gdnB.rows), 1, 1)
 			e.disp(pass, p["gdn_conv"], e.bg[tag+"_gconv"], (uint32(convDim)+63)/64, 1, 1)
 			e.disp(pass, p["gdn_prep"], e.bg[tag+"_gprep"], prepWG, 1, 1)
 			e.disp(pass, p["gdn_step"], e.bg[tag+"_gstep"], uint32(b.numValueHeads), 1, 1)
