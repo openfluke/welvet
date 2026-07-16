@@ -33,14 +33,18 @@
 | **Dense** FormatNone × 34 × CPU/SIMD/WebGPU fwd+bwd | ✅ |
 | **Dense** block-quant × SIMD/WebGPU (all 20 formats on-device fwd+bwd) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
-| `forward/` / `backward/` volumetric Dense walk | ✅ |
-| `training/` SGD on volumetric tape (Dense; layer-agnostic dispatch) | ✅ |
-| All other layers | ⬜ |
+| `forward/` / `backward/` volumetric Dense + MHA walk | ✅ |
+| `training/` SGD on volumetric tape (Dense + MHA) | ✅ |
+| Remaining layers (SwiGLU, RMSNorm, …) | ⬜ |
 | Model IO / transformer / entity / tokenizer / hf | ⬜ |
 | Accel / donate / fountain / dna / … | ⬜ |
 | Full v1 matrix | ⬜ |
 
-Validate live: `cd w2a && go test ./tests/dense -v` (timed FormatNone matrix + gap census).
+Validate live:
+```bash
+cd w2a && go test ./tests/dense -v
+cd w2a && go test ./tests/mha -v
+```
 
 ---
 
@@ -171,17 +175,20 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `webgpu/` | All FormatNone + all quant GEMV/GEMVT + DenseDW | ✅ |
 | `tiling/` | Tile size / SC / MC / GPU workgroup caps | ✅ |
 | `dense/` | FormatNone×34 + all quants × 3 backends; packed fwd/bwd; grad verify | ✅ |
+| `mha/` | Causal+RoPE+GQA; Q/K/V/O via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | ✅ |
-| `forward/` | Grid walk z→y→x→l; Dense dispatch; remote hops | ✅ |
-| `backward/` | Reverse tape over Dense cells | ✅ |
-| `training/` | MSE + SGD; ApplyGradSGD dispatch (*dense.Layer today) | ✅ |
+| `forward/` | Grid walk z→y→x→l; Dense + MHA dispatch; remote hops | ✅ |
+| `backward/` | Reverse tape over Dense + MHA cells | ✅ |
+| `training/` | MSE + SGD; ApplyGradSGD for *dense.Layer and *mha.Layer | ✅ |
 
 ### Layers (each needs CPU + SIMD + WebGPU × all dtype × all quant × fwd/bwd)
 
 | Package | Features | Status |
 |---------|----------|:------:|
 | `dense/` | FormatNone×34 + all quants × 3 backends; packed SIMD/GPU; grad verify | ✅ |
-| `mha/` | Multi-head attention | ⬜ |
+| `mha/` | Policy Mask/Pos/Mode (decoder, encoder, diffusion, cross, PrefixLM, window, ALiBi); Dense proj coverage | ✅ |
+| `seqmix/` | Sequence-mixer kinds (attention / SSM / linear / conv) — contract only | ✅ |
+| `mamba/` | SSM / Mamba (KindSSM) | ⬜ |
 | `swiglu/` | SwiGLU FFN | ⬜ |
 | `rmsnorm/` | RMSNorm | ⬜ |
 | `layernorm/` | LayerNorm | ⬜ |
@@ -201,7 +208,7 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `residual/` | Residual | ⬜ |
 | `metacognition/` | Metacognition | ⬜ |
 
-### Dense detail (only layer with real coverage today)
+### Dense detail
 
 | Feature | CPU | SIMD | WebGPU |
 |---------|:---:|:----:|:------:|
@@ -216,6 +223,27 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | Train (fwd+MSE+bwd+SGD) FormatNone×34 + all quants | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
+
+### MHA detail (attention seqmix — transformers + diffusion ready)
+
+| Feature | CPU | SIMD | WebGPU |
+|---------|:---:|:----:|:------:|
+| Mask: causal / bidirectional / sliding window / Prefix-LM / custom | ✅ | ✅ | ✅ |
+| Pos: RoPE / none / ALiBi / RoPE+ALiBi | ✅ | ✅ | ✅ |
+| Mode: self + cross (`ForwardWithContext`) | ✅ | ✅ | ✅ |
+| GQA / MQA (`NumKVHeads`) + optional QK-RMSNorm | ✅ | ✅ | ✅ |
+| Presets: Decoder / Encoder / Diffusion self+cross / PrefixLM / Local / ALiBi | ✅ | ✅ | ✅ |
+| Q/K/V/O FormatNone × 34 — fwd+bwd | ✅ Dense projs | ✅ Dense projs | ✅ Dense projs |
+| Q/K/V/O all 20 quants — fwd+bwd | ✅ | ✅ | ✅ |
+| Attention / RoPE ALU | ✅ f64 host | ✅ f64 host | ✅ f64 host |
+| Timed FormatNone + quant matrices in `w2a` | ✅ | ✅ | ✅ |
+| Gap census 34×20×3 | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
+| On-device attention / RoPE shaders | ⬜ | ⬜ | ⬜ |
+| SoftmaxSigmoid / train Dropout | ⬜ hard-error | ⬜ | ⬜ |
+
+Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/` — they land under `seqmix.Kind*` in their own packages.
 
 ### Model / IO / runtime
 
@@ -248,7 +276,7 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `w2a/` | Interactive menu, dense suite, timed matrix, gap census, docs | 🚧 |
+| `w2a/` | Interactive menu, dense + mha suites, timed matrices, gap census, docs | 🚧 |
 
 ---
 
@@ -270,6 +298,7 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 ```go
 // T is any core.Numeric — never assume float32
 dense.Forward[T](layer, input) / dense.Backward[T](...)
+mha.Forward[T](layer, input) / mha.Backward[T](...)  // input [batch,seq,d] or [seq,d]
 ForwardCPUTiled[T] / ForwardSIMD[T] / ForwardWebGPU[T]
 weights.New[T](...) / weights.MatVec[T](...) / weights.MatVecT[T](...)
 ```
@@ -288,6 +317,7 @@ cd welvet && go build ./...
 cd w2a
 go run .                 # interactive
 go test ./tests/dense -v # FormatNone timed matrix + gap census
+go test ./tests/mha -v   # causal+RoPE+GQA; same coverage axes as Dense
 ```
 
 Docs: `w2a/docs/`.

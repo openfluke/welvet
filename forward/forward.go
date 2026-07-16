@@ -1,4 +1,4 @@
-// Package forward walks the volumetric grid and dispatches cell ops (Dense today).
+// Package forward walks the volumetric grid and dispatches cell ops (Dense, MHA, …).
 //
 // Contract: CPU tiled + SIMD + WebGPU via each layer's Exec; unsupported cell types
 // hard-error (no silent skip of missing kernels). Tests live in w2a.
@@ -10,6 +10,7 @@ import (
 	"github.com/openfluke/welvet/architecture"
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/dense"
+	"github.com/openfluke/welvet/mha"
 )
 
 // Step records one executed cell for backward (and debugging).
@@ -80,7 +81,13 @@ func dispatch[T core.Numeric](cell *architecture.Cell, input *core.Tensor[T]) (p
 			return nil, nil, fmt.Errorf("dense cell Op is %T, want *dense.Layer", cell.Op)
 		}
 		return dense.Forward(dl, input)
+	case core.LayerMultiHeadAttention:
+		ml, ok := cell.Op.(*mha.Layer)
+		if !ok || ml == nil {
+			return nil, nil, fmt.Errorf("mha cell Op is %T, want *mha.Layer", cell.Op)
+		}
+		return mha.Forward(ml, input)
 	default:
-		return nil, nil, fmt.Errorf("unsupported layer type %s (only Dense wired so far)", cell.Layer.Type)
+		return nil, nil, fmt.Errorf("unsupported layer type %s", cell.Layer.Type)
 	}
 }

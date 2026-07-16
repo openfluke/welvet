@@ -1,7 +1,7 @@
 // Package training owns optimizers and volumetric train steps.
 //
 // Layer-agnostic: SGD walks the forward tape and dispatches ApplyGradSGD per
-// cell Op (*dense.Layer today; MHA/SwiGLU/… later). No QAT.
+// cell Op (*dense.Layer, *mha.Layer, …). No QAT.
 package training
 
 import (
@@ -11,6 +11,7 @@ import (
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/forward"
+	"github.com/openfluke/welvet/mha"
 )
 
 // Config is shared train hyper-params.
@@ -95,6 +96,8 @@ func applyCell[T core.Numeric](op any, dW *core.Tensor[T], lr float64) error {
 	switch v := op.(type) {
 	case *dense.Layer:
 		return dense.ApplyGradSGD(v, dW, lr)
+	case *mha.Layer:
+		return mha.ApplyGradSGD(v, dW, lr)
 	case GradApplier[T]:
 		return v.ApplyGradSGD(dW, lr)
 	default:

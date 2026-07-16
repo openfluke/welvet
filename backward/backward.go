@@ -8,9 +8,10 @@ import (
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/forward"
+	"github.com/openfluke/welvet/mha"
 )
 
-// GradW is one cell's weight gradient (Dense today).
+// GradW is one cell's weight gradient (Dense / MHA concat, …).
 type GradW[T core.Numeric] struct {
 	Coord architecture.Coord
 	DW    *core.Tensor[T]
@@ -57,6 +58,12 @@ func dispatchBwd[T core.Numeric](st forward.Step[T], gradOut *core.Tensor[T]) (g
 			return nil, nil, fmt.Errorf("dense cell Op is %T", st.Cell.Op)
 		}
 		return dense.Backward(dl, gradOut, st.Input, st.Pre)
+	case core.LayerMultiHeadAttention:
+		ml, ok := st.Cell.Op.(*mha.Layer)
+		if !ok || ml == nil {
+			return nil, nil, fmt.Errorf("mha cell Op is %T", st.Cell.Op)
+		}
+		return mha.Backward(ml, gradOut, st.Input, st.Pre)
 	default:
 		return nil, nil, fmt.Errorf("unsupported layer type %s", st.Cell.Layer.Type)
 	}
