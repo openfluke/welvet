@@ -1,5 +1,13 @@
-// Package entity is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package entity is Welvet's native .entity checkpoint format (ENTITY magic + JSON + blobs).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Tests live in w2a — not here.
 package entity
+
+const (
+	// Magic is the 8-byte file signature (Loom wire layout).
+	Magic         = "ENTITY\x00\x00"
+	FormatVersion = 1
+	headerMaxSize = 256 << 20
+)
+
+func fixedHeaderSize() int { return 20 }

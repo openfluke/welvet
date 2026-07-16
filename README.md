@@ -6,6 +6,7 @@
 |------|------|
 | **[openfluke/welvet](https://github.com/openfluke/welvet)** (this tree) | **Engine only** — layers, quant, SIMD (Plan 9 `.s`), WebGPU, ENTITY, dispatch |
 | **[openfluke/w2a](https://github.com/openfluke/w2a)** (`w2a/`) | Tests, CABI, docs, menus — **never** in engine packages |
+| **[openfluke/octo](octo/)** (`octo/`) | Model shell — HF download, convert→ENTITY, quantize, run (Lucy successor) |
 
 `loom/poly` is legacy reference only. Welvet is the rewrite.
 
@@ -36,7 +37,8 @@
 | `forward/` / `backward/` volumetric Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential + Residual walk | ✅ |
 | `training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential + Residual) | ✅ |
 | Remaining layers (parallel, …) | ⬜ |
-| Model IO / transformer / entity / tokenizer / hf | ⬜ |
+| Model IO / transformer / entity / tokenizer / hf | 🚧 |
+| `octo/` interactive model shell (download / convert / chat) | 🚧 |
 | Accel / donate / fountain / dna / … | ⬜ |
 | Full v1 matrix | ⬜ |
 
@@ -444,11 +446,11 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/`
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `entity/` | `.entity` native checkpoints | ⬜ |
-| `transformer/` | Decoder generate, KV cache, LM head (all quants) | ⬜ |
-| `sampling/` | TopK, greedy, penalties | ⬜ |
-| `tokenizer/` | BPE / HF tokenizers | ⬜ |
-| `hf/` | HuggingFace → native packs | ⬜ |
+| `entity/` | `.entity` native checkpoints | 🚧 |
+| `transformer/` | Decoder generate, KV cache, LM head (all quants) | 🚧 |
+| `sampling/` | TopK, greedy, penalties | 🚧 |
+| `tokenizer/` | BPE / HF tokenizers | ✅ |
+| `hf/` | HuggingFace → native packs | 🚧 |
 | `seed/` | Seed manifests / infinite init | ⬜ |
 | `serialization/` | Bit-perfect native I/O | ⬜ |
 
