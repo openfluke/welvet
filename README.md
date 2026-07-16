@@ -34,6 +34,7 @@
 | **Dense** block-quant × SIMD/WebGPU (all 20 formats on-device fwd+bwd) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
 | `forward/` / `backward/` volumetric Dense walk | ✅ |
+| `training/` SGD on volumetric tape (Dense; layer-agnostic dispatch) | ✅ |
 | All other layers | ⬜ |
 | Model IO / transformer / entity / tokenizer / hf | ⬜ |
 | Accel / donate / fountain / dna / … | ⬜ |
@@ -173,7 +174,7 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | ✅ |
 | `forward/` | Grid walk z→y→x→l; Dense dispatch; remote hops | ✅ |
 | `backward/` | Reverse tape over Dense cells | ✅ |
-| `training/` | Optimizers, graphs, native train | ⬜ |
+| `training/` | MSE + SGD; ApplyGradSGD dispatch (*dense.Layer today) | ✅ |
 
 ### Layers (each needs CPU + SIMD + WebGPU × all dtype × all quant × fwd/bwd)
 
@@ -212,6 +213,9 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | SC + MC tiling | ✅ | 🚧 | ✅ workgroup caps |
 | Timed FormatNone + quant matrices in `w2a` | ✅ | ✅ | ✅ |
 | Grad verify (CPU↔SIMD↔GPU + finite-diff) | ✅ | ✅ | ✅ |
+| Train (fwd+MSE+bwd+SGD) FormatNone×34 + all quants | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
 
 ### Model / IO / runtime
 
