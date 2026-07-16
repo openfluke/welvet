@@ -1,6 +1,7 @@
 package fusedgpu
 
-// BinaryG128 hybrid decoder shaders — weights + activations stay on device.
+// Fast BinaryG128 hybrid shaders: tiled shared-mem GEMV, fused SwiGLU,
+// parallel RMS/GDN, on-device argmax.
 
 const shaderBinG128GEMV = `
 struct Params { inputSize: u32, outputSize: u32, _p0: u32, _p1: u32, };
@@ -10,22 +11,110 @@ struct Params { inputSize: u32, outputSize: u32, _p0: u32, _p1: u32, };
 @group(0) @binding(3) var<storage, read> weights: array<u32>;
 @group(0) @binding(4) var<storage, read_write> output: array<f32>;
 
+const TILE: u32 = 1024u;
+var<workgroup> xin: array<f32, 1024>;
+
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let o = gid.x;
-    if (o >= params.outputSize) { return; }
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let tid = lid.x;
+    let o = wg_id.x * 64u + tid;
+    let inN = params.inputSize;
+    let outN = params.outputSize;
     var sum: f32 = 0.0;
-    let wBase = o * params.inputSize;
-    for (var c: u32 = 0u; c < params.inputSize; c += 32u) {
-        let word = weights[(wBase + c) / 32u];
-        let scale = scales[(wBase + c) / 128u];
-        for (var j: u32 = 0u; j < 32u; j++) {
-            var tw: f32 = -scale;
-            if (((word >> j) & 1u) != 0u) { tw = scale; }
-            sum += input[c + j] * tw;
+    var tile: u32 = 0u;
+    loop {
+        if (tile >= inN) { break; }
+        var n = TILE;
+        if (tile + n > inN) { n = inN - tile; }
+        for (var i = tid; i < n; i += 64u) {
+            xin[i] = input[tile + i];
         }
+        workgroupBarrier();
+        if (o < outN) {
+            let wBase = o * inN + tile;
+            for (var c: u32 = 0u; c < n; c += 32u) {
+                let word = weights[(wBase + c) / 32u];
+                let scale = scales[(wBase + c) / 128u];
+                var lim = 32u;
+                if (c + lim > n) { lim = n - c; }
+                for (var j: u32 = 0u; j < lim; j++) {
+                    var tw: f32 = -scale;
+                    if (((word >> j) & 1u) != 0u) { tw = scale; }
+                    sum += xin[c + j] * tw;
+                }
+            }
+        }
+        workgroupBarrier();
+        tile += TILE;
     }
-    output[o] = sum;
+    if (o < outN) { output[o] = sum; }
+}
+`
+
+// Fused BinaryG128 gate+up → silu(gate)*up into intermediate.
+const shaderBinG128SwiGLU = `
+struct Params { inputSize: u32, intermediate: u32, _p0: u32, _p1: u32, };
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> input: array<f32>;
+@group(0) @binding(2) var<storage, read> gateScales: array<f32>;
+@group(0) @binding(3) var<storage, read> gateWeights: array<u32>;
+@group(0) @binding(4) var<storage, read> upScales: array<f32>;
+@group(0) @binding(5) var<storage, read> upWeights: array<u32>;
+@group(0) @binding(6) var<storage, read_write> output: array<f32>;
+
+const TILE: u32 = 1024u;
+var<workgroup> xin: array<f32, 1024>;
+
+@compute @workgroup_size(64)
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let tid = lid.x;
+    let o = wg_id.x * 64u + tid;
+    let inN = params.inputSize;
+    let outN = params.intermediate;
+    var gSum: f32 = 0.0;
+    var uSum: f32 = 0.0;
+    var tile: u32 = 0u;
+    loop {
+        if (tile >= inN) { break; }
+        var n = TILE;
+        if (tile + n > inN) { n = inN - tile; }
+        for (var i = tid; i < n; i += 64u) {
+            xin[i] = input[tile + i];
+        }
+        workgroupBarrier();
+        if (o < outN) {
+            let wBase = o * inN + tile;
+            for (var c: u32 = 0u; c < n; c += 32u) {
+                let gWord = gateWeights[(wBase + c) / 32u];
+                let uWord = upWeights[(wBase + c) / 32u];
+                let gScale = gateScales[(wBase + c) / 128u];
+                let uScale = upScales[(wBase + c) / 128u];
+                var lim = 32u;
+                if (c + lim > n) { lim = n - c; }
+                for (var j: u32 = 0u; j < lim; j++) {
+                    var gt: f32 = -gScale;
+                    if (((gWord >> j) & 1u) != 0u) { gt = gScale; }
+                    var ut: f32 = -uScale;
+                    if (((uWord >> j) & 1u) != 0u) { ut = uScale; }
+                    let xv = xin[c + j];
+                    gSum += xv * gt;
+                    uSum += xv * ut;
+                }
+            }
+        }
+        workgroupBarrier();
+        tile += TILE;
+    }
+    if (o < outN) {
+        let silu = gSum / (1.0 + exp(-gSum));
+        output[o] = silu * uSum;
+    }
 }
 `
 
@@ -51,6 +140,29 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `
 
+const shaderBinEmbedPrompt = `
+struct Params { hidden: u32, wordsPerRow: u32, groupsPerRow: u32, _p: u32, };
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> step: array<u32>;
+@group(0) @binding(2) var<storage, read> prompt: array<u32>;
+@group(0) @binding(3) var<storage, read> scales: array<f32>;
+@group(0) @binding(4) var<storage, read> weights: array<u32>;
+@group(0) @binding(5) var<storage, read_write> hidden: array<f32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let c = gid.x;
+    if (c >= params.hidden) { return; }
+    let id = prompt[step[0]];
+    let word = weights[id * params.wordsPerRow + c / 32u];
+    let scale = scales[id * params.groupsPerRow + c / 128u];
+    let bit = (word >> (c % 32u)) & 1u;
+    var tw: f32 = -scale;
+    if (bit != 0u) { tw = scale; }
+    hidden[c] = tw;
+}
+`
+
 const shaderHybridRMS = `
 struct Params { dim: u32, eps: f32, _p0: u32, _p1: u32, };
 @group(0) @binding(0) var<uniform> params: Params;
@@ -58,16 +170,30 @@ struct Params { dim: u32, eps: f32, _p0: u32, _p1: u32, };
 @group(0) @binding(2) var<storage, read> gamma: array<f32>;
 @group(0) @binding(3) var<storage, read_write> y: array<f32>;
 
-@compute @workgroup_size(1)
-fn main() {
-    var mean: f32 = 0.0;
-    for (var i: u32 = 0u; i < params.dim; i++) {
+var<workgroup> partial: array<f32, 64>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(local_invocation_id) lid: vec3<u32>) {
+    let tid = lid.x;
+    let dim = params.dim;
+    var local: f32 = 0.0;
+    for (var i = tid; i < dim; i += 64u) {
         let v = x[i];
-        mean += v * v;
+        local += v * v;
     }
-    mean /= f32(params.dim);
-    let inv = inverseSqrt(mean + params.eps);
-    for (var i: u32 = 0u; i < params.dim; i++) {
+    partial[tid] = local;
+    workgroupBarrier();
+    var stride = 32u;
+    loop {
+        if (stride == 0u) { break; }
+        if (tid < stride) {
+            partial[tid] += partial[tid + stride];
+        }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    let inv = inverseSqrt(partial[0] / f32(dim) + params.eps);
+    for (var i = tid; i < dim; i += 64u) {
         y[i] = x[i] * inv * gamma[i];
     }
 }
@@ -87,23 +213,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `
 
-const shaderHybridSwiGLU = `
-struct Params { inter: u32, _p0: u32, _p1: u32, _p2: u32, };
-@group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var<storage, read_write> gate: array<f32>;
-@group(0) @binding(2) var<storage, read> up: array<f32>;
-
-@compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    if (i >= params.inter) { return; }
-    let g = gate[i];
-    let silu = g / (1.0 + exp(-g));
-    gate[i] = silu * up[i];
-}
-`
-
-// Depthwise causal conv over qkv + silu; updates conv state in place.
 const shaderGDNConv = `
 struct Params {
     convDim: u32,
@@ -130,7 +239,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     acc += convW[ch * k + (k - 1u)] * qkv[ch];
     mixed[ch] = acc / (1.0 + exp(-acc));
-    // shift state
     if (hist > 1u) {
         for (var t: u32 = 0u; t < hist - 1u; t++) {
             convState[base + t] = convState[base + t + 1u];
@@ -142,8 +250,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `
 
-// L2-norm key heads, repeat to value heads, scale q; write qRep/kRep; leave v in mixed.
-const shaderGDNPrepQK = `
+// Fused: L2-norm+repeat key heads AND beta/g for value heads (one dispatch).
+const shaderGDNPrepFused = `
 struct Params {
     numK: u32,
     numV: u32,
@@ -151,72 +259,86 @@ struct Params {
     hdV: u32,
 };
 @group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var<storage, read_write> mixed: array<f32>; // [q|k|v]
+@group(0) @binding(1) var<storage, read_write> mixed: array<f32>;
 @group(0) @binding(2) var<storage, read_write> qRep: array<f32>;
 @group(0) @binding(3) var<storage, read_write> kRep: array<f32>;
-
-@compute @workgroup_size(1)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let hi = gid.x;
-    if (hi >= params.numK) { return; }
-    let hdK = params.hdK;
-    let keyDim = params.numK * hdK;
-    let qBase = hi * hdK;
-    let kBase = keyDim + hi * hdK;
-    // L2 q
-    var sq: f32 = 0.0;
-    for (var i: u32 = 0u; i < hdK; i++) {
-        let v = mixed[qBase + i];
-        sq += v * v;
-    }
-    let invQ = inverseSqrt(sq + 1e-6);
-    for (var i: u32 = 0u; i < hdK; i++) {
-        mixed[qBase + i] *= invQ;
-    }
-    // L2 k
-    var sk: f32 = 0.0;
-    for (var i: u32 = 0u; i < hdK; i++) {
-        let v = mixed[kBase + i];
-        sk += v * v;
-    }
-    let invK = inverseSqrt(sk + 1e-6);
-    for (var i: u32 = 0u; i < hdK; i++) {
-        mixed[kBase + i] *= invK;
-    }
-    let rep = params.numV / params.numK;
-    let scale = inverseSqrt(f32(hdK));
-    for (var r: u32 = 0u; r < rep; r++) {
-        let dst = (hi * rep + r) * hdK;
-        for (var i: u32 = 0u; i < hdK; i++) {
-            qRep[dst + i] = mixed[qBase + i] * scale;
-            kRep[dst + i] = mixed[kBase + i];
-        }
-    }
-}
-`
-
-const shaderGDNBetaG = `
-struct Params { numV: u32, _p0: u32, _p1: u32, _p2: u32, };
-@group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var<storage, read> betaRaw: array<f32>;
-@group(0) @binding(2) var<storage, read> aRaw: array<f32>;
-@group(0) @binding(3) var<storage, read> aLog: array<f32>;
-@group(0) @binding(4) var<storage, read> dtBias: array<f32>;
-@group(0) @binding(5) var<storage, read_write> beta: array<f32>;
-@group(0) @binding(6) var<storage, read_write> g: array<f32>;
+@group(0) @binding(4) var<storage, read> betaRaw: array<f32>;
+@group(0) @binding(5) var<storage, read> aRaw: array<f32>;
+@group(0) @binding(6) var<storage, read> aLog: array<f32>;
+@group(0) @binding(7) var<storage, read> dtBias: array<f32>;
+@group(0) @binding(8) var<storage, read_write> beta: array<f32>;
+@group(0) @binding(9) var<storage, read_write> g: array<f32>;
 
 fn softplus(x: f32) -> f32 {
     if (x > 20.0) { return x; }
     return log(1.0 + exp(x));
 }
 
+var<workgroup> red: array<f32, 64>;
+
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    if (i >= params.numV) { return; }
-    beta[i] = 1.0 / (1.0 + exp(-betaRaw[i]));
-    let dt = aRaw[i] + dtBias[i];
-    g[i] = -exp(aLog[i]) * softplus(dt);
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let h = wg_id.x;
+    let tid = lid.x;
+    let hdK = params.hdK;
+    let keyDim = params.numK * hdK;
+
+    if (h < params.numK) {
+        let qBase = h * hdK;
+        let kBase = keyDim + h * hdK;
+        var sq: f32 = 0.0;
+        var sk: f32 = 0.0;
+        for (var i = tid; i < hdK; i += 64u) {
+            let qv = mixed[qBase + i];
+            let kv = mixed[kBase + i];
+            sq += qv * qv;
+            sk += kv * kv;
+        }
+        red[tid] = sq;
+        workgroupBarrier();
+        var stride = 32u;
+        loop {
+            if (stride == 0u) { break; }
+            if (tid < stride) { red[tid] += red[tid + stride]; }
+            workgroupBarrier();
+            stride = stride / 2u;
+        }
+        let invQ = inverseSqrt(red[0] + 1e-6);
+        workgroupBarrier();
+        red[tid] = sk;
+        workgroupBarrier();
+        stride = 32u;
+        loop {
+            if (stride == 0u) { break; }
+            if (tid < stride) { red[tid] += red[tid + stride]; }
+            workgroupBarrier();
+            stride = stride / 2u;
+        }
+        let invK = inverseSqrt(red[0] + 1e-6);
+        for (var i = tid; i < hdK; i += 64u) {
+            mixed[qBase + i] *= invQ;
+            mixed[kBase + i] *= invK;
+        }
+        workgroupBarrier();
+        let rep = params.numV / params.numK;
+        let scale = inverseSqrt(f32(hdK));
+        for (var r: u32 = 0u; r < rep; r++) {
+            let dst = (h * rep + r) * hdK;
+            for (var i = tid; i < hdK; i += 64u) {
+                qRep[dst + i] = mixed[qBase + i] * scale;
+                kRep[dst + i] = mixed[kBase + i];
+            }
+        }
+    }
+
+    if (h < params.numV && tid == 0u) {
+        beta[h] = 1.0 / (1.0 + exp(-betaRaw[h]));
+        let dt = aRaw[h] + dtBias[h];
+        g[h] = -exp(aLog[h]) * softplus(dt);
+    }
 }
 `
 
@@ -236,27 +358,46 @@ struct Params {
 @group(0) @binding(6) var<storage, read_write> state: array<f32>;
 @group(0) @binding(7) var<storage, read_write> out: array<f32>;
 
-@compute @workgroup_size(1)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let h = gid.x;
+var<workgroup> scratch: array<f32, 512>;
+
+@compute @workgroup_size(64)
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let h = wg_id.x;
     if (h >= params.numV) { return; }
+    let tid = lid.x;
     let hdK = params.hdK;
     let hdV = params.hdV;
     let stBase = h * hdK * hdV;
     let gt = exp(g[h]);
     let bt = beta[h];
-    for (var i: u32 = 0u; i < hdK * hdV; i++) {
+    let stN = hdK * hdV;
+
+    for (var i = tid; i < stN; i += 64u) {
         state[stBase + i] *= gt;
     }
-    for (var d: u32 = 0u; d < hdV; d++) {
+    workgroupBarrier();
+
+    for (var d = tid; d < hdV; d += 64u) {
         var s: f32 = 0.0;
         for (var j: u32 = 0u; j < hdK; j++) {
             s += state[stBase + j * hdV + d] * k[h * hdK + j];
         }
-        let delta = (v[h * hdV + d] - s) * bt;
-        for (var j: u32 = 0u; j < hdK; j++) {
-            state[stBase + j * hdV + d] += k[h * hdK + j] * delta;
+        scratch[d] = (v[h * hdV + d] - s) * bt;
+    }
+    workgroupBarrier();
+
+    for (var j = tid; j < hdK; j += 64u) {
+        let kj = k[h * hdK + j];
+        for (var d: u32 = 0u; d < hdV; d++) {
+            state[stBase + j * hdV + d] += kj * scratch[d];
         }
+    }
+    workgroupBarrier();
+
+    for (var d = tid; d < hdV; d += 64u) {
         var o: f32 = 0.0;
         for (var j: u32 = 0u; j < hdK; j++) {
             o += state[stBase + j * hdV + d] * q[h * hdK + j];
@@ -273,19 +414,33 @@ struct Params { dim: u32, eps: f32, _p0: u32, _p1: u32, };
 @group(0) @binding(2) var<storage, read> z: array<f32>;
 @group(0) @binding(3) var<storage, read> gamma: array<f32>;
 
-@compute @workgroup_size(1)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let h = gid.x;
+var<workgroup> partial: array<f32, 64>;
+
+@compute @workgroup_size(64)
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let h = wg_id.x;
+    let tid = lid.x;
     let hd = params.dim;
     let base = h * hd;
-    var mean: f32 = 0.0;
-    for (var i: u32 = 0u; i < hd; i++) {
+    var local: f32 = 0.0;
+    for (var i = tid; i < hd; i += 64u) {
         let v = x[base + i];
-        mean += v * v;
+        local += v * v;
     }
-    mean /= f32(hd);
-    let inv = inverseSqrt(mean + params.eps);
-    for (var i: u32 = 0u; i < hd; i++) {
+    partial[tid] = local;
+    workgroupBarrier();
+    var stride = 32u;
+    loop {
+        if (stride == 0u) { break; }
+        if (tid < stride) { partial[tid] += partial[tid + stride]; }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    let inv = inverseSqrt(partial[0] / f32(hd) + params.eps);
+    for (var i = tid; i < hd; i += 64u) {
         let zi = z[base + i];
         let silu = zi / (1.0 + exp(-zi));
         x[base + i] = x[base + i] * inv * gamma[i] * silu;
@@ -293,38 +448,51 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `
 
-// Per-head RMSNorm (q or k).
 const shaderHeadRMS = `
 struct Params {
     numHeads: u32,
     headDim: u32,
-    eps: f32,
+    epsBits: u32,
     _p: u32,
 };
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read_write> x: array<f32>;
 @group(0) @binding(2) var<storage, read> gamma: array<f32>;
 
-@compute @workgroup_size(1)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let h = gid.x;
+var<workgroup> partial: array<f32, 64>;
+
+@compute @workgroup_size(64)
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let h = wg_id.x;
     if (h >= params.numHeads) { return; }
+    let tid = lid.x;
     let hd = params.headDim;
+    let eps = bitcast<f32>(params.epsBits);
     let base = h * hd;
-    var mean: f32 = 0.0;
-    for (var i: u32 = 0u; i < hd; i++) {
+    var local: f32 = 0.0;
+    for (var i = tid; i < hd; i += 64u) {
         let v = x[base + i];
-        mean += v * v;
+        local += v * v;
     }
-    mean /= f32(hd);
-    let inv = inverseSqrt(mean + params.eps);
-    for (var i: u32 = 0u; i < hd; i++) {
+    partial[tid] = local;
+    workgroupBarrier();
+    var stride = 32u;
+    loop {
+        if (stride == 0u) { break; }
+        if (tid < stride) { partial[tid] += partial[tid + stride]; }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    let inv = inverseSqrt(partial[0] / f32(hd) + eps);
+    for (var i = tid; i < hd; i += 64u) {
         x[base + i] = x[base + i] * inv * gamma[i];
     }
 }
 `
 
-// Split interleaved per-head [q|gate] → qBuf + gateBuf.
 const shaderSplitQGate = `
 struct Params {
     numHeads: u32,
@@ -352,7 +520,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `
 
-// Partial RoPE: rotate first rotDim dims with adjacent pairs (Qwen3.5 style).
 const shaderPartialRoPE = `
 struct Params {
     numHeads: u32,
@@ -520,7 +687,6 @@ const shaderIncPosHybrid = `
 fn main() { step[0] = step[0] + 1u; }
 `
 
-// Zero a buffer (f32) — used to clear GDN/KV state on Reset.
 const shaderZeroF32 = `
 struct Params { n: u32, _p0: u32, _p1: u32, _p2: u32, };
 @group(0) @binding(0) var<uniform> params: Params;
@@ -531,5 +697,45 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.x;
     if (i >= params.n) { return; }
     buf[i] = 0.0;
+}
+`
+
+const shaderHybridArgMax = `
+struct Params { n: u32, _p0: u32, _p1: u32, _p2: u32, };
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> logits: array<f32>;
+@group(0) @binding(2) var<storage, read_write> outTok: array<u32>;
+
+var<workgroup> bval: array<f32, 256>;
+var<workgroup> bidx: array<u32, 256>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(local_invocation_id) lid: vec3<u32>) {
+    let lane = lid.x;
+    var bestV: f32 = -3.402823466e+38;
+    var bestI: u32 = 0u;
+    var i = lane;
+    loop {
+        if (i >= params.n) { break; }
+        let v = logits[i];
+        if (v > bestV) { bestV = v; bestI = i; }
+        i += 256u;
+    }
+    bval[lane] = bestV;
+    bidx[lane] = bestI;
+    workgroupBarrier();
+    var stride = 128u;
+    loop {
+        if (stride == 0u) { break; }
+        if (lane < stride) {
+            if (bval[lane + stride] > bval[lane]) {
+                bval[lane] = bval[lane + stride];
+                bidx[lane] = bidx[lane + stride];
+            }
+        }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    if (lane == 0u) { outTok[0] = bidx[0]; }
 }
 `

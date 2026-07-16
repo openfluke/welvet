@@ -5,6 +5,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/openfluke/welvet/fusedgpu"
 	"github.com/openfluke/welvet/sampling"
 )
 
@@ -57,6 +58,12 @@ func (m *Model) Generate(
 	m.ResetKV()
 	m.Quiet = opts.Silent
 	prefillStart := time.Now()
+
+	// Hybrid full-fuse: on-device argmax (map 4 bytes/token), not full logits.
+	if he, ok := m.gpu.(*fusedgpu.HybridEngine); ok && he != nil {
+		return m.generateHybridGPUSample(he, encode, decode, ids, eos, stream, allTokens, opts, prefillStart)
+	}
+
 	logits, err := m.ForwardTokens(ids)
 	m.Quiet = false
 	prefillElapsed := time.Since(prefillStart)
@@ -98,7 +105,59 @@ func (m *Model) Generate(
 	if !opts.Silent {
 		fmt.Println()
 	}
+	return stream.String(), metrics, nil
+}
 
+func (m *Model) generateHybridGPUSample(
+	he *fusedgpu.HybridEngine,
+	encode func(text string, addSpecial bool) []uint32,
+	decode func(ids []uint32, skipSpecial bool) string,
+	ids []uint32,
+	eos map[int]struct{},
+	stream *Streamer,
+	allTokens []uint32,
+	opts GenOptions,
+	prefillStart time.Time,
+) (string, GenMetrics, error) {
+	_ = encode
+	_ = decode
+	var zero GenMetrics
+	tok, err := he.PrefillSample(ids)
+	m.Quiet = false
+	prefillElapsed := time.Since(prefillStart)
+	if err != nil {
+		return "", zero, fmt.Errorf("prefill: %w", err)
+	}
+	if !opts.Silent {
+		fmt.Printf("  prompt loaded in %s (%.2f tok/s) [gpu sample]\nAssistant: ",
+			prefillElapsed.Round(time.Millisecond),
+			float64(len(ids))/math.Max(prefillElapsed.Seconds(), 1e-9))
+	}
+
+	decodeStart := time.Now()
+	generatedCount := 0
+	for step := 0; step < opts.MaxTokens; step++ {
+		if _, stop := eos[int(tok)]; stop {
+			break
+		}
+		allTokens = append(allTokens, tok)
+		generatedCount++
+		stream.Push(allTokens, opts.Silent, opts.StreamCallback)
+
+		tok, err = he.DecodeSample(tok)
+		if err != nil {
+			metrics := buildMetrics(len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
+			return stream.String(), metrics, fmt.Errorf("decode step %d: %w", step, err)
+		}
+	}
+	decodeElapsed := time.Since(decodeStart)
+	metrics := buildMetrics(len(ids), generatedCount, prefillElapsed, decodeElapsed)
+	if generatedCount > 0 && opts.PrintMetrics && !opts.Silent {
+		fmt.Print(metrics.FormatFooter())
+	}
+	if !opts.Silent {
+		fmt.Println()
+	}
 	return stream.String(), metrics, nil
 }
 

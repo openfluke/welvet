@@ -96,6 +96,22 @@ func (eng *HybridEngine) AppendTokens(ids []uint32) ([]float32, error) {
 	return eng.e.appendTokens(ids)
 }
 
+// PrefillSample runs the prompt on-device and returns the greedy next token (4-byte readback).
+func (eng *HybridEngine) PrefillSample(ids []uint32) (uint32, error) {
+	if eng == nil || eng.e == nil {
+		return 0, fmt.Errorf("fusedgpu: nil hybrid engine")
+	}
+	return eng.e.prefillSample(ids)
+}
+
+// DecodeSample embeds tok, runs one decode step, returns the next greedy token (4-byte readback).
+func (eng *HybridEngine) DecodeSample(tok uint32) (uint32, error) {
+	if eng == nil || eng.e == nil {
+		return 0, fmt.Errorf("fusedgpu: nil hybrid engine")
+	}
+	return eng.e.stepTokenSample(tok)
+}
+
 // AdapterName returns the bound GPU adapter name.
 func (eng *HybridEngine) AdapterName() string {
 	if eng == nil || eng.e == nil || eng.e.adapter == nil {

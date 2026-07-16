@@ -70,8 +70,8 @@ func acquireDevice() (inst *wgpu.Instance, adapt *wgpu.Adapter, dev *wgpu.Device
 	limits := adapt.GetLimits().Limits
 	limits.MaxStorageBufferBindingSize = minU64(1<<30, limits.MaxStorageBufferBindingSize)
 	limits.MaxBufferSize = minU64(2<<30, limits.MaxBufferSize)
-	if limits.MaxStorageBuffersPerShaderStage < 12 {
-		limits.MaxStorageBuffersPerShaderStage = 12
+	if limits.MaxStorageBuffersPerShaderStage < 16 {
+		limits.MaxStorageBuffersPerShaderStage = 16
 	}
 	dev, err = adapt.RequestDevice(&wgpu.DeviceDescriptor{
 		RequiredLimits: &wgpu.RequiredLimits{Limits: limits},
