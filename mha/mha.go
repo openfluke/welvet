@@ -37,6 +37,10 @@ type Layer struct {
 	KVCacheK []float64
 	KVCacheV []float64
 	KVOffset int
+
+	// Decode scratch (reused when seqLen==1 incremental decode).
+	DecodeScratchQ    []float64
+	DecodeScratchAttn []float64
 }
 
 // MixerKind identifies this layer under the seqmix contract.

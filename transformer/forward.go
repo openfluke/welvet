@@ -17,6 +17,13 @@ import (
 // Prefill with the full prompt once, then call with a single new token for decode
 // so MHA KV cache stays warm.
 func (m *Model) ForwardTokens(ids []uint32) ([]float32, error) {
+	if m.gpu != nil {
+		return m.ForwardTokensGPU(ids)
+	}
+	return m.forwardTokensHost(ids)
+}
+
+func (m *Model) forwardTokensHost(ids []uint32) ([]float32, error) {
 	if m == nil || m.Embed == nil {
 		return nil, fmt.Errorf("transformer: nil model")
 	}
@@ -36,7 +43,10 @@ func (m *Model) ForwardTokens(ids []uint32) ([]float32, error) {
 		return nil, fmt.Errorf("embed: %w", err)
 	}
 
-	h := emb
+	sc := m.ensureScratch(emb.Shape, len(emb.Data))
+	copy(sc.h.Data[:len(emb.Data)], emb.Data)
+	h := sc.h
+
 	for i, b := range m.Blocks {
 		_, n1, err := rmsnorm.Forward(b.AttnNorm, h)
 		if err != nil {
@@ -46,7 +56,7 @@ func (m *Model) ForwardTokens(ids []uint32) ([]float32, error) {
 		if err != nil {
 			return nil, fmt.Errorf("block %d attn: %w", i, err)
 		}
-		h = residualAdd(h, a)
+		residualAddInPlace(h, a)
 
 		_, n2, err := rmsnorm.Forward(b.FFNNorm, h)
 		if err != nil {
@@ -56,30 +66,22 @@ func (m *Model) ForwardTokens(ids []uint32) ([]float32, error) {
 		if err != nil {
 			return nil, fmt.Errorf("block %d ffn: %w", i, err)
 		}
-		h = residualAdd(h, f)
+		residualAddInPlace(h, f)
 	}
 
 	if m.HasFinalNorm && m.FinalNorm != nil {
-		_, h, err = rmsnorm.Forward(m.FinalNorm, h)
+		_, normed, err := rmsnorm.Forward(m.FinalNorm, h)
 		if err != nil {
 			return nil, fmt.Errorf("final_norm: %w", err)
 		}
+		copy(h.Data[:len(normed.Data)], normed.Data)
 	}
 
-	last := lastRow(h, m.HiddenSize)
-	return m.applyLMHead(last)
-}
-
-func residualAdd(a, b *core.Tensor[float32]) *core.Tensor[float32] {
-	out := core.NewTensor[float32](a.Shape...)
-	n := len(a.Data)
-	if len(b.Data) < n {
-		n = len(b.Data)
+	off := len(h.Data) - m.HiddenSize
+	if off < 0 {
+		return nil, fmt.Errorf("transformer: hidden short")
 	}
-	for i := 0; i < n; i++ {
-		out.Data[i] = a.Data[i] + b.Data[i]
-	}
-	return out
+	return m.applyLMHead(h.Data[off:])
 }
 
 func lastRow(t *core.Tensor[float32], hidden int) []float32 {
@@ -98,7 +100,7 @@ func (m *Model) applyLMHead(hidden []float32) ([]float32, error) {
 	if err != nil {
 		return nil, err
 	}
-	if m.Exec.Backend == core.BackendWebGPU {
+	if m.Exec.Backend == core.BackendWebGPU && m.gpu == nil {
 		if err := dense.MatVecWebGPU(store, hidden, logits, 1, m.HiddenSize, m.VocabSize); err != nil {
 			return nil, fmt.Errorf("lm_head gpu: %w", err)
 		}

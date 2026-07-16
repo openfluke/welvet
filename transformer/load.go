@@ -202,15 +202,3 @@ func LoadEntity(path string) (*Model, error) {
 
 	return m, nil
 }
-
-// ResetKV clears attention caches for a new prompt.
-func (m *Model) ResetKV() {
-	if m == nil {
-		return
-	}
-	for i := range m.Blocks {
-		m.Blocks[i].Attn.KVOffset = 0
-		m.Blocks[i].Attn.KVCacheK = nil
-		m.Blocks[i].Attn.KVCacheV = nil
-	}
-}

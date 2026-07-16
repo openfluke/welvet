@@ -49,4 +49,20 @@ type Model struct {
 	// PackFormat is the active fused quant layout (all k-quants / IQ / BitNet).
 	PackFormat quant.Format
 	FusedPack  bool
+
+	// gpu holds *fusedgpu.Engine when gpu_fuse profile synced (see gpu.go).
+	gpu any
+
+	scratch *fwdScratch
 }
+
+// FusedGPUReady reports whether the full fused GPU decoder can run.
+func (m *Model) FusedGPUReady() bool {
+	return m != nil && m.FusedPack && m.PackFormat == quant.FormatQ4_0
+}
+
+// LMHeadPackedBlob returns baked tied-head logits matrix when present.
+func (m *Model) LMHeadPackedBlob() *quant.Blob { return m.lmHeadPacked }
+
+// UntiedLMHead returns untied lm_head weights when present.
+func (m *Model) UntiedLMHead() *weights.Store { return m.lmHead }

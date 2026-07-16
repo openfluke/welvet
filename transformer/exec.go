@@ -90,7 +90,7 @@ func (p ExecProfile) FusedNote() string {
 		return "packed quant + SIMD fused kernels (Lucy-style CPU path)"
 	case "gpu_fuse":
 		if webgpu.Available() {
-			return "packed quant dense + LM head on GPU; embed/norm/attn on host"
+			return "full-stack Q4 decoder on GPU (Lucy ForwardTokenIDsWGPU path)"
 		}
 		return "packed quant on GPU (needs Vulkan/DX12/Metal adapter)"
 	default:
@@ -101,6 +101,9 @@ func (p ExecProfile) FusedNote() string {
 // GPUHybridNote explains what runs on GPU vs host for the gpu profile.
 func (p ExecProfile) GPUHybridNote() string {
 	if p.Backend != core.BackendWebGPU {
+		return ""
+	}
+	if p.Fused {
 		return ""
 	}
 	name := webgpu.AdapterName()
@@ -148,6 +151,13 @@ func (m *Model) ApplyExec(p ExecProfile) error {
 				return fmt.Errorf("fused pack: %w", err)
 			}
 		}
+	}
+	if p.Fused && p.Backend == core.BackendWebGPU && m.FusedGPUReady() {
+		if err := m.SyncGPU(); err != nil {
+			return fmt.Errorf("fused gpu: %w", err)
+		}
+	} else if m.gpu != nil {
+		m.CloseGPU()
 	}
 	if m.Embed != nil {
 		m.Embed.Exec = exec

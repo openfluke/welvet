@@ -102,12 +102,20 @@ func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 	qGamma := l.QNormWeight
 	kGamma := l.KNormWeight
 
+	needScratch := lay.seqLen * qDim
+	if needScratch > len(l.DecodeScratchQ) {
+		l.DecodeScratchQ = make([]float64, needScratch)
+	}
+	if needScratch > len(l.DecodeScratchAttn) {
+		l.DecodeScratchAttn = make([]float64, needScratch)
+	}
+
 	for b := 0; b < lay.batch; b++ {
 		seqBase := kvStart
 		if cfg.Mode == ModeSelf {
 			seqBase = kvStart + b*lay.seqLen
 		}
-		Q := make([]float64, lay.seqLen*qDim)
+		Q := l.DecodeScratchQ[:lay.seqLen*qDim]
 
 		if cfg.Mode == ModeCross {
 			// Fill KV from this batch's context once.
@@ -163,7 +171,7 @@ func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 			kvLen = seqBase + lay.seqLen
 		}
 
-		attnOut := make([]float64, lay.seqLen*qDim)
+		attnOut := l.DecodeScratchAttn[:lay.seqLen*qDim]
 		attnForward(cfg, attnOut, Q, l.KVCacheK, l.KVCacheV,
 			lay.seqLen, seqBase, kvLen, msl, qDim, kvDim, allow)
 		for s := 0; s < lay.seqLen; s++ {
