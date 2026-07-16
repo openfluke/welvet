@@ -9,9 +9,10 @@ import (
 
 	"github.com/openfluke/welvet/architecture"
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/cnn1"
 	"github.com/openfluke/welvet/dense"
-	"github.com/openfluke/welvet/mha"
 	"github.com/openfluke/welvet/layernorm"
+	"github.com/openfluke/welvet/mha"
 	"github.com/openfluke/welvet/rmsnorm"
 	"github.com/openfluke/welvet/swiglu"
 )
@@ -108,6 +109,12 @@ func dispatch[T core.Numeric](cell *architecture.Cell, input *core.Tensor[T]) (p
 			return nil, nil, fmt.Errorf("layernorm cell Op is %T, want *layernorm.Layer", cell.Op)
 		}
 		return layernorm.Forward(ll, input)
+	case core.LayerCNN1:
+		cl, ok := cell.Op.(*cnn1.Layer)
+		if !ok || cl == nil {
+			return nil, nil, fmt.Errorf("cnn1 cell Op is %T, want *cnn1.Layer", cell.Op)
+		}
+		return cnn1.Forward(cl, input)
 	default:
 		return nil, nil, fmt.Errorf("unsupported layer type %s", cell.Layer.Type)
 	}
