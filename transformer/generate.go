@@ -34,7 +34,7 @@ func (m *Model) Generate(
 		return "", zero, fmt.Errorf("transformer: nil model")
 	}
 	if opts.MaxTokens <= 0 {
-		opts.MaxTokens = 128
+		opts.MaxTokens = 1024
 	}
 	if !opts.Silent && !opts.PrintMetrics {
 		opts.PrintMetrics = true
