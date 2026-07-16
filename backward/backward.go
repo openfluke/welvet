@@ -17,6 +17,7 @@ import (
 	"github.com/openfluke/welvet/mha"
 	"github.com/openfluke/welvet/rmsnorm"
 	"github.com/openfluke/welvet/rnn"
+	"github.com/openfluke/welvet/softmax"
 	"github.com/openfluke/welvet/swiglu"
 )
 
@@ -127,6 +128,12 @@ func dispatchBwd[T core.Numeric](st forward.Step[T], gradOut *core.Tensor[T]) (g
 			return nil, nil, fmt.Errorf("embedding cell Op is %T", st.Cell.Op)
 		}
 		return embedding.Backward(el, gradOut, st.Input, st.Pre)
+	case core.LayerSoftmax:
+		sl, ok := st.Cell.Op.(*softmax.Layer)
+		if !ok || sl == nil {
+			return nil, nil, fmt.Errorf("softmax cell Op is %T", st.Cell.Op)
+		}
+		return softmax.Backward(sl, gradOut, st.Input, st.Pre)
 	default:
 		return nil, nil, fmt.Errorf("unsupported layer type %s", st.Cell.Layer.Type)
 	}

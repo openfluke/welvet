@@ -19,6 +19,7 @@ import (
 	"github.com/openfluke/welvet/mha"
 	"github.com/openfluke/welvet/rmsnorm"
 	"github.com/openfluke/welvet/rnn"
+	"github.com/openfluke/welvet/softmax"
 	"github.com/openfluke/welvet/swiglu"
 )
 
@@ -150,6 +151,12 @@ func dispatch[T core.Numeric](cell *architecture.Cell, input *core.Tensor[T]) (p
 			return nil, nil, fmt.Errorf("embedding cell Op is %T, want *embedding.Layer", cell.Op)
 		}
 		return embedding.Forward(el, input)
+	case core.LayerSoftmax:
+		sl, ok := cell.Op.(*softmax.Layer)
+		if !ok || sl == nil {
+			return nil, nil, fmt.Errorf("softmax cell Op is %T, want *softmax.Layer", cell.Op)
+		}
+		return softmax.Forward(sl, input)
 	default:
 		return nil, nil, fmt.Errorf("unsupported layer type %s", cell.Layer.Type)
 	}
