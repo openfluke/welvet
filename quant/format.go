@@ -118,9 +118,22 @@ type Blob struct {
 	Meta []byte
 	// BlockWeights is the primary block / super-block width (e.g. 32 or 256).
 	BlockWeights int
+	// Q4Packed is optional u32 SIMD view (4 words / Q4_0 block); see EnsureQ4SIMDCache.
+	Q4Packed []uint32
 }
 
-// Supported reports whether pack/unpack/MatVec exist for this format.
+// ParseFormatName maps ENTITY header / blob format strings to Format.
+func ParseFormatName(s string) Format {
+	if s == "" || s == "none" {
+		return FormatNone
+	}
+	for _, f := range AllFormats {
+		if f.String() == s {
+			return f
+		}
+	}
+	return FormatNone
+}
 func Supported(f Format) bool {
 	switch f {
 	case FormatNone,

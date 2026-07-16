@@ -58,6 +58,12 @@ func Available() bool {
 	return haveGPU
 }
 
+// InitError returns why WebGPU init failed (nil if Available or not yet tried).
+func InitError() error {
+	ensure()
+	return initErr
+}
+
 // AdapterName returns the bound adapter name (empty if none).
 func AdapterName() string {
 	ensure()

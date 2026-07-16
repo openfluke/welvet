@@ -4,8 +4,10 @@ import (
 	"fmt"
 
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/embedding"
 	"github.com/openfluke/welvet/mha"
+	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/rmsnorm"
 	"github.com/openfluke/welvet/swiglu"
 	"github.com/openfluke/welvet/weights"
@@ -92,16 +94,49 @@ func lastRow(t *core.Tensor[float32], hidden int) []float32 {
 
 func (m *Model) applyLMHead(hidden []float32) ([]float32, error) {
 	logits := make([]float32, m.VocabSize)
-	var store *weights.Store
-	if m.lmHead != nil {
-		store = m.lmHead
-	} else if m.Embed != nil {
-		store = m.Embed.Weights
-	} else {
-		return nil, fmt.Errorf("lm_head: no weights")
-	}
-	if err := weights.MatVec(store, hidden, logits); err != nil {
+	store, err := m.lmHeadStore()
+	if err != nil {
 		return nil, err
 	}
+	if m.Exec.Backend == core.BackendWebGPU {
+		if err := dense.MatVecWebGPU(store, hidden, logits, 1, m.HiddenSize, m.VocabSize); err != nil {
+			return nil, fmt.Errorf("lm_head gpu: %w", err)
+		}
+		return logits, nil
+	}
+	if store.Format == quant.FormatQ4_0 && store.Packed != nil {
+		if err := dense.MatVecQ4_0Blob(store.Packed, hidden, logits); err != nil {
+			return nil, fmt.Errorf("lm_head q4: %w", err)
+		}
+		return logits, nil
+	}
+	if store.Format != quant.FormatNone && store.Packed != nil {
+		if err := weights.MatVec(store, hidden, logits); err != nil {
+			return nil, fmt.Errorf("lm_head packed: %w", err)
+		}
+		return logits, nil
+	}
+	if err := weights.MatVec(store, hidden, logits); err != nil {
+		return nil, fmt.Errorf("lm_head: %w", err)
+	}
 	return logits, nil
+}
+
+func (m *Model) lmHeadStore() (*weights.Store, error) {
+	if m.lmHead != nil {
+		return m.lmHead, nil
+	}
+	if m.lmHeadPacked != nil {
+		return &weights.Store{
+			Rows:   m.VocabSize,
+			Cols:   m.HiddenSize,
+			Format: m.PackFormat,
+			Packed: m.lmHeadPacked,
+			DType:  core.DTypeFloat32,
+		}, nil
+	}
+	if m.Embed != nil && m.Embed.Weights != nil {
+		return m.Embed.Weights, nil
+	}
+	return nil, fmt.Errorf("lm_head: no weights")
 }

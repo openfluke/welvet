@@ -114,7 +114,15 @@ func (s *Store) Pack(format quant.Format) error {
 	s.Packed = b
 	s.gpuF32 = nil
 	s.wireF64 = nil
+	if format == quant.FormatQ4_0 {
+		quant.EnsureQ4SIMDCache(b)
+	}
 	return nil
+}
+
+// MatrixF32 returns row-major float32 weights (pack / fused quant source).
+func MatrixF32(s *Store) ([]float32, error) {
+	return s.float32View()
 }
 
 func (s *Store) float32View() ([]float32, error) {

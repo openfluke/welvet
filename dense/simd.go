@@ -528,26 +528,27 @@ func quantizeActsI8(x []float32, out []int8) float32 {
 }
 
 func q4BlobToSIMD(b *quant.Blob) (scales []float32, packed []uint32, ok bool) {
-	if b == nil || b.Format != quant.FormatQ4_0 || len(b.Raw) < 20 {
-		return nil, nil, false
+	return quant.Q4SIMD(b)
+}
+
+// MatVecQ4_0Blob computes y = W @ x using SIMD Q4_0 kernels (LM head / standalone).
+func MatVecQ4_0Blob(b *quant.Blob, x, y []float32) error {
+	scales, packed, ok := q4BlobToSIMD(b)
+	if !ok {
+		return fmt.Errorf("dense: Q4_0 SIMD view missing")
 	}
-	const bw = 32
-	n := b.Rows * b.Cols
-	blocks := (n + bw - 1) / bw
-	if len(b.Raw) < blocks*20 {
-		return nil, nil, false
+	in, out := b.Cols, b.Rows
+	if len(x) < in || len(y) < out {
+		return fmt.Errorf("dense: Q4_0 matvec shape")
 	}
-	scales = make([]float32, blocks)
-	packed = make([]uint32, blocks*4)
-	for bi := 0; bi < blocks; bi++ {
-		off := bi * 20
-		scales[bi] = math.Float32frombits(uint32(b.Raw[off]) | uint32(b.Raw[off+1])<<8 | uint32(b.Raw[off+2])<<16 | uint32(b.Raw[off+3])<<24)
-		for k := 0; k < 4; k++ {
-			packed[bi*4+k] = uint32(b.Raw[off+4+k*4]) |
-				uint32(b.Raw[off+5+k*4])<<8 |
-				uint32(b.Raw[off+6+k*4])<<16 |
-				uint32(b.Raw[off+7+k*4])<<24
-		}
+	o := 0
+	for ; o+4 <= out && in%32 == 0; o += 4 {
+		var tmp [4]float32
+		simd.DotQ4_0Rows4(x, scales, packed, o*in, in, tmp[:])
+		copy(y[o:o+4], tmp[:])
 	}
-	return scales, packed, true
+	for ; o < out; o++ {
+		y[o] = float32(simd.DotQ4_0Row(x, scales, packed, o*in, in, 0))
+	}
+	return nil
 }

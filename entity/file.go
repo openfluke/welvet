@@ -6,15 +6,19 @@ import (
 	"fmt"
 	"math"
 	"os"
+
+	"github.com/openfluke/welvet/quant"
 )
 
-// WeightBlob indexes one Float32 (FormatNone) payload in the blob section.
+// WeightBlob indexes one payload in the blob section (F32 or packed quant).
 type WeightBlob struct {
 	Path   string `json:"path"`
 	Offset uint64 `json:"offset"`
 	Length uint64 `json:"length"`
-	DType  string `json:"dtype"`   // "FLOAT32"
-	Format string `json:"format"`  // "none"
+	DType  string `json:"dtype"`  // "FLOAT32" for norms/embed
+	Format string `json:"format"` // "none", "Q4_0", "Q4_K", …
+	Rows   int    `json:"rows,omitempty"`
+	Cols   int    `json:"cols,omitempty"`
 	Native bool   `json:"native"`
 }
 
@@ -39,6 +43,8 @@ type TransformerSpec struct {
 	LMHeadTied   bool             `json:"lm_head_tied,omitempty"`
 	HasFinalNorm bool             `json:"has_final_norm,omitempty"`
 	WeightDType  string           `json:"weight_dtype,omitempty"`
+	PackFormat   string           `json:"pack_format,omitempty"` // baked decoder quant (Q4_0, Q4_K, …)
+	LMHeadPacked bool             `json:"lm_head_packed,omitempty"`
 	Snapshot     string           `json:"snapshot,omitempty"`
 	Tokenizer    string           `json:"tokenizer,omitempty"`
 	Repo         string           `json:"repo,omitempty"`
@@ -145,20 +151,13 @@ func (ef *File) LoadBlob(path string) ([]float32, error) {
 	if ef == nil || ef.hdr == nil {
 		return nil, fmt.Errorf("entity: not open")
 	}
-	var blob *WeightBlob
-	for i := range ef.hdr.Blobs {
-		if ef.hdr.Blobs[i].Path == path {
-			blob = &ef.hdr.Blobs[i]
-			break
-		}
+	blob, err := ef.findBlob(path)
+	if err != nil {
+		return nil, err
 	}
-	if blob == nil {
-		return nil, fmt.Errorf("entity blob %q not found", path)
-	}
-	raw := make([]byte, int(blob.Length))
-	off := int64(ef.hdr.DataOffset) + int64(blob.Offset)
-	if _, err := ef.f.ReadAt(raw, off); err != nil {
-		return nil, fmt.Errorf("entity blob %q: %w", path, err)
+	raw, err := ef.LoadBlobBytes(path)
+	if err != nil {
+		return nil, err
 	}
 	if blob.DType != "FLOAT32" && blob.DType != "" {
 		return nil, fmt.Errorf("entity blob %q: unsupported dtype %s (only FLOAT32 this pass)", path, blob.DType)
@@ -172,6 +171,52 @@ func (ef *File) LoadBlob(path string) ([]float32, error) {
 		out[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4 : i*4+4]))
 	}
 	return out, nil
+}
+
+// LoadBlobBytes reads raw payload bytes for a blob path.
+func (ef *File) LoadBlobBytes(path string) ([]byte, error) {
+	blob, err := ef.findBlob(path)
+	if err != nil {
+		return nil, err
+	}
+	raw := make([]byte, int(blob.Length))
+	off := int64(ef.hdr.DataOffset) + int64(blob.Offset)
+	if _, err := ef.f.ReadAt(raw, off); err != nil {
+		return nil, fmt.Errorf("entity blob %q: %w", path, err)
+	}
+	return raw, nil
+}
+
+// LoadQuantBlob decodes a packed quant blob (Format != none).
+func (ef *File) LoadQuantBlob(path string) (*quant.Blob, error) {
+	blob, err := ef.findBlob(path)
+	if err != nil {
+		return nil, err
+	}
+	format := quant.ParseFormatName(blob.Format)
+	if format == quant.FormatNone {
+		return nil, fmt.Errorf("entity blob %q: not a packed quant blob (format=%q)", path, blob.Format)
+	}
+	if blob.Rows <= 0 || blob.Cols <= 0 {
+		return nil, fmt.Errorf("entity blob %q: missing rows/cols", path)
+	}
+	wire, err := ef.LoadBlobBytes(path)
+	if err != nil {
+		return nil, err
+	}
+	return DecodePackedBlob(format, blob.Rows, blob.Cols, wire)
+}
+
+func (ef *File) findBlob(path string) (*WeightBlob, error) {
+	if ef == nil || ef.hdr == nil {
+		return nil, fmt.Errorf("entity: not open")
+	}
+	for i := range ef.hdr.Blobs {
+		if ef.hdr.Blobs[i].Path == path {
+			return &ef.hdr.Blobs[i], nil
+		}
+	}
+	return nil, fmt.Errorf("entity blob %q not found", path)
 }
 
 // PeekMagic reads the first 8 bytes of path.

@@ -31,6 +31,21 @@ func ForwardWebGPU[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *
 	return pre, post, nil
 }
 
+// MatVecWebGPU computes y = W @ x on device for any packed/native weight layout.
+func MatVecWebGPU(s *weights.Store, x, y []float32, batch, in, out int) error {
+	if s == nil {
+		return fmt.Errorf("dense: nil weights")
+	}
+	l := &Layer{
+		Weights: s,
+		Core: core.Layer{
+			InputHeight:  in,
+			OutputHeight: out,
+		},
+	}
+	return forwardWebGPUDispatch(l, x, y, batch, in, out)
+}
+
 func forwardWebGPUDispatch(l *Layer, xF, yF []float32, batch, in, out int) error {
 	switch {
 	case l.Weights.Format == quant.FormatQ4_0 && l.Weights.Packed != nil:

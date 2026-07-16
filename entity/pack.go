@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/openfluke/welvet/hf"
 	"github.com/openfluke/welvet/quant"
@@ -23,10 +24,12 @@ type PackOptions struct {
 	Progress ProgressFunc
 }
 
-// PackFromHF converts a Hugging Face snapshot directory to a Welvet .entity (FormatNone only).
+// PackFromHF converts a Hugging Face snapshot directory to a Welvet .entity.
+// When opts.Format != FormatNone, decoder dense weights + LM head are baked as packed quant
+// (embed + RMSNorm γ stay Float32 — Lucy parity).
 func PackFromHF(snapshotDir, outPath string, opts PackOptions) error {
-	if opts.Format != quant.FormatNone {
-		return fmt.Errorf("entity.PackFromHF: only FormatNone supported this pass (got %s)", opts.Format.String())
+	if opts.Format != quant.FormatNone && !quant.Supported(opts.Format) {
+		return fmt.Errorf("entity.PackFromHF: unsupported pack format %s", opts.Format.String())
 	}
 
 	configPath := filepath.Join(snapshotDir, "config.json")
@@ -109,6 +112,32 @@ func PackFromHF(snapshotDir, outPath string, opts PackOptions) error {
 			Length: uint64(len(data) * 4),
 			DType:  "FLOAT32",
 			Format: "none",
+			Native: false,
+		})
+		return nil
+	}
+	appendPacked := func(path string, data []float32, rows, cols int) error {
+		if opts.Format == quant.FormatNone {
+			return appendF32(path, data)
+		}
+		blob, err := quant.Pack(opts.Format, data, rows, cols)
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		wire := EncodePackedBlob(blob)
+		off := acc.offset
+		if _, err := acc.w.Write(wire); err != nil {
+			return err
+		}
+		acc.offset += uint64(len(wire))
+		blobs = append(blobs, WeightBlob{
+			Path:   path,
+			Offset: off,
+			Length: uint64(len(wire)),
+			DType:  "PACKED",
+			Format: opts.Format.String(),
+			Rows:   rows,
+			Cols:   cols,
 			Native: true,
 		})
 		return nil
@@ -125,13 +154,30 @@ func PackFromHF(snapshotDir, outPath string, opts PackOptions) error {
 		}
 	}
 	if !globals.LMHeadTied {
-		if err := appendF32("transformer.lm_head", globals.LMHead); err != nil {
+		if err := appendPacked("transformer.lm_head", globals.LMHead, dims.VocabSize, dims.HiddenSize); err != nil {
+			_ = payloadTmp.Close()
+			return err
+		}
+	} else if opts.Format != quant.FormatNone {
+		// Baked packed LM head for tied embeddings (+H parity).
+		if err := appendPacked("transformer.lm_head.packed", globals.Embeddings, dims.VocabSize, dims.HiddenSize); err != nil {
 			_ = payloadTmp.Close()
 			return err
 		}
 	}
 
 	layerFiles := hf.BuildLayerShardIndex(sts, dims.NumLayers)
+	qDim := dims.NumHeads * dims.HeadDim
+	kvDim := dims.NumKVHeads * dims.HeadDim
+	if dims.QueryDim > 0 {
+		qDim = dims.QueryDim
+	}
+	if dims.KVDim > 0 {
+		kvDim = dims.KVDim
+	}
+	hidden := dims.HiddenSize
+	inter := dims.IntermediateSize
+
 	for i := 0; i < dims.NumLayers; i++ {
 		if progress != nil {
 			progress(i+1, dims.NumLayers, fmt.Sprintf("block %d/%d", i+1, dims.NumLayers))
@@ -158,19 +204,28 @@ func PackFromHF(snapshotDir, outPath string, opts PackOptions) error {
 		pairs := []struct {
 			name string
 			data []float32
+			rows int
+			cols int
 		}{
-			{prefix + ".attn_norm", block.AttnNorm},
-			{prefix + ".q", block.Q},
-			{prefix + ".k", block.K},
-			{prefix + ".v", block.V},
-			{prefix + ".o", block.O},
-			{prefix + ".ffn_norm", block.FFNNorm},
-			{prefix + ".gate", block.Gate},
-			{prefix + ".up", block.Up},
-			{prefix + ".down", block.Down},
+			{prefix + ".attn_norm", block.AttnNorm, 0, 0},
+			{prefix + ".q", block.Q, qDim, hidden},
+			{prefix + ".k", block.K, kvDim, hidden},
+			{prefix + ".v", block.V, kvDim, hidden},
+			{prefix + ".o", block.O, hidden, qDim},
+			{prefix + ".ffn_norm", block.FFNNorm, 0, 0},
+			{prefix + ".gate", block.Gate, inter, hidden},
+			{prefix + ".up", block.Up, inter, hidden},
+			{prefix + ".down", block.Down, hidden, inter},
 		}
 		for _, p := range pairs {
-			if err := appendF32(p.name, p.data); err != nil {
+			if strings.HasSuffix(p.name, "_norm") {
+				if err := appendF32(p.name, p.data); err != nil {
+					_ = payloadTmp.Close()
+					return err
+				}
+				continue
+			}
+			if err := appendPacked(p.name, p.data, p.rows, p.cols); err != nil {
 				_ = payloadTmp.Close()
 				return err
 			}
@@ -208,6 +263,10 @@ func PackFromHF(snapshotDir, outPath string, opts PackOptions) error {
 			RMSNormEps:       dims.RMSNormEps,
 			RoPEFreqBase:     dims.RoPEFreqBase,
 		},
+	}
+	if opts.Format != quant.FormatNone {
+		spec.PackFormat = opts.Format.String()
+		spec.LMHeadPacked = true
 	}
 
 	doc := headerDoc{

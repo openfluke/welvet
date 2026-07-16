@@ -44,7 +44,6 @@ func PackQ4_0(weights []float32, rows, cols int) (*Blob, error) {
 	}, nil
 }
 
-// UnpackQ4_0 expands a Q4_0 Blob to float32 (reference / debug path).
 func UnpackQ4_0(b *Blob) ([]float32, error) {
 	if b == nil || b.Format != FormatQ4_0 {
 		return nil, errFormat("UnpackQ4_0", b)

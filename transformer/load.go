@@ -12,7 +12,6 @@ import (
 	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/rmsnorm"
 	"github.com/openfluke/welvet/swiglu"
-	"github.com/openfluke/welvet/weights"
 )
 
 // LoadEntity builds a Model from a packed Welvet .entity file.
@@ -63,6 +62,9 @@ func LoadEntity(path string) (*Model, error) {
 		Blocks:        make([]Block, d.NumLayers),
 		EOSTokens:     []int{2},
 	}
+	packFmt := specPackFormat(spec)
+	m.PackFormat = packFmt
+	m.FusedPack = packFmt != quant.FormatNone
 	if m.Snapshot != "" {
 		cfgPath := filepath.Join(m.Snapshot, "config.json")
 		if cfg, err := hf.LoadConfigJSON(cfgPath); err == nil {
@@ -90,24 +92,27 @@ func LoadEntity(path string) (*Model, error) {
 		}
 	}
 
-	if !spec.LMHeadTied {
-		lm, err := ef.LoadBlob("transformer.lm_head")
-		if err != nil {
-			return nil, err
-		}
-		ws, err := weights.New(spec.VocabSize, spec.HiddenSize, lm, core.DTypeFloat32, quant.FormatNone)
-		if err != nil {
-			return nil, fmt.Errorf("lm_head: %w", err)
-		}
-		m.lmHead = ws
+	if err := loadLMHead(ef, m, packFmt); err != nil {
+		return nil, err
 	}
+
+	qDim := d.NumHeads * d.HeadDim
+	kvDim := d.NumKVHeads * d.HeadDim
+	if d.QueryDim > 0 {
+		qDim = d.QueryDim
+	}
+	if d.KVDim > 0 {
+		kvDim = d.KVDim
+	}
+	hidden := spec.HiddenSize
+	inter := d.IntermediateSize
 
 	for i := 0; i < d.NumLayers; i++ {
 		prefix := fmt.Sprintf("blocks.%d", i)
-		load := func(suffix string) ([]float32, error) {
+		loadF32 := func(suffix string) ([]float32, error) {
 			return ef.LoadBlob(prefix + "." + suffix)
 		}
-		an, err := load("attn_norm")
+		an, err := loadF32("attn_norm")
 		if err != nil {
 			return nil, err
 		}
@@ -115,19 +120,19 @@ func LoadEntity(path string) (*Model, error) {
 		if err != nil {
 			return nil, err
 		}
-		q, err := load("q")
+		qStore, err := loadWeightStore(ef, prefix+".q", qDim, hidden, packFmt)
 		if err != nil {
 			return nil, err
 		}
-		k, err := load("k")
+		kStore, err := loadWeightStore(ef, prefix+".k", kvDim, hidden, packFmt)
 		if err != nil {
 			return nil, err
 		}
-		v, err := load("v")
+		vStore, err := loadWeightStore(ef, prefix+".v", kvDim, hidden, packFmt)
 		if err != nil {
 			return nil, err
 		}
-		o, err := load("o")
+		oStore, err := loadWeightStore(ef, prefix+".o", hidden, qDim, packFmt)
 		if err != nil {
 			return nil, err
 		}
@@ -135,12 +140,25 @@ func LoadEntity(path string) (*Model, error) {
 		cfg.HeadDim = d.HeadDim
 		cfg.RoPETheta = rope
 		cfg.MaxSeqLen = maxSeq
-		attn, err := mha.NewConfigured(cfg, core.DTypeFloat32, quant.FormatNone, q, k, v, o)
-		if err != nil {
-			return nil, fmt.Errorf("block %d mha: %w", i, err)
+		attn := &mha.Layer{
+			Core: core.Layer{
+				Type:         core.LayerMultiHeadAttention,
+				DType:        core.DTypeFloat32,
+				Activation:   core.ActivationLinear,
+				InputHeight:  hidden,
+				OutputHeight: hidden,
+				TileSize:     32,
+				MultiCore:    true,
+			},
+			Cfg:  cfg,
+			Exec: core.ExecConfig{Backend: core.BackendCPUTiled, MultiCore: true, TileSize: 32},
+			Q:    denseFromStore(hidden, qDim, core.ActivationLinear, qStore),
+			K:    denseFromStore(hidden, kvDim, core.ActivationLinear, kStore),
+			V:    denseFromStore(hidden, kvDim, core.ActivationLinear, vStore),
+			O:    denseFromStore(qDim, hidden, core.ActivationLinear, oStore),
 		}
 
-		fn, err := load("ffn_norm")
+		fn, err := loadF32("ffn_norm")
 		if err != nil {
 			return nil, err
 		}
@@ -148,24 +166,36 @@ func LoadEntity(path string) (*Model, error) {
 		if err != nil {
 			return nil, err
 		}
-		gate, err := load("gate")
+		gateStore, err := loadWeightStore(ef, prefix+".gate", inter, hidden, packFmt)
 		if err != nil {
 			return nil, err
 		}
-		up, err := load("up")
+		upStore, err := loadWeightStore(ef, prefix+".up", inter, hidden, packFmt)
 		if err != nil {
 			return nil, err
 		}
-		down, err := load("down")
+		downStore, err := loadWeightStore(ef, prefix+".down", hidden, inter, packFmt)
 		if err != nil {
 			return nil, err
 		}
-		ffn, err := swiglu.NewConfigured(swiglu.Config{
-			InputDim:         spec.HiddenSize,
-			IntermediateDim:  d.IntermediateSize,
-		}, core.DTypeFloat32, quant.FormatNone, gate, up, down)
-		if err != nil {
-			return nil, fmt.Errorf("block %d swiglu: %w", i, err)
+		ffn := &swiglu.Layer{
+			Core: core.Layer{
+				Type:         core.LayerSwiGLU,
+				DType:        core.DTypeFloat32,
+				Activation:   core.ActivationSilu,
+				InputHeight:  hidden,
+				OutputHeight: hidden,
+				TileSize:     32,
+				MultiCore:    true,
+			},
+			Cfg: swiglu.Config{
+				InputDim:        hidden,
+				IntermediateDim: inter,
+			},
+			Exec: core.ExecConfig{Backend: core.BackendCPUTiled, MultiCore: true, TileSize: 32},
+			Gate: denseFromStore(hidden, inter, core.ActivationLinear, gateStore),
+			Up:   denseFromStore(hidden, inter, core.ActivationLinear, upStore),
+			Down: denseFromStore(inter, hidden, core.ActivationLinear, downStore),
 		}
 		m.Blocks[i] = Block{AttnNorm: attnNorm, Attn: attn, FFNNorm: ffnNorm, FFN: ffn}
 	}
