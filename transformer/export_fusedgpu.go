@@ -46,6 +46,12 @@ func (m *Model) ExportFusedGPUSpec() (*fusedgpu.Spec, error) {
 	if maxSeq <= 0 {
 		maxSeq = 512
 	}
+	// Cap KV footprint for fused GPU — host MaxSeqLen may be 2048+ for long-context
+	// CPU paths; 4GB cards OOM on kc_* after several sequential SyncGPU uploads.
+	const gpuMaxSeq = 256
+	if maxSeq > gpuMaxSeq {
+		maxSeq = gpuMaxSeq
+	}
 
 	emb, err := weights.MatrixF32(m.Embed.Weights)
 	if err != nil {
@@ -181,6 +187,8 @@ func q4SpecFromDense(l *dense.Layer) (fusedgpu.Q4Spec, error) {
 }
 
 // q4ViewFromBlob returns Q4_0 SIMD scales/packed, projecting other formats via Unpack→Pack.
+// Does not retain F32Cache on the source blob — sequential gpu_fuse benches OOMs when every
+// layer's inflate view stays live during CreateBufferInit staging.
 func q4ViewFromBlob(b *quant.Blob) (scales []float32, packed []uint32, err error) {
 	if b == nil {
 		return nil, nil, fmt.Errorf("nil blob")
@@ -193,19 +201,22 @@ func q4ViewFromBlob(b *quant.Blob) (scales []float32, packed []uint32, err error
 		}
 		return s, p, nil
 	}
-	quant.EnsureFloatCache(b)
-	f32 := b.F32Cache
-	if len(f32) < b.Rows*b.Cols {
-		var uerr error
-		f32, uerr = quant.Unpack(b)
-		if uerr != nil {
-			return nil, nil, uerr
+	need := b.Rows * b.Cols
+	var f32 []float32
+	if len(b.F32Cache) >= need {
+		f32 = b.F32Cache[:need]
+	} else {
+		f32, err = quant.Unpack(b)
+		if err != nil {
+			return nil, nil, err
 		}
 	}
-	q4, err := quant.Pack(quant.FormatQ4_0, f32[:b.Rows*b.Cols], b.Rows, b.Cols)
+	q4, err := quant.Pack(quant.FormatQ4_0, f32[:need], b.Rows, b.Cols)
 	if err != nil {
 		return nil, nil, err
 	}
+	// Drop any inflate view left from simd_fuse so host RSS falls before GPU upload.
+	b.F32Cache = nil
 	quant.EnsureQ4SIMDCache(q4)
 	s, p, ok := quant.Q4SIMD(q4)
 	if !ok {

@@ -19,55 +19,7 @@ func (e *engine) resetState() {
 }
 
 func (e *engine) release() {
-	if e == nil {
-		return
-	}
-	for _, bg := range e.bg {
-		if bg != nil {
-			bg.Release()
-		}
-	}
-	e.bg = nil
-	for _, p := range e.pipe {
-		if p != nil {
-			p.Release()
-		}
-	}
-	e.pipe = nil
-	for _, b := range e.owned {
-		if b != nil {
-			b.Release()
-		}
-	}
-	e.owned = nil
-	e.blocks = nil
-	e.embed, e.finalNorm, e.lmScales, e.lmW = nil, nil, nil, nil
-	e.step, e.token, e.promptBuf, e.histBuf, e.stagingHist = nil, nil, nil, nil, nil
-	e.hidden, e.normed, e.qkvBuf, e.attnOut = nil, nil, nil, nil
-	e.inter, e.logits, e.outTok, e.stagingLogits = nil, nil, nil, nil
-	e.uGemvQDimH, e.uGemvHInter, e.uGemvVocabH = nil, nil, nil
-	e.uQKV, e.uSwiglu, e.uRMS, e.uResidH = nil, nil, nil, nil
-	e.uRopeQ, e.uRopeK, e.uAttn, e.uKV = nil, nil, nil, nil
-	e.uEmbed, e.uArgMax = nil, nil
-
-	if e.queue != nil {
-		e.queue.Release()
-		e.queue = nil
-	}
-	if e.device != nil {
-		e.device.Poll(true, nil) // flush outstanding work before drop
-		e.device.Release()
-		e.device = nil
-	}
-	if e.adapter != nil {
-		e.adapter.Release()
-		e.adapter = nil
-	}
-	if e.instance != nil {
-		e.instance.Release()
-		e.instance = nil
-	}
-	e.m = nil
+	e.releaseModelGPU()
 	runtime.GC()
 }
 

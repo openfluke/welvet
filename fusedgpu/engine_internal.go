@@ -2,6 +2,7 @@ package fusedgpu
 
 import (
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"github.com/openfluke/webgpu/wgpu"
@@ -61,37 +62,14 @@ type engine struct {
 
 func newEngine(m *modelCPU) (*engine, error) {
 	e := &engine{m: m, pipe: map[string]*wgpu.ComputePipeline{}, bg: map[string]*wgpu.BindGroup{}}
-	inst := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: wgpu.InstanceBackendVulkan})
-	if inst == nil {
-		return nil, fmt.Errorf("CreateInstance failed")
+	inst, adapt, device, queue, _, err := acquireDevice()
+	if err != nil {
+		return nil, err
 	}
 	e.instance = inst
-
-	adapter, err := inst.RequestAdapter(&wgpu.RequestAdapterOptions{
-		PowerPreference: wgpu.PowerPreferenceHighPerformance,
-	})
-	if err != nil || adapter == nil {
-		return nil, fmt.Errorf("RequestAdapter: %w", err)
-	}
-	e.adapter = adapter
-	info := e.adapter.GetInfo()
-	fmt.Printf("Adapter: %s [%v]\n", info.Name, info.BackendType)
-
-	limits := e.adapter.GetLimits().Limits
-	limits.MaxStorageBufferBindingSize = minU64(1<<30, limits.MaxStorageBufferBindingSize)
-	limits.MaxBufferSize = minU64(2<<30, limits.MaxBufferSize)
-	if limits.MaxStorageBuffersPerShaderStage < 12 {
-		limits.MaxStorageBuffersPerShaderStage = 12
-	}
-
-	device, err := e.adapter.RequestDevice(&wgpu.DeviceDescriptor{
-		RequiredLimits: &wgpu.RequiredLimits{Limits: limits},
-	})
-	if err != nil || device == nil {
-		return nil, fmt.Errorf("RequestDevice: %w", err)
-	}
+	e.adapter = adapt
 	e.device = device
-	e.queue = e.device.GetQueue()
+	e.queue = queue
 
 	shaders := map[string]string{
 		"q4gemv":  shaderQ4GEMV,
@@ -111,23 +89,55 @@ func newEngine(m *modelCPU) (*engine, error) {
 	for name, src := range shaders {
 		p, err := e.createPipeline(src)
 		if err != nil {
+			e.releaseModelGPU()
 			return nil, fmt.Errorf("pipeline %s: %w", name, err)
 		}
 		e.pipe[name] = p
 	}
 
 	if err := e.uploadModel(); err != nil {
-		e.release()
+		e.releaseModelGPU()
 		return nil, err
 	}
 	if err := e.allocScratch(); err != nil {
-		e.release()
+		e.releaseModelGPU()
 		return nil, err
 	}
+	e.dropHostWeightPayloads()
 	e.initUniforms()
 	e.buildBindGroups()
 	fmt.Println("✅ GPU engine ready (chunked on-device decode)")
 	return e, nil
+}
+
+// dropHostWeightPayloads frees CPU weight copies after GPU upload.
+// Shape fields on e.m stay; only large payloads are cleared.
+func (e *engine) dropHostWeightPayloads() {
+	if e == nil || e.m == nil {
+		return
+	}
+	m := e.m
+	m.embed, m.finalNorm = nil, nil
+	m.lmScales, m.lmPacked = nil, nil
+	for i := range m.blocks {
+		b := &m.blocks[i]
+		b.attnNorm.w, b.mlpNorm.w = nil, nil
+		clearQ4Host(&b.q)
+		clearQ4Host(&b.k)
+		clearQ4Host(&b.v)
+		clearQ4Host(&b.o)
+		clearQ4Host(&b.gate)
+		clearQ4Host(&b.up)
+		clearQ4Host(&b.down)
+	}
+	runtime.GC()
+}
+
+func clearQ4Host(q *q4Mat) {
+	if q == nil {
+		return
+	}
+	q.scales, q.packed = nil, nil
 }
 
 func (e *engine) createPipeline(wgsl string) (*wgpu.ComputePipeline, error) {
@@ -191,15 +201,19 @@ func (e *engine) uploadModel() error {
 	if e.embed, err = e.mkBuf("embed", uint64(len(m.embed)*4), wgpu.BufferUsageStorage, f32Bytes(m.embed)); err != nil {
 		return err
 	}
+	m.embed = nil
 	if e.finalNorm, err = e.mkBuf("fnorm", uint64(len(m.finalNorm)*4), wgpu.BufferUsageStorage, f32Bytes(m.finalNorm)); err != nil {
 		return err
 	}
+	m.finalNorm = nil
 	if e.lmScales, err = e.mkBuf("lm_s", uint64(len(m.lmScales)*4), wgpu.BufferUsageStorage, f32Bytes(m.lmScales)); err != nil {
 		return err
 	}
+	m.lmScales = nil
 	if e.lmW, err = e.mkBuf("lm_w", uint64(len(m.lmPacked)*4), wgpu.BufferUsageStorage, u32Bytes(m.lmPacked)); err != nil {
 		return err
 	}
+	m.lmPacked = nil
 
 	e.blocks = make([]blockGPU, m.layers)
 	kvBytes := uint64(m.kvHeads * m.maxSeq * m.headDim * 4)
@@ -215,24 +229,31 @@ func (e *engine) uploadModel() error {
 		if g.q, err = e.uploadQ4(fmt.Sprintf("q_%d", i), b.q); err != nil {
 			return err
 		}
+		clearQ4Host(&b.q)
 		if g.k, err = e.uploadQ4(fmt.Sprintf("k_%d", i), b.k); err != nil {
 			return err
 		}
+		clearQ4Host(&b.k)
 		if g.v, err = e.uploadQ4(fmt.Sprintf("v_%d", i), b.v); err != nil {
 			return err
 		}
+		clearQ4Host(&b.v)
 		if g.o, err = e.uploadQ4(fmt.Sprintf("o_%d", i), b.o); err != nil {
 			return err
 		}
+		clearQ4Host(&b.o)
 		if g.gate, err = e.uploadQ4(fmt.Sprintf("g_%d", i), b.gate); err != nil {
 			return err
 		}
+		clearQ4Host(&b.gate)
 		if g.up, err = e.uploadQ4(fmt.Sprintf("u_%d", i), b.up); err != nil {
 			return err
 		}
+		clearQ4Host(&b.up)
 		if g.down, err = e.uploadQ4(fmt.Sprintf("d_%d", i), b.down); err != nil {
 			return err
 		}
+		clearQ4Host(&b.down)
 		if g.kCache, err = e.mkBuf(fmt.Sprintf("kc_%d", i), kvBytes, wgpu.BufferUsageStorage, nil); err != nil {
 			return err
 		}

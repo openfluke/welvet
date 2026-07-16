@@ -2,6 +2,8 @@ package transformer
 
 import (
 	"fmt"
+	"runtime"
+	"runtime/debug"
 
 	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/fusedgpu"
@@ -17,21 +19,37 @@ func (m *Model) SyncGPU() error {
 	if m.gpu != nil {
 		return nil
 	}
+	// Drop simd_fuse inflate views before building the upload bundle — otherwise
+	// host RSS stays ~3–4GB and CreateBufferInit staging fails mid-upload (kc_*).
+	m.clearFloatCaches()
+	runtime.GC()
+	debug.FreeOSMemory()
+
 	spec, err := m.ExportFusedGPUSpec()
 	if err != nil {
 		return err
 	}
+	m.clearFloatCaches()
+	runtime.GC()
+
 	eng, err := fusedgpu.NewFromSpec(spec)
 	if err != nil {
 		return fmt.Errorf("fusedgpu: %w", err)
 	}
 	m.gpu = eng
-	m.clearFloatCaches() // drop inflate scratch used for Q4 projection
+	m.clearFloatCaches()
 	return nil
 }
 
-// clearFloatCaches frees host F32Cache / Int8QS inflate views after GPU upload.
+// ClearFloatCaches drops host inflate views (F32Cache) to free RAM between profiles.
+func (m *Model) ClearFloatCaches() {
+	m.clearFloatCaches()
+}
+
 func (m *Model) clearFloatCaches() {
+	if m == nil {
+		return
+	}
 	clearBlob := func(b *quant.Blob) {
 		if b != nil {
 			b.F32Cache = nil
