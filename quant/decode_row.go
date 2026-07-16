@@ -36,6 +36,11 @@ func DecodeRow(b *Blob, row int, dst []float32) error {
 }
 
 func decodeRowViaUnpack(b *Blob, row int, dst []float32) error {
+	EnsureFloatCache(b)
+	if len(b.F32Cache) >= b.Rows*b.Cols {
+		copy(dst[:b.Cols], b.F32Cache[row*b.Cols:(row+1)*b.Cols])
+		return nil
+	}
 	all, err := Unpack(b)
 	if err != nil {
 		return err

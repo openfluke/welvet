@@ -87,12 +87,9 @@ func (p ExecProfile) FusedNote() string {
 	}
 	switch p.Name {
 	case "simd_fuse":
-		return "packed quant + SIMD fused kernels (Lucy-style CPU path)"
+		return "packed fused GEMV (Q4/Q8/Q4_1/Q5 asm; k/IQ inflate-once + DotTile)"
 	case "gpu_fuse":
-		if webgpu.Available() {
-			return "full-stack Q4 decoder on GPU (Lucy ForwardTokenIDsWGPU path)"
-		}
-		return "packed quant on GPU (needs Vulkan/DX12/Metal adapter)"
+		return "full on-device fused decoder — Q4_0 only (other formats: use simd_fuse)"
 	default:
 		return ""
 	}
@@ -152,9 +149,14 @@ func (m *Model) ApplyExec(p ExecProfile) error {
 			}
 		}
 	}
-	if p.Fused && p.Backend == core.BackendWebGPU && m.FusedGPUReady() {
-		if err := m.SyncGPU(); err != nil {
-			return fmt.Errorf("fused gpu: %w", err)
+	if p.Fused && p.Backend == core.BackendWebGPU {
+		if m.FusedGPUReady() {
+			if err := m.SyncGPU(); err != nil {
+				return fmt.Errorf("fused gpu: %w", err)
+			}
+		} else {
+			return fmt.Errorf("gpu_fuse full on-device decoder requires baked Q4_0 (got %s); use simd_fuse or reconvert",
+				m.PackFormat.String())
 		}
 	} else if m.gpu != nil {
 		m.CloseGPU()

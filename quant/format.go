@@ -122,6 +122,9 @@ type Blob struct {
 	Q4Packed []uint32
 	// Int8QS is optional projected int8 codes for Q8_0 / Q5_* fused SIMD (one per weight).
 	Int8QS []int8
+	// F32Cache is optional once-inflated FP32 weights for k/IQ simd_fuse
+	// (true fused k/IQ asm not wired yet; cache avoids per-GEMV Unpack).
+	F32Cache []float32
 }
 
 // ParseFormatName maps ENTITY header / blob format strings to Format.

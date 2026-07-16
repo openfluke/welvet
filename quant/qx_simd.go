@@ -162,5 +162,26 @@ func EnsureFusedSIMDCache(b *Blob) {
 		EnsureQ5_0SIMDCache(b)
 	case FormatQ5_1:
 		EnsureQ5_1SIMDCache(b)
+	case FormatQ2_K, FormatQ3_K, FormatQ4_K, FormatQ5_K, FormatQ6_K,
+		FormatIQ1_S, FormatIQ2_XXS, FormatIQ2_XS, FormatIQ3_XXS, FormatIQ3_S,
+		FormatIQ4_NL, FormatIQ4_XS:
+		EnsureFloatCache(b)
 	}
+}
+
+// EnsureFloatCache unpacks k/IQ weights to FP32 once for parallel DotTile GEMV.
+// Keeps packed Raw on disk/RAM; F32Cache is the simd_fuse compute view.
+func EnsureFloatCache(b *Blob) {
+	if b == nil {
+		return
+	}
+	n := b.Rows * b.Cols
+	if n <= 0 || len(b.F32Cache) >= n {
+		return
+	}
+	all, err := Unpack(b)
+	if err != nil || len(all) < n {
+		return
+	}
+	b.F32Cache = all
 }

@@ -223,6 +223,45 @@ func gemvQ5_1RowsF32(scales, mins []float32, qs []int8, in, out []float32, rowLo
 	}
 }
 
+// gemvF32ParallelF32 — row-shard DotTile over a dense FP32 weight matrix (k/IQ cache).
+func gemvF32ParallelF32(w, in, out []float32, outRows, inCols int) {
+	if outRows < 64 || runtime.NumCPU() < 2 {
+		gemvF32RowsF32(w, in, out, 0, outRows, inCols)
+		return
+	}
+	workers := runtime.GOMAXPROCS(0)
+	if workers < 1 {
+		workers = runtime.NumCPU()
+	}
+	if workers > outRows {
+		workers = outRows
+	}
+	chunk := (outRows + workers - 1) / workers
+	var wg sync.WaitGroup
+	for wkr := 0; wkr < workers; wkr++ {
+		o0 := wkr * chunk
+		o1 := o0 + chunk
+		if o1 > outRows {
+			o1 = outRows
+		}
+		if o0 >= o1 {
+			break
+		}
+		wg.Add(1)
+		go func(lo, hi int) {
+			defer wg.Done()
+			gemvF32RowsF32(w, in, out, lo, hi, inCols)
+		}(o0, o1)
+	}
+	wg.Wait()
+}
+
+func gemvF32RowsF32(w, in, out []float32, rowLo, rowHi, inCols int) {
+	for o := rowLo; o < rowHi; o++ {
+		out[o] = float32(simd.DotTile(in, w[o*inCols:(o+1)*inCols], 0, inCols, 0))
+	}
+}
+
 // writeGemvF32 runs gemv into y when T is float32 (in-place); otherwise scratch + convert.
 func writeGemvF32[T core.Numeric](y []T, out int, gemv func(dst []float32)) {
 	if yF, ok := any(y).([]float32); ok && len(yF) >= out {
