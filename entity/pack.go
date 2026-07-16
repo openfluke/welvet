@@ -41,6 +41,9 @@ func PackFromHF(snapshotDir, outPath string, opts PackOptions) error {
 	if kind == hf.ArchUnknown {
 		return fmt.Errorf("unsupported HF architecture (model_type=%q)", hf.ConfigStringDefault(config, "model_type", ""))
 	}
+	if kind == hf.ArchQwen35Hybrid {
+		return PackFromQwen35MLX(snapshotDir, outPath, opts)
+	}
 
 	sts, err := filepath.Glob(filepath.Join(snapshotDir, "*.safetensors"))
 	if err != nil {

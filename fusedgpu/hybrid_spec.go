@@ -1,0 +1,97 @@
+package fusedgpu
+
+import "fmt"
+
+// BinarySpec is one BinaryG128 matrix (native MLX layout: 1 scale / 128 weights).
+type BinarySpec struct {
+	Rows, Cols int
+	Scales     []float32
+	Words      []uint32
+}
+
+// HybridBlockSpec is one Qwen3.5 / Bonsai decoder layer.
+type HybridBlockSpec struct {
+	LayerType string // "linear_attention" | "full_attention"
+	AttnNorm  []float32
+	FFNNorm   []float32
+	Gate, Up, Down BinarySpec
+
+	// full_attention
+	Q, K, V, O BinarySpec
+	QNorm, KNorm []float32
+	OutputGate   bool
+	PartialRotary float32
+	RoPETheta     float32
+	NumHeads, NumKVHeads, HeadDim int
+
+	// linear_attention (GDN)
+	GDNQKV, GDNZ, GDNB, GDNA, GDNOut BinarySpec
+	GDNConv                           []float32
+	GDNALog, GDNDtBias                []float32
+	GDNNorm                           []float32
+	NumKeyHeads, NumValueHeads        int
+	KeyHeadDim, ValueHeadDim          int
+	ConvKernel                        int
+}
+
+// HybridSpec is the full on-device BinaryG128 hybrid decoder bundle.
+type HybridSpec struct {
+	Hidden, Vocab, Layers int
+	Eps                   float32
+	MaxSeq                int
+	Embed                 BinarySpec // vocab × hidden
+	FinalNorm             []float32
+	LMHead                BinarySpec // vocab × hidden
+	Blocks                []HybridBlockSpec
+}
+
+// NewHybridFromSpec uploads every weight to GPU and builds the fused hybrid engine.
+// Requires enough VRAM for the full BinaryPacked working set (~entity size + scratch).
+func NewHybridFromSpec(spec *HybridSpec) (*HybridEngine, error) {
+	if spec == nil {
+		return nil, fmt.Errorf("fusedgpu: nil hybrid spec")
+	}
+	if spec.Layers <= 0 || len(spec.Blocks) != spec.Layers {
+		return nil, fmt.Errorf("fusedgpu: hybrid block count mismatch")
+	}
+	e, err := newHybridEngine(spec)
+	if err != nil {
+		return nil, err
+	}
+	return &HybridEngine{e: e}, nil
+}
+
+func (s *BinarySpec) nbytes() uint64 {
+	if s == nil {
+		return 0
+	}
+	return uint64(len(s.Scales)*4 + len(s.Words)*4)
+}
+
+func (s *HybridSpec) clearPayloads() {
+	if s == nil {
+		return
+	}
+	s.Embed.Scales, s.Embed.Words = nil, nil
+	s.FinalNorm = nil
+	s.LMHead.Scales, s.LMHead.Words = nil, nil
+	for i := range s.Blocks {
+		b := &s.Blocks[i]
+		b.AttnNorm, b.FFNNorm = nil, nil
+		b.Gate.Scales, b.Gate.Words = nil, nil
+		b.Up.Scales, b.Up.Words = nil, nil
+		b.Down.Scales, b.Down.Words = nil, nil
+		b.Q.Scales, b.Q.Words = nil, nil
+		b.K.Scales, b.K.Words = nil, nil
+		b.V.Scales, b.V.Words = nil, nil
+		b.O.Scales, b.O.Words = nil, nil
+		b.QNorm, b.KNorm = nil, nil
+		b.GDNQKV.Scales, b.GDNQKV.Words = nil, nil
+		b.GDNZ.Scales, b.GDNZ.Words = nil, nil
+		b.GDNB.Scales, b.GDNB.Words = nil, nil
+		b.GDNA.Scales, b.GDNA.Words = nil, nil
+		b.GDNOut.Scales, b.GDNOut.Words = nil, nil
+		b.GDNConv, b.GDNALog, b.GDNDtBias, b.GDNNorm = nil, nil, nil, nil
+	}
+	s.Blocks = nil
+}

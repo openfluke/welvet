@@ -33,6 +33,15 @@ type TransformerDims struct {
 	IntermediateSize int     `json:"intermediate_size"`
 	RMSNormEps       float64 `json:"rms_norm_eps,omitempty"`
 	RoPEFreqBase     float64 `json:"rope_freq_base,omitempty"`
+	// Hybrid (Qwen3.5 / Bonsai)
+	PartialRotaryFactor float64  `json:"partial_rotary_factor,omitempty"`
+	AttnOutputGate      bool     `json:"attn_output_gate,omitempty"`
+	LayerTypes          []string `json:"layer_types,omitempty"`
+	LinearConvKernel    int      `json:"linear_conv_kernel,omitempty"`
+	LinearNumKeyHeads   int      `json:"linear_num_key_heads,omitempty"`
+	LinearNumValueHeads int      `json:"linear_num_value_heads,omitempty"`
+	LinearKeyHeadDim    int      `json:"linear_key_head_dim,omitempty"`
+	LinearValueHeadDim  int      `json:"linear_value_head_dim,omitempty"`
 }
 
 // TransformerSpec is the decoder add-on in the ENTITY header.

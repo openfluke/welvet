@@ -2,6 +2,7 @@ package transformer
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/openfluke/welvet/sampling"
@@ -54,11 +55,18 @@ func (m *Model) Generate(
 	}
 
 	m.ResetKV()
+	m.Quiet = opts.Silent
 	prefillStart := time.Now()
 	logits, err := m.ForwardTokens(ids)
+	m.Quiet = false
 	prefillElapsed := time.Since(prefillStart)
 	if err != nil {
 		return "", zero, fmt.Errorf("prefill: %w", err)
+	}
+	if !opts.Silent {
+		fmt.Printf("  prompt loaded in %s (%.2f tok/s)\nAssistant: ",
+			prefillElapsed.Round(time.Millisecond),
+			float64(len(ids))/math.Max(prefillElapsed.Seconds(), 1e-9))
 	}
 
 	decodeStart := time.Now()

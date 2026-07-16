@@ -107,11 +107,20 @@ func (m *Model) ResetKV() {
 		return
 	}
 	for i := range m.Blocks {
-		m.Blocks[i].Attn.KVOffset = 0
-		m.Blocks[i].Attn.KVCacheK = nil
-		m.Blocks[i].Attn.KVCacheV = nil
-		m.Blocks[i].Attn.DecodeScratchQ = nil
-		m.Blocks[i].Attn.DecodeScratchAttn = nil
+		b := &m.Blocks[i]
+		if b.Attn != nil {
+			b.Attn.KVOffset = 0
+			b.Attn.KVCacheK = nil
+			b.Attn.KVCacheV = nil
+			b.Attn.DecodeScratchQ = nil
+			b.Attn.DecodeScratchAttn = nil
+		}
+		b.KVOffset = 0
+		b.KVCacheK = nil
+		b.KVCacheV = nil
+		if b.GDN != nil {
+			b.GDN.Reset()
+		}
 	}
 	if eng, ok := m.gpu.(*fusedgpu.Engine); ok && eng != nil {
 		_ = eng.Reset()

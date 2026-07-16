@@ -24,7 +24,13 @@ func (m *Model) ForwardTokens(ids []uint32) ([]float32, error) {
 }
 
 func (m *Model) forwardTokensHost(ids []uint32) ([]float32, error) {
-	if m == nil || m.Embed == nil {
+	if m == nil {
+		return nil, fmt.Errorf("transformer: nil model")
+	}
+	if m.isHybrid() {
+		return m.forwardTokensHybrid(ids)
+	}
+	if m.Embed == nil {
 		return nil, fmt.Errorf("transformer: nil model")
 	}
 	if len(ids) == 0 {

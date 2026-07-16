@@ -93,20 +93,28 @@ type ArchitectureKind int
 const (
 	ArchUnknown ArchitectureKind = iota
 	ArchLlamaStyleDecoder
+	ArchQwen35Hybrid // Qwen3.5 / Bonsai: Gated DeltaNet + full attention
 )
 
 func (k ArchitectureKind) String() string {
 	switch k {
 	case ArchLlamaStyleDecoder:
 		return "llama_style_decoder"
+	case ArchQwen35Hybrid:
+		return "qwen35_hybrid"
 	default:
 		return "unknown"
 	}
 }
 
 // DetectArchitecture returns ArchLlamaStyleDecoder for Llama/Mistral/Qwen/SmolLM/…
+// or ArchQwen35Hybrid for Qwen3.5 / Bonsai multimodal text towers.
 func DetectArchitecture(config map[string]any) ArchitectureKind {
-	modelType := strings.ToLower(ConfigStringDefault(config, "model_type", ""))
+	if IsQwen35Hybrid(config) {
+		return ArchQwen35Hybrid
+	}
+	cfg := EffectiveConfig(config)
+	modelType := strings.ToLower(ConfigStringDefault(cfg, "model_type", ""))
 	for _, arch := range architectureStrings(config) {
 		a := strings.ToLower(arch)
 		switch {
@@ -126,9 +134,9 @@ func DetectArchitecture(config map[string]any) ArchitectureKind {
 	if strings.Contains(modelType, "smol") || strings.Contains(modelType, "llama") {
 		return ArchLlamaStyleDecoder
 	}
-	if _, ok := ConfigInt(config, "num_hidden_layers"); ok {
-		if _, ok2 := ConfigInt(config, "hidden_size"); ok2 {
-			if _, ok3 := ConfigInt(config, "num_attention_heads"); ok3 {
+	if _, ok := ConfigInt(cfg, "num_hidden_layers"); ok {
+		if _, ok2 := ConfigInt(cfg, "hidden_size"); ok2 {
+			if _, ok3 := ConfigInt(cfg, "num_attention_heads"); ok3 {
 				return ArchLlamaStyleDecoder
 			}
 		}

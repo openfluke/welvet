@@ -611,11 +611,15 @@ func MatVecPackedBlob(b *quant.Blob, x, y []float32) error {
 }
 
 // matVecBitNetF32 — Ternary/Binary inflate-once + parallel DotTile (LM head + projections).
+// BinaryG128 (Bonsai MLX) uses native packed matvec — no F32 inflate.
 func matVecBitNetF32(b *quant.Blob, x, y []float32) error {
+	if b.Format == quant.FormatBinaryPacked && b.BlockWeights == quant.BinaryG128Group {
+		return quant.MatVec(b, x, y)
+	}
 	quant.EnsureFloatCache(b)
 	in, out := b.Cols, b.Rows
 	if len(b.F32Cache) < out*in {
-		return fmt.Errorf("dense: %s F32Cache missing", b.Format)
+		return quant.MatVec(b, x, y)
 	}
 	gemvF32ParallelF32(b.F32Cache, x, y, out, in)
 	return nil

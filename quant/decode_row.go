@@ -128,6 +128,9 @@ func decodeRowTernary(b *Blob, row int, dst []float32) error {
 }
 
 func decodeRowBinary(b *Blob, row int, dst []float32) error {
+	if isBinaryG128(b) {
+		return decodeRowBinaryG128(b, row, dst)
+	}
 	cols := b.Cols
 	base := row * cols
 	n := b.Rows * cols

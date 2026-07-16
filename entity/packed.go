@@ -69,5 +69,8 @@ func DecodePackedBlob(format quant.Format, rows, cols int, wire []byte) (*quant.
 	if format == quant.FormatQ4_0 {
 		quant.EnsureQ4SIMDCache(b)
 	}
+	if format == quant.FormatBinaryPacked {
+		quant.InferBinaryBlockWeights(b)
+	}
 	return b, nil
 }

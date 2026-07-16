@@ -40,6 +40,8 @@ func DenseGEMVTernary(scales []float32, words []uint32, x, y []float32, batch, i
 }
 
 // DenseGEMVBinary — on-device binary (±scale), 32 bits / u32, per-group scales.
+// Large matrices (e.g. Bonsai LM head) are tiled by output rows so each
+// storage binding stays under the typical 128 MiB max_*_buffer_binding_size.
 func DenseGEMVBinary(scales []float32, words []uint32, x, y []float32, batch, in, out int) error {
 	ensure()
 	if !haveGPU || sess == nil {
@@ -49,27 +51,68 @@ func DenseGEMVBinary(scales []float32, words []uint32, x, y []float32, batch, in
 		return fmt.Errorf("webgpu DenseGEMVBinary: %w", initErr)
 	}
 	groups := (out*in + 31) / 32
-	if len(scales) < groups || len(words) < groups || len(x) < batch*in || len(y) < batch*out {
+	if in <= 0 || in%32 != 0 || len(scales) < groups || len(words) < groups || len(x) < batch*in || len(y) < batch*out {
 		return fmt.Errorf("webgpu DenseGEMVBinary: shape")
 	}
-	return sess.gemvBinary(scales, words, x, y, batch, in, out)
+	wordsPerRow := in / 32
+	const maxBindBytes = 128 << 20 // wgpu default max storage buffer binding
+	maxRows := (maxBindBytes / 4) / wordsPerRow
+	if maxRows < 1 {
+		return fmt.Errorf("webgpu DenseGEMVBinary: cols=%d exceeds binding limit", in)
+	}
+	if out <= maxRows {
+		return sess.gemvBinary(scales[:groups], words[:groups], x, y, batch, in, out)
+	}
+	for row0 := 0; row0 < out; row0 += maxRows {
+		rows := maxRows
+		if row0+rows > out {
+			rows = out - row0
+		}
+		off := row0 * wordsPerRow
+		n := rows * wordsPerRow
+		if batch == 1 {
+			if err := sess.gemvBinary(scales[off:off+n], words[off:off+n], x, y[row0:row0+rows], 1, in, rows); err != nil {
+				return err
+			}
+			continue
+		}
+		ytmp := make([]float32, batch*rows)
+		if err := sess.gemvBinary(scales[off:off+n], words[off:off+n], x, ytmp, batch, in, rows); err != nil {
+			return err
+		}
+		for b := 0; b < batch; b++ {
+			copy(y[b*out+row0:b*out+row0+rows], ytmp[b*rows:(b+1)*rows])
+		}
+	}
+	return nil
 }
 
 func (s *session) ensureExtraPipes() error {
-	if s.pipeQ8 != nil {
+	if s.pipeQ8 != nil && s.pipeBinaryG128 != nil {
 		return nil
 	}
 	var err error
-	s.pipeQ8, err = makePipeline(s.device, ShaderDenseQ8, "welvet-dense-q8")
-	if err != nil {
-		return err
+	if s.pipeQ8 == nil {
+		s.pipeQ8, err = makePipeline(s.device, ShaderDenseQ8, "welvet-dense-q8")
+		if err != nil {
+			return err
+		}
+		s.pipeTernary, err = makePipeline(s.device, ShaderDenseTernary, "welvet-dense-ternary")
+		if err != nil {
+			return err
+		}
+		s.pipeBinary, err = makePipeline(s.device, ShaderDenseBinary, "welvet-dense-binary")
+		if err != nil {
+			return err
+		}
 	}
-	s.pipeTernary, err = makePipeline(s.device, ShaderDenseTernary, "welvet-dense-ternary")
-	if err != nil {
-		return err
+	if s.pipeBinaryG128 == nil {
+		s.pipeBinaryG128, err = makePipeline(s.device, ShaderDenseBinaryG128, "welvet-dense-binary-g128")
+		if err != nil {
+			return err
+		}
 	}
-	s.pipeBinary, err = makePipeline(s.device, ShaderDenseBinary, "welvet-dense-binary")
-	return err
+	return nil
 }
 
 func (s *session) gemvQ8(scales []float32, packed []uint32, x, y []float32, batch, in, out int) error {
@@ -147,6 +190,20 @@ func (s *session) gemvBinary(scales []float32, words []uint32, x, y []float32, b
 	}
 	defer wBuf.Destroy()
 	return s.dispatchPacked(dev, q, s.pipeBinary, scBuf, wBuf, x, y, batch, in, out, 64, true)
+}
+
+func (s *session) gemvBinaryResident(e *binGPU, x, y []float32, batch, in, out int) error {
+	if e == nil || e.scales == nil || e.words == nil {
+		return fmt.Errorf("webgpu: nil resident binary weights")
+	}
+	if err := s.ensureExtraPipes(); err != nil {
+		return err
+	}
+	pipe := s.pipeBinary
+	if e.g128 {
+		pipe = s.pipeBinaryG128
+	}
+	return s.dispatchPacked(s.device, s.queue, pipe, e.scales, e.words, x, y, batch, in, out, 64, true)
 }
 
 func (s *session) dispatchPacked(dev *wgpu.Device, q *wgpu.Queue, pipe *wgpu.ComputePipeline,
@@ -306,6 +363,40 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let g = (wBase + c) / 32u;
         let word = weights[g];
         let scale = scales[g];
+        var n = 32u;
+        if (c + n > params.inputSize) { n = params.inputSize - c; }
+        for (var j: u32 = 0u; j < n; j++) {
+            var tw: f32 = -scale;
+            if (((word >> j) & 1u) != 0u) { tw = scale; }
+            sum += X[xBase + c + j] * tw;
+        }
+    }
+    Y[b * params.outputSize + o] = sum;
+}
+`
+
+// ShaderDenseBinaryG128 — MLX/Bonsai layout: one scale per 128 weights (4 u32 words).
+const ShaderDenseBinaryG128 = `
+struct Params { batch: u32, inputSize: u32, outputSize: u32, _pad: u32, };
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> X: array<f32>;
+@group(0) @binding(2) var<storage, read> scales: array<f32>;
+@group(0) @binding(3) var<storage, read> weights: array<u32>;
+@group(0) @binding(4) var<storage, read_write> Y: array<f32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let o = gid.x;
+    let b = gid.y;
+    if (o >= params.outputSize || b >= params.batch) { return; }
+    var sum: f32 = 0.0;
+    let xBase = b * params.inputSize;
+    let wBase = o * params.inputSize;
+    for (var c: u32 = 0u; c < params.inputSize; c += 32u) {
+        let wordIdx = (wBase + c) / 32u;
+        let scaleIdx = (wBase + c) / 128u;
+        let word = weights[wordIdx];
+        let scale = scales[scaleIdx];
         var n = 32u;
         if (c + n > params.inputSize) { n = params.inputSize - c; }
         for (var j: u32 = 0u; j < n; j++) {

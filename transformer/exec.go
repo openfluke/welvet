@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/simd"
 	"github.com/openfluke/welvet/webgpu"
@@ -89,7 +90,7 @@ func (p ExecProfile) FusedNote() string {
 	case "simd_fuse":
 		return "packed fused GEMV (Q4/Q8/Q4_1/Q5 asm; k/IQ inflate-once + DotTile)"
 	case "gpu_fuse":
-		return "full on-device fused decoder (native Q4_0, or project other quants → Q4 for upload)"
+		return "full on-device fused decoder (native Q4_0, or project other quants → Q4 for upload); Bonsai hybrid: resident BinaryG128 GEMVs (weights stay on GPU)"
 	default:
 		return ""
 	}
@@ -154,11 +155,20 @@ func (m *Model) ApplyExec(p ExecProfile) error {
 			if err := m.SyncGPU(); err != nil {
 				return fmt.Errorf("fused gpu: %w", err)
 			}
+		} else if m.IsHybrid() {
+			m.CloseGPU()
+			m.CloseHybridGPU()
+			m.Fused = true
+			if err := m.SyncHybridGPU(); err != nil {
+				return fmt.Errorf("hybrid gpu: %w", err)
+			}
+			fmt.Printf("  gpu_fuse (hybrid): resident BinaryG128 GEMV + host GDN/attn ALU\n")
 		} else {
 			return fmt.Errorf("gpu_fuse requires a baked packed entity (got %s)", m.PackFormat.String())
 		}
-	} else if m.gpu != nil {
+	} else {
 		m.CloseGPU()
+		m.CloseHybridGPU()
 	}
 	if m.Embed != nil {
 		m.Embed.Exec = exec
@@ -213,6 +223,15 @@ func (m *Model) ApplyExec(p ExecProfile) error {
 			b.FFN.Gate.Core.MultiCore = p.MultiCore
 			b.FFN.Up.Core.MultiCore = p.MultiCore
 			b.FFN.Down.Core.MultiCore = p.MultiCore
+		}
+		// Hybrid Qwen3.5 / Bonsai projections (full-attn layers)
+		for _, d := range []*dense.Layer{b.Q, b.K, b.V, b.O} {
+			if d == nil {
+				continue
+			}
+			d.Exec = exec
+			d.Core.TileSize = tile
+			d.Core.MultiCore = p.MultiCore
 		}
 	}
 	return nil

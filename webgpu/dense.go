@@ -28,6 +28,7 @@ type session struct {
 	pipeQ8       *wgpu.ComputePipeline
 	pipeTernary  *wgpu.ComputePipeline
 	pipeBinary   *wgpu.ComputePipeline
+	pipeBinaryG128 *wgpu.ComputePipeline
 	pipeIQ       *wgpu.ComputePipeline
 	pipeIQT      *wgpu.ComputePipeline
 	pipeQ4T      *wgpu.ComputePipeline
@@ -50,6 +51,11 @@ type session struct {
 	pipeNativeT  *wgpu.ComputePipeline
 	pipeExtT     *wgpu.ComputePipeline
 	name         string
+
+	// Sticky BinaryPacked weight buffers (hybrid gpu_fuse / Bonsai).
+	binCache      map[uintptr]*binGPU
+	binCacheBytes uint64
+	binCacheFull  bool
 }
 
 // Available reports whether a real WebGPU device was acquired.
@@ -139,7 +145,17 @@ func newSession() (*session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("webgpu: RequestAdapter: %w", err)
 	}
-	device, err := adapter.RequestDevice(nil)
+	limits := adapter.GetLimits().Limits
+	// Match fusedgpu: allow large BinaryPacked matrices (LM head ~190MiB) in one binding.
+	if limits.MaxStorageBufferBindingSize < 1<<30 {
+		limits.MaxStorageBufferBindingSize = 1 << 30
+	}
+	if limits.MaxBufferSize < 2<<30 {
+		limits.MaxBufferSize = 2 << 30
+	}
+	device, err := adapter.RequestDevice(&wgpu.DeviceDescriptor{
+		RequiredLimits: &wgpu.RequiredLimits{Limits: limits},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("webgpu: RequestDevice: %w", err)
 	}

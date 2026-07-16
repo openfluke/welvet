@@ -47,6 +47,10 @@ func packBinary(weights []float32, rows, cols int) (*Blob, error) {
 }
 
 func forEachBinary(b *Blob, fn func(i int, w float32)) {
+	if isBinaryG128(b) {
+		forEachBinaryG128(b, fn)
+		return
+	}
 	n := b.Rows * b.Cols
 	nGroup := len(b.Raw) / 4
 	for g := 0; g < nGroup; g++ {
@@ -80,6 +84,9 @@ func unpackBinary(b *Blob) ([]float32, error) {
 }
 
 func matVecBinary(b *Blob, x, y []float32) error {
+	if isBinaryG128(b) {
+		return matVecBinaryG128(b, x, y)
+	}
 	for i := range y[:b.Rows] {
 		y[i] = 0
 	}

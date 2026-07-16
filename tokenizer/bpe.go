@@ -136,6 +136,7 @@ func newTokenizerFromParsedJSON(tokJSON TokenizerJSON) (*Tokenizer, error) {
 	// Handle added tokens
 	for _, token := range tokJSON.AddedTokens {
 		t.AddedTokens[token.Content] = token.ID
+		t.ReverseVocab[token.ID] = token.Content
 		if token.Special {
 			t.SpecialTokens[token.Content] = token.ID
 		}

@@ -22,6 +22,7 @@ type DecoderDims struct {
 
 // ParseDecoderDims extracts decoder dimensions from config (+ optional safetensors for layer count).
 func ParseDecoderDims(config map[string]any, safetensorFiles []string) (DecoderDims, error) {
+	config = EffectiveConfig(config)
 	numHeads, ok := ConfigInt(config, "num_attention_heads")
 	if !ok || numHeads <= 0 {
 		return DecoderDims{}, fmt.Errorf("config missing num_attention_heads")

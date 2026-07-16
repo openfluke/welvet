@@ -5,7 +5,9 @@ package transformer
 
 import (
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/embedding"
+	"github.com/openfluke/welvet/gdn"
 	"github.com/openfluke/welvet/mha"
 	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/rmsnorm"
@@ -13,12 +15,27 @@ import (
 	"github.com/openfluke/welvet/weights"
 )
 
-// Block is one decoder layer: RMSNorm → MHA → residual → RMSNorm → SwiGLU → residual.
+// Block is one decoder layer: RMSNorm → mixer → residual → RMSNorm → SwiGLU → residual.
 type Block struct {
 	AttnNorm *rmsnorm.Layer
-	Attn     *mha.Layer
+	Attn     *mha.Layer // Llama-style path
 	FFNNorm  *rmsnorm.Layer
 	FFN      *swiglu.Layer
+
+	// Qwen3.5 / Bonsai hybrid fields (optional)
+	LayerType     string
+	GDN           *gdn.Layer
+	Q, K, V, O    *dense.Layer
+	QNorm, KNorm  []float32
+	NumHeads      int
+	NumKVHeads    int
+	HeadDim       int
+	RoPETheta     float64
+	PartialRotary float64
+	OutputGate    bool
+	KVCacheK      []float32
+	KVCacheV      []float32
+	KVOffset      int
 }
 
 // Model is a causal LM loaded from .entity.
@@ -32,8 +49,13 @@ type Model struct {
 	Repo       string
 	Snapshot   string
 	TokenizerPath string
+	Architecture  string
+	LayerTypes    []string
+	AttnOutputGate bool
+	PartialRotary  float64
 
 	Embed     *embedding.Layer
+	embedPacked *quant.Blob // Bonsai / MLX 1-bit embed table
 	Blocks    []Block
 	FinalNorm *rmsnorm.Layer
 
@@ -55,12 +77,26 @@ type Model struct {
 
 	scratch       *fwdScratch
 	logitsScratch []float32 // reused LM-head output
+	// Quiet suppresses hybrid prefill progress lines (set by Generate when Silent).
+	Quiet bool
 }
 
 // FusedGPUReady reports whether the full fused GPU decoder can run.
-// Any baked packed quant can be projected to Q4_0 for the on-device stack.
+// Hybrid Qwen3.5 / Bonsai uses per-GEMV WebGPU BinaryG128 (gpu_fuse → hybrid GPU matvecs),
+// not the monolithic Q4 fusedgpu engine.
 func (m *Model) FusedGPUReady() bool {
-	return m != nil && m.FusedPack && m.PackFormat != quant.FormatNone
+	if m == nil || !m.FusedPack || m.PackFormat == quant.FormatNone {
+		return false
+	}
+	if m.isHybrid() {
+		return false // SyncGPU/fusedgpu path off; ApplyExec uses WebGPU dense GEMV instead
+	}
+	return true
+}
+
+// HybridGPUFuse reports gpu_fuse on a Qwen3.5/Bonsai entity (BinaryG128 WebGPU GEMVs).
+func (m *Model) HybridGPUFuse() bool {
+	return m != nil && m.isHybrid() && m.Exec.Backend == core.BackendWebGPU && m.Fused
 }
 
 // LMHeadPackedBlob returns baked tied-head logits matrix when present.

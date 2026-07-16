@@ -172,12 +172,20 @@ func EnsureFusedSIMDCache(b *Blob) {
 
 // EnsureFloatCache unpacks k/IQ weights to FP32 once for parallel DotTile GEMV.
 // Keeps packed Raw on disk/RAM; F32Cache is the simd_fuse compute view.
+// Skips BinaryG128 (Bonsai) — full inflate of 27B would OOM; use native matvec.
 func EnsureFloatCache(b *Blob) {
 	if b == nil {
 		return
 	}
+	if isBinaryG128(b) {
+		return
+	}
 	n := b.Rows * b.Cols
 	if n <= 0 || len(b.F32Cache) >= n {
+		return
+	}
+	// Refuse huge inflates (>512MiB) — force native packed path.
+	if n > 128<<20 {
 		return
 	}
 	all, err := Unpack(b)

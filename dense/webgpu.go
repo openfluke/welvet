@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"unsafe"
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/quant"
@@ -83,11 +84,7 @@ func forwardWebGPUDispatch(l *Layer, xF, yF []float32, batch, in, out int) error
 		return webgpu.DenseGEMVTernary(scales, words, xF, yF, batch, in, out)
 
 	case l.Weights.Format == quant.FormatBinaryPacked && l.Weights.Packed != nil:
-		scales, words, ok := binaryBlobToGPU(l.Weights.Packed)
-		if !ok {
-			return fmt.Errorf("dense: WebGPU Binary projection failed")
-		}
-		return webgpu.DenseGEMVBinary(scales, words, xF, yF, batch, in, out)
+		return matVecBinaryResident(l.Weights.Packed, xF, yF, batch, in, out)
 
 	case isIQ(l.Weights.Format) && l.Weights.Packed != nil:
 		return forwardWebGPUIQ(l.Weights.Packed, xF, yF, batch, in, out)
@@ -250,7 +247,7 @@ func backwardWebGPUDispatch(l *Layer, dPreF, gxF []float32, batch, in, out int) 
 		return webgpu.DenseGEMVTTernary(scales, words, dPreF, gxF, batch, in, out)
 
 	case l.Weights.Format == quant.FormatBinaryPacked && l.Weights.Packed != nil:
-		scales, words, ok := binaryBlobToGPU(l.Weights.Packed)
+		scales, words, _, ok := binaryBlobToGPU(l.Weights.Packed)
 		if !ok {
 			return fmt.Errorf("dense: WebGPU BinaryT projection failed")
 		}
@@ -575,20 +572,73 @@ func ternaryBlobToGPU(b *quant.Blob) (scales []float32, words []uint32, ok bool)
 	return scales, words, true
 }
 
-func binaryBlobToGPU(b *quant.Blob) (scales []float32, words []uint32, ok bool) {
-	if b == nil || b.Format != quant.FormatBinaryPacked || len(b.Raw) < 4 {
-		return nil, nil, false
+func matVecBinaryResident(b *quant.Blob, x, y []float32, batch, in, out int) error {
+	key := webgpu.BlobKey(unsafe.Pointer(b))
+	if webgpu.HasBinaryWeight(key) {
+		return webgpu.DenseGEMVBinaryResident(key, nil, nil, x, y, batch, in, out, quant.IsBinaryG128(b))
 	}
-	groups := len(b.Raw) / 4
-	words = make([]uint32, groups)
-	scales = make([]float32, groups)
-	for g := 0; g < groups; g++ {
+	// Tiny mats: host is faster than create/dispatch/readback.
+	if len(b.Raw) < 512<<10 {
+		if batch != 1 {
+			return fmt.Errorf("dense: binary tiny host path needs batch=1")
+		}
+		return MatVecPackedBlob(b, x, y)
+	}
+	scales, words, g128, ok := BinaryBlobStaging(b)
+	if !ok {
+		return fmt.Errorf("dense: WebGPU Binary projection failed")
+	}
+	err := webgpu.DenseGEMVBinaryResident(key, scales, words, x, y, batch, in, out, g128)
+	if err == nil {
+		return nil
+	}
+	if !webgpu.IsBinaryVRAMFull(err) {
+		return err
+	}
+	if batch != 1 {
+		return fmt.Errorf("dense: binary VRAM full and batch!=1")
+	}
+	return MatVecPackedBlob(b, x, y)
+}
+
+// BinaryBlobStaging prepares host scales/words for BinaryPacked WebGPU upload.
+// BinaryG128 keeps native 1-scale-per-128 layout (G128 shader).
+func BinaryBlobStaging(b *quant.Blob) (scales []float32, words []uint32, g128 bool, ok bool) {
+	return binaryBlobToGPU(b)
+}
+
+// binaryBlobToGPU prepares host staging for BinaryPacked.
+// BinaryG128 keeps native 1-scale-per-128 layout (G128 shader); other binary expands 1:1 with words.
+func binaryBlobToGPU(b *quant.Blob) (scales []float32, words []uint32, g128 bool, ok bool) {
+	if b == nil || b.Format != quant.FormatBinaryPacked || len(b.Raw) < 4 {
+		return nil, nil, false, false
+	}
+	nWords := len(b.Raw) / 4
+	words = make([]uint32, nWords)
+	for g := 0; g < nWords; g++ {
 		words[g] = binary.LittleEndian.Uint32(b.Raw[g*4:])
+	}
+	if quant.IsBinaryG128(b) {
+		cols := b.Cols
+		rows := b.Rows
+		if cols <= 0 || cols%128 != 0 || rows*cols/32 != nWords {
+			return nil, nil, false, false
+		}
+		need := rows * (cols / 128)
+		scales = make([]float32, need)
+		copy(scales, b.Scales)
+		for i := len(b.Scales); i < need; i++ {
+			scales[i] = 1
+		}
+		return scales, words, true, true
+	}
+	scales = make([]float32, nWords)
+	for g := 0; g < nWords; g++ {
 		if g < len(b.Scales) {
 			scales[g] = b.Scales[g]
 		} else {
 			scales[g] = 1
 		}
 	}
-	return scales, words, true
+	return scales, words, false, true
 }

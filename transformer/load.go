@@ -36,6 +36,32 @@ func LoadEntity(path string) (*Model, error) {
 		return nil, fmt.Errorf("entity: invalid dims")
 	}
 
+	// Qwen3.5 / Bonsai hybrid path
+	if spec.Architecture == "qwen35_hybrid" || len(d.LayerTypes) > 0 {
+		m := &Model{
+			HiddenSize:    spec.HiddenSize,
+			VocabSize:     spec.VocabSize,
+			LMHeadTied:    spec.LMHeadTied,
+			HasFinalNorm:  spec.HasFinalNorm,
+			MaxSeqLen:     maxSeq,
+			Repo:          spec.Repo,
+			Snapshot:      spec.Snapshot,
+			TokenizerPath: spec.Tokenizer,
+			Blocks:        make([]Block, d.NumLayers),
+			EOSTokens:     []int{248046},
+		}
+		if m.Snapshot != "" {
+			cfgPath := filepath.Join(m.Snapshot, "config.json")
+			if cfg, err := hf.LoadConfigJSON(cfgPath); err == nil {
+				m.EOSTokens = hf.EOSTokenIDs(cfg)
+			}
+		}
+		if err := loadHybridEntity(ef, m, spec); err != nil {
+			return nil, err
+		}
+		return m, nil
+	}
+
 	embData, err := ef.LoadBlob("transformer.embeddings")
 	if err != nil {
 		return nil, err
