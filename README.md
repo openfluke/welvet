@@ -33,9 +33,9 @@
 | **Dense** FormatNone × 34 × CPU/SIMD/WebGPU fwd+bwd | ✅ |
 | **Dense** block-quant × SIMD/WebGPU (all 20 formats on-device fwd+bwd) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
-| `forward/` / `backward/` volumetric Dense + MHA walk | ✅ |
-| `training/` SGD on volumetric tape (Dense + MHA) | ✅ |
-| Remaining layers (SwiGLU, RMSNorm, …) | ⬜ |
+| `forward/` / `backward/` volumetric Dense + MHA + SwiGLU walk | ✅ |
+| `training/` SGD on volumetric tape (Dense + MHA + SwiGLU) | ✅ |
+| Remaining layers (RMSNorm, Embedding, …) | ⬜ |
 | Model IO / transformer / entity / tokenizer / hf | ⬜ |
 | Accel / donate / fountain / dna / … | ⬜ |
 | Full v1 matrix | ⬜ |
@@ -44,6 +44,7 @@ Validate live:
 ```bash
 cd w2a && go test ./tests/dense -v
 cd w2a && go test ./tests/mha -v
+cd w2a && go test ./tests/swiglu -v
 ```
 
 ---
@@ -176,10 +177,11 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `tiling/` | Tile size / SC / MC / GPU workgroup caps | ✅ |
 | `dense/` | FormatNone×34 + all quants × 3 backends; packed fwd/bwd; grad verify | ✅ |
 | `mha/` | Causal+RoPE+GQA; Q/K/V/O via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `swiglu/` | SiLU-gated FFN; Gate/Up/Down via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | ✅ |
-| `forward/` | Grid walk z→y→x→l; Dense + MHA dispatch; remote hops | ✅ |
-| `backward/` | Reverse tape over Dense + MHA cells | ✅ |
-| `training/` | MSE + SGD; ApplyGradSGD for *dense.Layer and *mha.Layer | ✅ |
+| `forward/` | Grid walk z→y→x→l; Dense + MHA + SwiGLU dispatch; remote hops | ✅ |
+| `backward/` | Reverse tape over Dense + MHA + SwiGLU cells | ✅ |
+| `training/` | MSE + SGD; ApplyGradSGD for Dense / MHA / SwiGLU | ✅ |
 
 ### Layers (each needs CPU + SIMD + WebGPU × all dtype × all quant × fwd/bwd)
 
@@ -187,9 +189,9 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 |---------|----------|:------:|
 | `dense/` | FormatNone×34 + all quants × 3 backends; packed SIMD/GPU; grad verify | ✅ |
 | `mha/` | Policy Mask/Pos/Mode (decoder, encoder, diffusion, cross, PrefixLM, window, ALiBi); Dense proj coverage | ✅ |
+| `swiglu/` | SiLU-gated FFN; Gate/Up/Down via Dense; FormatNone×34 + all quants × 3 backends | ✅ |
 | `seqmix/` | Sequence-mixer kinds (attention / SSM / linear / conv) — contract only | ✅ |
 | `mamba/` | SSM / Mamba (KindSSM) | ⬜ |
-| `swiglu/` | SwiGLU FFN | ⬜ |
 | `rmsnorm/` | RMSNorm | ⬜ |
 | `layernorm/` | LayerNorm | ⬜ |
 | `cnn1/` | 1D convolution | ⬜ |
@@ -246,6 +248,20 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 
 Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/` — they land under `seqmix.Kind*` in their own packages.
 
+### SwiGLU detail
+
+| Feature | CPU | SIMD | WebGPU |
+|---------|:---:|:----:|:------:|
+| SiLU(gate) ⊙ up → down | ✅ | ✅ | ✅ |
+| Gate/Up/Down FormatNone × 34 — fwd+bwd | ✅ Dense projs | ✅ Dense projs | ✅ Dense projs |
+| Gate/Up/Down all 20 quants — fwd+bwd | ✅ | ✅ | ✅ |
+| Activation `Tensor[T]` × all 15 `core.Numeric` kinds | ✅ | ✅ | ✅ |
+| Timed FormatNone + quant matrices in `w2a` | ✅ | ✅ | ✅ |
+| Gap census 34×20×3 | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
+| Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
+| Fused on-device SiLU⊙ / SwiGLU shader | ⬜ | ⬜ | ⬜ |
+
 ### Model / IO / runtime
 
 | Package | Features | Status |
@@ -277,7 +293,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/`
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `w2a/` | Interactive menu, dense + mha suites, timed matrices, gap census, docs | 🚧 |
+| `w2a/` | Interactive menu, dense + mha + swiglu suites, timed matrices, gap census, docs | 🚧 |
 
 ---
 
@@ -319,6 +335,7 @@ cd w2a
 go run .                 # interactive
 go test ./tests/dense -v # FormatNone timed matrix + gap census
 go test ./tests/mha -v   # causal+RoPE+GQA; same coverage axes as Dense
+go test ./tests/swiglu -v # SiLU-gated FFN; same coverage axes as Dense
 ```
 
 Docs: `w2a/docs/`.

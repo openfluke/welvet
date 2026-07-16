@@ -12,6 +12,7 @@ import (
 	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/forward"
 	"github.com/openfluke/welvet/mha"
+	"github.com/openfluke/welvet/swiglu"
 )
 
 // Config is shared train hyper-params.
@@ -98,6 +99,8 @@ func applyCell[T core.Numeric](op any, dW *core.Tensor[T], lr float64) error {
 		return dense.ApplyGradSGD(v, dW, lr)
 	case *mha.Layer:
 		return mha.ApplyGradSGD(v, dW, lr)
+	case *swiglu.Layer:
+		return swiglu.ApplyGradSGD(v, dW, lr)
 	case GradApplier[T]:
 		return v.ApplyGradSGD(dW, lr)
 	default:

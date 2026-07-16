@@ -11,6 +11,7 @@ import (
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/mha"
+	"github.com/openfluke/welvet/swiglu"
 )
 
 // Step records one executed cell for backward (and debugging).
@@ -87,6 +88,12 @@ func dispatch[T core.Numeric](cell *architecture.Cell, input *core.Tensor[T]) (p
 			return nil, nil, fmt.Errorf("mha cell Op is %T, want *mha.Layer", cell.Op)
 		}
 		return mha.Forward(ml, input)
+	case core.LayerSwiGLU:
+		sl, ok := cell.Op.(*swiglu.Layer)
+		if !ok || sl == nil {
+			return nil, nil, fmt.Errorf("swiglu cell Op is %T, want *swiglu.Layer", cell.Op)
+		}
+		return swiglu.Forward(sl, input)
 	default:
 		return nil, nil, fmt.Errorf("unsupported layer type %s", cell.Layer.Type)
 	}

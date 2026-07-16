@@ -1,5 +1,13 @@
-// Package swiglu is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package swiglu is Welvet SwiGLU FFN (SiLU-gated MLP).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Math (loom / planetbridging compatible):
+//
+//	gate = Wg x + bg
+//	up   = Wu x + bu
+//	h    = SiLU(gate) ⊙ up
+//	y    = Wd h + bd
+//
+// Gate / Up / Down ride dense.Layer (FormatNone×34 + all quants × CPU/SIMD/WebGPU).
+// Activations are core.Tensor[T] (not hardcoded float32). No QAT.
+// Tests live in github.com/openfluke/w2a only.
 package swiglu
