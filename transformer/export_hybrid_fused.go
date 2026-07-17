@@ -2,6 +2,8 @@ package transformer
 
 import (
 	"fmt"
+	"runtime"
+	"runtime/debug"
 
 	"github.com/openfluke/welvet/dense"
 	"github.com/openfluke/welvet/fusedgpu"
@@ -10,6 +12,10 @@ import (
 
 // ExportHybridFusedGPUSpec builds the full BinaryG128 on-device hybrid decoder bundle.
 // Every projection/embed/LM weight is included — no host GEMV fallback.
+//
+// Move semantics: each host packed blob is staged (copied into BinarySpec) then the
+// host Raw/Scales are dropped immediately so peak RAM ≈ remaining_host + staging_so_far
+// (+ GPU as upload progresses), not host+staging+GPU all at once.
 func (m *Model) ExportHybridFusedGPUSpec() (*fusedgpu.HybridSpec, error) {
 	if m == nil {
 		return nil, fmt.Errorf("transformer: nil model")
@@ -40,20 +46,19 @@ func (m *Model) ExportHybridFusedGPUSpec() (*fusedgpu.HybridSpec, error) {
 		maxSeq = gpuMaxSeq
 	}
 
-	embed, err := binarySpecFromBlob(m.embedPacked)
-	if err != nil {
-		return nil, fmt.Errorf("embed: %w", err)
-	}
+	// Resolve tied LM before any take() — taking embed would nil the shared blob.
+	tied := m.LMHeadTied
 	lmBlob := m.lmHeadPacked
 	if lmBlob == nil && m.lmHead != nil {
 		lmBlob = m.lmHead.Packed
 	}
-	if lmBlob == nil {
-		lmBlob = m.embedPacked // tied
+	if lmBlob == nil || lmBlob == m.embedPacked {
+		tied = true
 	}
-	lm, err := binarySpecFromBlob(lmBlob)
+
+	embed, err := takeBinarySpecFromBlob(m.embedPacked)
 	if err != nil {
-		return nil, fmt.Errorf("lm_head: %w", err)
+		return nil, fmt.Errorf("embed: %w", err)
 	}
 
 	spec := &fusedgpu.HybridSpec{
@@ -63,9 +68,15 @@ func (m *Model) ExportHybridFusedGPUSpec() (*fusedgpu.HybridSpec, error) {
 		Intermediate: inter,
 		Eps:          eps,
 		MaxSeq:       maxSeq,
+		LMHeadTied:   tied,
 		Embed:        embed,
-		LMHead:       lm,
 		Blocks:       make([]fusedgpu.HybridBlockSpec, len(m.Blocks)),
+	}
+	if !tied {
+		spec.LMHead, err = takeBinarySpecFromBlob(lmBlob)
+		if err != nil {
+			return nil, fmt.Errorf("lm_head: %w", err)
+		}
 	}
 	if m.HasFinalNorm && m.FinalNorm != nil {
 		spec.FinalNorm, err = rmsGammaF32(m.FinalNorm)
@@ -92,28 +103,28 @@ func (m *Model) ExportHybridFusedGPUSpec() (*fusedgpu.HybridSpec, error) {
 				return nil, fmt.Errorf("block %d ffn_norm: %w", i, err)
 			}
 		}
-		if blk.Gate, err = binarySpecFromDense(b.FFN.Gate); err != nil {
+		if blk.Gate, err = takeBinarySpecFromDense(b.FFN.Gate); err != nil {
 			return nil, fmt.Errorf("block %d gate: %w", i, err)
 		}
-		if blk.Up, err = binarySpecFromDense(b.FFN.Up); err != nil {
+		if blk.Up, err = takeBinarySpecFromDense(b.FFN.Up); err != nil {
 			return nil, fmt.Errorf("block %d up: %w", i, err)
 		}
-		if blk.Down, err = binarySpecFromDense(b.FFN.Down); err != nil {
+		if blk.Down, err = takeBinarySpecFromDense(b.FFN.Down); err != nil {
 			return nil, fmt.Errorf("block %d down: %w", i, err)
 		}
 
 		switch b.LayerType {
 		case "full_attention":
-			if blk.Q, err = binarySpecFromDense(b.Q); err != nil {
+			if blk.Q, err = takeBinarySpecFromDense(b.Q); err != nil {
 				return nil, fmt.Errorf("block %d q: %w", i, err)
 			}
-			if blk.K, err = binarySpecFromDense(b.K); err != nil {
+			if blk.K, err = takeBinarySpecFromDense(b.K); err != nil {
 				return nil, fmt.Errorf("block %d k: %w", i, err)
 			}
-			if blk.V, err = binarySpecFromDense(b.V); err != nil {
+			if blk.V, err = takeBinarySpecFromDense(b.V); err != nil {
 				return nil, fmt.Errorf("block %d v: %w", i, err)
 			}
-			if blk.O, err = binarySpecFromDense(b.O); err != nil {
+			if blk.O, err = takeBinarySpecFromDense(b.O); err != nil {
 				return nil, fmt.Errorf("block %d o: %w", i, err)
 			}
 			blk.QNorm = append([]float32(nil), b.QNorm...)
@@ -132,19 +143,19 @@ func (m *Model) ExportHybridFusedGPUSpec() (*fusedgpu.HybridSpec, error) {
 			if g == nil {
 				return nil, fmt.Errorf("block %d: nil GDN", i)
 			}
-			if blk.GDNQKV, err = binarySpecFromBlob(g.InQKV); err != nil {
+			if blk.GDNQKV, err = takeBinarySpecFromBlob(g.InQKV); err != nil {
 				return nil, fmt.Errorf("block %d gdn_qkv: %w", i, err)
 			}
-			if blk.GDNZ, err = binarySpecFromBlob(g.InZ); err != nil {
+			if blk.GDNZ, err = takeBinarySpecFromBlob(g.InZ); err != nil {
 				return nil, fmt.Errorf("block %d gdn_z: %w", i, err)
 			}
-			if blk.GDNB, err = binarySpecFromBlob(g.InB); err != nil {
+			if blk.GDNB, err = takeBinarySpecFromBlob(g.InB); err != nil {
 				return nil, fmt.Errorf("block %d gdn_b: %w", i, err)
 			}
-			if blk.GDNA, err = binarySpecFromBlob(g.InA); err != nil {
+			if blk.GDNA, err = takeBinarySpecFromBlob(g.InA); err != nil {
 				return nil, fmt.Errorf("block %d gdn_a: %w", i, err)
 			}
-			if blk.GDNOut, err = binarySpecFromBlob(g.Out); err != nil {
+			if blk.GDNOut, err = takeBinarySpecFromBlob(g.Out); err != nil {
 				return nil, fmt.Errorf("block %d gdn_out: %w", i, err)
 			}
 			blk.GDNConv = append([]float32(nil), g.ConvWeight...)
@@ -159,15 +170,44 @@ func (m *Model) ExportHybridFusedGPUSpec() (*fusedgpu.HybridSpec, error) {
 		default:
 			return nil, fmt.Errorf("block %d: unknown layer type %q", i, b.LayerType)
 		}
+		if (i+1)%8 == 0 || i+1 == len(m.Blocks) {
+			fmt.Printf("  hybrid fuse stage layers %d/%d\n", i+1, len(m.Blocks))
+			runtime.GC()
+			debug.FreeOSMemory()
+		}
 	}
+	// Host packed payloads were moved into staging; mark so CPU paths reload from entity.
+	m.hostWeightsReleased = true
 	return spec, nil
 }
 
-func binarySpecFromDense(l *dense.Layer) (fusedgpu.BinarySpec, error) {
+func takeBinarySpecFromDense(l *dense.Layer) (fusedgpu.BinarySpec, error) {
 	if l == nil || l.Weights == nil || l.Weights.Packed == nil {
 		return fusedgpu.BinarySpec{}, fmt.Errorf("nil packed dense")
 	}
-	return binarySpecFromBlob(l.Weights.Packed)
+	return takeBinarySpecFromBlob(l.Weights.Packed)
+}
+
+// takeBinarySpecFromBlob stages a BinaryG128 copy then drops the host blob payload
+// so RAM does not hold host+staging for the same tensor.
+func takeBinarySpecFromBlob(b *quant.Blob) (fusedgpu.BinarySpec, error) {
+	spec, err := binarySpecFromBlob(b)
+	if err != nil {
+		return fusedgpu.BinarySpec{}, err
+	}
+	dropBlobPayload(b)
+	return spec, nil
+}
+
+func dropBlobPayload(b *quant.Blob) {
+	if b == nil {
+		return
+	}
+	b.Raw = nil
+	b.Scales = nil
+	b.Mins = nil
+	b.Q4Packed = nil
+	b.F32Cache = nil
 }
 
 func binarySpecFromBlob(b *quant.Blob) (fusedgpu.BinarySpec, error) {

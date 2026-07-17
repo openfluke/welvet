@@ -117,13 +117,13 @@ func (m *Model) Generate(
 
 		logits, err = m.ForwardTokens([]uint32{tok})
 		if err != nil {
-			metrics := buildMetrics(len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
+			metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
 			return stream.String(), metrics, fmt.Errorf("decode step %d: %w", step, err)
 		}
 	}
 	decodeElapsed := time.Since(decodeStart)
 
-	metrics := buildMetrics(len(ids), generatedCount, prefillElapsed, decodeElapsed)
+	metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, decodeElapsed)
 	if generatedCount > 0 && opts.PrintMetrics && !opts.Silent {
 		fmt.Print(metrics.FormatFooter())
 	}
@@ -181,13 +181,13 @@ func (m *Model) generateHybridGPUSample(
 		}
 		next, err := he.DecodeChunk(1)
 		if err != nil {
-			metrics := buildMetrics(len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
+			metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
 			return stream.String(), metrics, fmt.Errorf("decode step %d: %w", generatedCount, err)
 		}
 		tok = next[0]
 	}
 	decodeElapsed := time.Since(decodeStart)
-	metrics := buildMetrics(len(ids), generatedCount, prefillElapsed, decodeElapsed)
+	metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, decodeElapsed)
 	if generatedCount > 0 && opts.PrintMetrics && !opts.Silent {
 		fmt.Print(metrics.FormatFooter())
 	}
@@ -197,7 +197,7 @@ func (m *Model) generateHybridGPUSample(
 	return stream.String(), metrics, nil
 }
 
-func buildMetrics(promptTokens, generatedCount int, prefillElapsed, decodeElapsed time.Duration) GenMetrics {
+func buildMetrics(m *Model, promptTokens, generatedCount int, prefillElapsed, decodeElapsed time.Duration) GenMetrics {
 	metrics := GenMetrics{
 		PrefillTime:     prefillElapsed,
 		DecodeTime:      decodeElapsed,
@@ -215,6 +215,13 @@ func buildMetrics(promptTokens, generatedCount int, prefillElapsed, decodeElapse
 		if promptTokens > 0 && prefillElapsed > 0 {
 			metrics.PrefillTokPerSec = float64(promptTokens) / prefillElapsed.Seconds()
 		}
+	}
+	if m != nil {
+		fp := m.MemFootprint()
+		metrics.HostMB = fp.HostMB
+		metrics.VRAMMB = fp.VRAMMB
+		metrics.HeapMB = fp.HeapMB
+		metrics.WeightsMB = fp.WeightsMB
 	}
 	return metrics
 }

@@ -59,6 +59,7 @@ func LoadEntity(path string) (*Model, error) {
 		if err := loadHybridEntity(ef, m, spec); err != nil {
 			return nil, err
 		}
+		m.EntityPath = path
 		return m, nil
 	}
 
@@ -226,5 +227,6 @@ func LoadEntity(path string) (*Model, error) {
 		m.Blocks[i] = Block{AttnNorm: attnNorm, Attn: attn, FFNNorm: ffnNorm, FFN: ffn}
 	}
 
+	m.EntityPath = path
 	return m, nil
 }

@@ -42,3 +42,17 @@ func (eng *Engine) AdapterName() string {
 	}
 	return eng.e.adapter.GetInfo().Name
 }
+
+// VRAMBytes returns allocated WebGPU buffer bytes for this Q4 fused engine.
+func (eng *Engine) VRAMBytes() uint64 {
+	if eng == nil || eng.e == nil {
+		return 0
+	}
+	var n uint64
+	for _, b := range eng.e.owned {
+		if b != nil {
+			n += b.GetSize()
+		}
+	}
+	return n
+}

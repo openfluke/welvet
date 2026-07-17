@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"runtime/debug"
 	"time"
 	"unsafe"
 
@@ -277,8 +278,8 @@ func (e *hybridEngine) mkBuf(label string, size uint64, usage wgpu.BufferUsage, 
 	return b, nil
 }
 
-func (e *hybridEngine) uploadBin(label string, s BinarySpec) (binGPU, error) {
-	if s.Rows <= 0 || s.Cols <= 0 || len(s.Words) == 0 {
+func (e *hybridEngine) uploadBin(label string, s *BinarySpec) (binGPU, error) {
+	if s == nil || s.Rows <= 0 || s.Cols <= 0 || len(s.Words) == 0 {
 		return binGPU{}, fmt.Errorf("%s: empty binary matrix", label)
 	}
 	sc, err := e.mkBuf(label+"_s", uint64(len(s.Scales)*4), wgpu.BufferUsageStorage, f32Bytes(s.Scales))
@@ -289,6 +290,8 @@ func (e *hybridEngine) uploadBin(label string, s BinarySpec) (binGPU, error) {
 	if err != nil {
 		return binGPU{}, err
 	}
+	// Move to GPU: drop host staging immediately so peak ≈ remaining+device, not 2×.
+	s.Scales, s.Words = nil, nil
 	return binGPU{scales: sc, weights: w, rows: s.Rows, cols: s.Cols}, nil
 }
 
@@ -302,10 +305,13 @@ func onesF32Hybrid(n int) []float32 {
 
 func (e *hybridEngine) uploadAll(spec *HybridSpec) error {
 	var err error
-	if e.embed, err = e.uploadBin("embed", spec.Embed); err != nil {
+	if e.embed, err = e.uploadBin("embed", &spec.Embed); err != nil {
 		return err
 	}
-	if e.lmHead, err = e.uploadBin("lm", spec.LMHead); err != nil {
+	if spec.LMHeadTied {
+		// Same GPU buffers as embed — avoid a second host→device copy of the vocab table.
+		e.lmHead = e.embed
+	} else if e.lmHead, err = e.uploadBin("lm", &spec.LMHead); err != nil {
 		return err
 	}
 	fn := spec.FinalNorm
@@ -315,6 +321,7 @@ func (e *hybridEngine) uploadAll(spec *HybridSpec) error {
 	if e.finalNorm, err = e.mkBuf("fnorm", uint64(len(fn)*4), wgpu.BufferUsageStorage, f32Bytes(fn)); err != nil {
 		return err
 	}
+	spec.FinalNorm = nil
 
 	e.blocks = make([]hybridBlockGPU, spec.Layers)
 	for i := range spec.Blocks {
@@ -327,13 +334,14 @@ func (e *hybridEngine) uploadAll(spec *HybridSpec) error {
 		if g.ffnNorm, err = e.mkBuf(fmt.Sprintf("fn_%d", i), uint64(len(b.FFNNorm)*4), wgpu.BufferUsageStorage, f32Bytes(b.FFNNorm)); err != nil {
 			return err
 		}
-		if g.gate, err = e.uploadBin(fmt.Sprintf("gate_%d", i), b.Gate); err != nil {
+		b.AttnNorm, b.FFNNorm = nil, nil
+		if g.gate, err = e.uploadBin(fmt.Sprintf("gate_%d", i), &b.Gate); err != nil {
 			return err
 		}
-		if g.up, err = e.uploadBin(fmt.Sprintf("up_%d", i), b.Up); err != nil {
+		if g.up, err = e.uploadBin(fmt.Sprintf("up_%d", i), &b.Up); err != nil {
 			return err
 		}
-		if g.down, err = e.uploadBin(fmt.Sprintf("down_%d", i), b.Down); err != nil {
+		if g.down, err = e.uploadBin(fmt.Sprintf("down_%d", i), &b.Down); err != nil {
 			return err
 		}
 
@@ -346,16 +354,16 @@ func (e *hybridEngine) uploadAll(spec *HybridSpec) error {
 			g.numKVHeads = b.NumKVHeads
 			g.headDim = b.HeadDim
 			g.qRows = b.Q.Rows
-			if g.q, err = e.uploadBin(fmt.Sprintf("q_%d", i), b.Q); err != nil {
+			if g.q, err = e.uploadBin(fmt.Sprintf("q_%d", i), &b.Q); err != nil {
 				return err
 			}
-			if g.k, err = e.uploadBin(fmt.Sprintf("k_%d", i), b.K); err != nil {
+			if g.k, err = e.uploadBin(fmt.Sprintf("k_%d", i), &b.K); err != nil {
 				return err
 			}
-			if g.v, err = e.uploadBin(fmt.Sprintf("v_%d", i), b.V); err != nil {
+			if g.v, err = e.uploadBin(fmt.Sprintf("v_%d", i), &b.V); err != nil {
 				return err
 			}
-			if g.o, err = e.uploadBin(fmt.Sprintf("o_%d", i), b.O); err != nil {
+			if g.o, err = e.uploadBin(fmt.Sprintf("o_%d", i), &b.O); err != nil {
 				return err
 			}
 			if g.qNorm, err = e.mkBuf(fmt.Sprintf("qn_%d", i), uint64(len(b.QNorm)*4), wgpu.BufferUsageStorage, f32Bytes(b.QNorm)); err != nil {
@@ -364,6 +372,7 @@ func (e *hybridEngine) uploadAll(spec *HybridSpec) error {
 			if g.kNorm, err = e.mkBuf(fmt.Sprintf("kn_%d", i), uint64(len(b.KNorm)*4), wgpu.BufferUsageStorage, f32Bytes(b.KNorm)); err != nil {
 				return err
 			}
+			b.QNorm, b.KNorm = nil, nil
 			kvBytes := uint64(b.NumKVHeads * e.maxSeq * b.HeadDim * 4)
 			if g.kCache, err = e.mkBuf(fmt.Sprintf("kc_%d", i), kvBytes, wgpu.BufferUsageStorage, nil); err != nil {
 				return err
@@ -380,19 +389,19 @@ func (e *hybridEngine) uploadAll(spec *HybridSpec) error {
 			if g.convKernel < 1 {
 				g.convKernel = 1
 			}
-			if g.gdnQKV, err = e.uploadBin(fmt.Sprintf("gqkv_%d", i), b.GDNQKV); err != nil {
+			if g.gdnQKV, err = e.uploadBin(fmt.Sprintf("gqkv_%d", i), &b.GDNQKV); err != nil {
 				return err
 			}
-			if g.gdnZ, err = e.uploadBin(fmt.Sprintf("gz_%d", i), b.GDNZ); err != nil {
+			if g.gdnZ, err = e.uploadBin(fmt.Sprintf("gz_%d", i), &b.GDNZ); err != nil {
 				return err
 			}
-			if g.gdnB, err = e.uploadBin(fmt.Sprintf("gb_%d", i), b.GDNB); err != nil {
+			if g.gdnB, err = e.uploadBin(fmt.Sprintf("gb_%d", i), &b.GDNB); err != nil {
 				return err
 			}
-			if g.gdnA, err = e.uploadBin(fmt.Sprintf("ga_%d", i), b.GDNA); err != nil {
+			if g.gdnA, err = e.uploadBin(fmt.Sprintf("ga_%d", i), &b.GDNA); err != nil {
 				return err
 			}
-			if g.gdnOut, err = e.uploadBin(fmt.Sprintf("gout_%d", i), b.GDNOut); err != nil {
+			if g.gdnOut, err = e.uploadBin(fmt.Sprintf("gout_%d", i), &b.GDNOut); err != nil {
 				return err
 			}
 			if g.gdnConv, err = e.mkBuf(fmt.Sprintf("gc_%d", i), uint64(len(b.GDNConv)*4), wgpu.BufferUsageStorage, f32Bytes(b.GDNConv)); err != nil {
@@ -407,6 +416,7 @@ func (e *hybridEngine) uploadAll(spec *HybridSpec) error {
 			if g.gdnNorm, err = e.mkBuf(fmt.Sprintf("gn_%d", i), uint64(len(b.GDNNorm)*4), wgpu.BufferUsageStorage, f32Bytes(b.GDNNorm)); err != nil {
 				return err
 			}
+			b.GDNConv, b.GDNALog, b.GDNDtBias, b.GDNNorm = nil, nil, nil, nil
 			stBytes := uint64(b.NumValueHeads * b.KeyHeadDim * b.ValueHeadDim * 4)
 			if g.gdnState, err = e.mkBuf(fmt.Sprintf("gst_%d", i), stBytes, wgpu.BufferUsageStorage, nil); err != nil {
 				return err
@@ -427,6 +437,9 @@ func (e *hybridEngine) uploadAll(spec *HybridSpec) error {
 		}
 		if (i+1)%8 == 0 || i+1 == spec.Layers {
 			fmt.Printf("  hybrid fuse upload layers %d/%d\n", i+1, spec.Layers)
+			// Reclaim staging pages between layer batches (iPad Jetsam).
+			runtime.GC()
+			debug.FreeOSMemory()
 		}
 	}
 	return nil

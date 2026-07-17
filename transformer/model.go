@@ -49,6 +49,8 @@ type Model struct {
 	Repo       string
 	Snapshot   string
 	TokenizerPath string
+	// EntityPath is the source .entity (used to drop/reload host weights after GPU fuse).
+	EntityPath    string
 	Architecture  string
 	LayerTypes    []string
 	AttnOutputGate bool
@@ -74,6 +76,8 @@ type Model struct {
 
 	// gpu holds *fusedgpu.Engine when gpu_fuse profile synced (see gpu.go).
 	gpu any
+	// hostWeightsReleased: host packed Raw/Scales were dropped after GPU upload (anti double-mount).
+	hostWeightsReleased bool
 
 	scratch       *fwdScratch
 	logitsScratch []float32 // reused LM-head output

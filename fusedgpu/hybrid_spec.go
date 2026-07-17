@@ -40,9 +40,10 @@ type HybridSpec struct {
 	Intermediate          int
 	Eps                   float32
 	MaxSeq                int
+	LMHeadTied            bool // reuse embed GPU buffers for LM head
 	Embed                 BinarySpec // vocab × hidden
 	FinalNorm             []float32
-	LMHead                BinarySpec // vocab × hidden
+	LMHead                BinarySpec // vocab × hidden (empty when LMHeadTied)
 	Blocks                []HybridBlockSpec
 }
 
@@ -143,6 +144,14 @@ func (eng *HybridEngine) AdapterName() string {
 		return ""
 	}
 	return eng.e.adapter.GetInfo().Name
+}
+
+// VRAMBytes returns allocated WebGPU buffer bytes for this hybrid engine.
+func (eng *HybridEngine) VRAMBytes() uint64 {
+	if eng == nil || eng.e == nil {
+		return 0
+	}
+	return eng.e.estimateVRAM()
 }
 
 func (s *BinarySpec) nbytes() uint64 {

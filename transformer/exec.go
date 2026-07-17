@@ -178,6 +178,9 @@ func (m *Model) ApplyExec(p ExecProfile) error {
 	} else {
 		m.CloseGPU()
 		m.CloseHybridGPU()
+		if err := m.ensureHostPackedWeights(); err != nil {
+			return err
+		}
 	}
 	if m.Embed != nil {
 		m.Embed.Exec = exec

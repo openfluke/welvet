@@ -38,6 +38,7 @@ func (m *Model) SyncGPU() error {
 	}
 	m.gpu = eng
 	m.clearFloatCaches()
+	m.releaseHostPackedWeights()
 	return nil
 }
 
@@ -73,6 +74,7 @@ func (m *Model) clearFloatCaches() {
 
 // SyncHybridFused uploads the full BinaryG128 hybrid/dense decoder to GPU (all weights on device).
 // Bonsai-27B hybrid needs ~5–8+ GiB VRAM; dense Bonsai-8B is ~1.3GB weights + scratch (~2–3 GiB).
+// Staging moves host→staging→GPU in blocks (no full 2× host+staging residency).
 func (m *Model) SyncHybridFused() error {
 	if m == nil {
 		return fmt.Errorf("transformer: nil model")
@@ -89,15 +91,19 @@ func (m *Model) SyncHybridFused() error {
 
 	spec, err := m.ExportHybridFusedGPUSpec()
 	if err != nil {
+		_ = m.ensureHostPackedWeights()
 		return err
 	}
 	runtime.GC()
+	debug.FreeOSMemory()
 
 	eng, err := fusedgpu.NewHybridFromSpec(spec)
 	if err != nil {
+		_ = m.ensureHostPackedWeights()
 		return fmt.Errorf("fusedgpu hybrid: %w", err)
 	}
 	m.gpu = eng
+	m.releaseHostPackedWeights()
 	return nil
 }
 
