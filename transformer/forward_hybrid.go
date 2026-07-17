@@ -149,8 +149,8 @@ func forwardFullAttnDecode(b *Block, x, y []float32, maxSeq int) error {
 	}
 
 	pos := b.KVOffset
-	applyPartialRoPE(q, nh, hd, b.PartialRotary, b.RoPETheta, pos)
-	applyPartialRoPE(kOut, nkv, hd, b.PartialRotary, b.RoPETheta, pos)
+	ApplyPartialRoPE(q, nh, hd, b.PartialRotary, b.RoPETheta, pos)
+	ApplyPartialRoPE(kOut, nkv, hd, b.PartialRotary, b.RoPETheta, pos)
 
 	// append KV
 	need := (pos + 1) * kvDim
@@ -265,10 +265,10 @@ func rmsNormVec(x, gamma []float32, eps float64) {
 	}
 }
 
-// applyPartialRoPE matches Qwen3 / Lucy rotate_half: pair dim d with d+half
+// ApplyPartialRoPE matches Qwen3 / Lucy rotate_half: pair dim d with d+half
 // inside the rotary prefix (not adjacent NeoX pairs). partial_rotary_factor
 // limits rotation to the first rotDim dims; the rest of the head is untouched.
-func applyPartialRoPE(x []float32, nHeads, headDim int, partial, theta float64, pos int) {
+func ApplyPartialRoPE(x []float32, nHeads, headDim int, partial, theta float64, pos int) {
 	rotDim := int(float64(headDim) * partial)
 	if rotDim <= 0 {
 		rotDim = headDim
