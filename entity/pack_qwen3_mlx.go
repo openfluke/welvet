@@ -222,13 +222,17 @@ func PackFromQwen3MLX(snapshotDir, outPath string, opts PackOptions) error {
 		}
 	}
 
+	tokPath := appendTokenizerBlob(acc, &blobs, snapshotDir)
+
 	if err := payloadTmp.Close(); err != nil {
 		return err
 	}
 
-	tokPath := filepath.Join(snapshotDir, "tokenizer.json")
-	if _, err := os.Stat(tokPath); err != nil {
-		tokPath = ""
+	if tokPath == "" {
+		cand := filepath.Join(snapshotDir, "tokenizer.json")
+		if _, err := os.Stat(cand); err == nil {
+			tokPath = cand
+		}
 	}
 
 	rope := dims.RoPEFreqBase

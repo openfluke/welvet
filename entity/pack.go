@@ -239,13 +239,17 @@ func PackFromHF(snapshotDir, outPath string, opts PackOptions) error {
 		}
 	}
 
+	tokPath := appendTokenizerBlob(acc, &blobs, snapshotDir)
+
 	if err := payloadTmp.Close(); err != nil {
 		return err
 	}
 
-	tokPath := filepath.Join(snapshotDir, "tokenizer.json")
-	if _, err := os.Stat(tokPath); err != nil {
-		tokPath = ""
+	if tokPath == "" {
+		cand := filepath.Join(snapshotDir, "tokenizer.json")
+		if _, err := os.Stat(cand); err == nil {
+			tokPath = cand
+		}
 	}
 
 	spec := &TransformerSpec{
@@ -336,12 +340,38 @@ type payloadAcc struct {
 func (a *payloadAcc) writeF32(data []float32) error {
 	buf := make([]byte, len(data)*4)
 	for i, v := range data {
-		binary.LittleEndian.PutUint32(buf[i*4:i*4+4], math.Float32bits(v))
+		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(v))
 	}
 	n, err := a.w.Write(buf)
-	if err != nil {
-		return err
-	}
 	a.offset += uint64(n)
-	return nil
+	return err
+}
+
+func (a *payloadAcc) writeBytes(data []byte) error {
+	n, err := a.w.Write(data)
+	a.offset += uint64(n)
+	return err
+}
+
+// appendTokenizerBlob embeds tokenizer.json into the payload when present.
+// Returns the on-disk path recorded in the header (may be empty).
+func appendTokenizerBlob(acc *payloadAcc, blobs *[]WeightBlob, snapshotDir string) string {
+	tokPath := filepath.Join(snapshotDir, "tokenizer.json")
+	data, err := os.ReadFile(tokPath)
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	off := acc.offset
+	if err := acc.writeBytes(data); err != nil {
+		return tokPath
+	}
+	*blobs = append(*blobs, WeightBlob{
+		Path:   TokenizerBlobPath,
+		Offset: off,
+		Length: uint64(len(data)),
+		DType:  "JSON",
+		Format: "none",
+		Native: true,
+	})
+	return tokPath
 }

@@ -8,6 +8,8 @@ const (
 	Magic         = "ENTITY\x00\x00"
 	FormatVersion = 1
 	headerMaxSize = 256 << 20
+	// TokenizerBlobPath is the UTF-8 tokenizer.json payload (portable; no host paths).
+	TokenizerBlobPath = "transformer.tokenizer.json"
 )
 
 func fixedHeaderSize() int { return 20 }

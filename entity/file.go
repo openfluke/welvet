@@ -228,6 +228,24 @@ func (ef *File) findBlob(path string) (*WeightBlob, error) {
 	return nil, fmt.Errorf("entity blob %q not found", path)
 }
 
+// LoadTokenizerJSON reads the embedded tokenizer.json blob, if present.
+func (ef *File) LoadTokenizerJSON() ([]byte, error) {
+	return ef.LoadBlobBytes(TokenizerBlobPath)
+}
+
+// HasTokenizerBlob reports whether the entity embeds tokenizer.json.
+func (ef *File) HasTokenizerBlob() bool {
+	if ef == nil || ef.hdr == nil {
+		return false
+	}
+	for i := range ef.hdr.Blobs {
+		if ef.hdr.Blobs[i].Path == TokenizerBlobPath {
+			return true
+		}
+	}
+	return false
+}
+
 // PeekMagic reads the first 8 bytes of path.
 func PeekMagic(path string) (string, error) {
 	f, err := os.Open(path)
