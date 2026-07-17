@@ -3,11 +3,14 @@ package transformer
 import (
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/openfluke/welvet/fusedgpu"
 	"github.com/openfluke/welvet/sampling"
 )
+
+const thinkTokenBudget = 256 // max tokens inside <think> before we force-close + answer
 
 // GenOptions controls greedy generation + streaming.
 type GenOptions struct {
@@ -24,6 +27,9 @@ type GenOptions struct {
 	RepetitionWindow int
 	// NoRepeatNGram stops when the last n tokens repeat immediately (0 = 8; <0 disables).
 	NoRepeatNGram int
+	// EnableThinking lets Qwen3/Bonsai emit <think>…</think> (default false = hard-disable).
+	// Ignored on non-thinking models (SmolLM, etc.).
+	EnableThinking bool
 }
 
 // Generate runs greedy decode for one user message (ChatML by default).
@@ -48,6 +54,9 @@ func (m *Model) Generate(
 	if opts.RepetitionPenalty == 0 {
 		opts.RepetitionPenalty = 1.15
 	}
+	if opts.EnableThinking && m.SupportsThinking() && opts.RepetitionPenalty < 1.2 {
+		opts.RepetitionPenalty = 1.2
+	}
 	if opts.RepetitionWindow <= 0 {
 		opts.RepetitionWindow = 64
 	}
@@ -56,9 +65,15 @@ func (m *Model) Generate(
 	}
 
 	prompt := ChatML.BuildPrompt(turns, systemPrompt, userMsg)
-	// Qwen3 / Bonsai: hard-disable thinking via empty <think></think> in the prompt.
-	if m.Architecture == "qwen3_dense" || m.Architecture == "qwen35_hybrid" {
-		prompt = ChatML.BuildPromptNoThink(turns, systemPrompt, userMsg)
+	hideThink := false
+	if m.SupportsThinking() {
+		if opts.EnableThinking {
+			// Soft /think only — no hard-open <think> (that traps 4B/8B).
+			prompt = ChatML.BuildPromptThink(turns, systemPrompt, userMsg)
+		} else {
+			prompt = ChatML.BuildPromptNoThink(turns, systemPrompt, userMsg)
+			hideThink = true
+		}
 	}
 	ids := encode(prompt, false)
 	if len(ids) == 0 {
@@ -68,6 +83,7 @@ func (m *Model) Generate(
 	streamDecode := func(toks []uint32) string { return decode(toks, false) }
 	allTokens := append([]uint32(nil), ids...)
 	stream := NewStreamer(streamDecode, ids)
+	stream.HideThink = hideThink
 
 	eos := make(map[int]struct{}, len(m.EOSTokens))
 	for _, t := range m.EOSTokens {
@@ -78,7 +94,6 @@ func (m *Model) Generate(
 	m.Quiet = opts.Silent
 	prefillStart := time.Now()
 
-	// Hybrid full-fuse: on-device argmax (map 4 bytes/token), not full logits.
 	if he, ok := m.gpu.(*fusedgpu.HybridEngine); ok && he != nil {
 		return m.generateHybridGPUSample(he, encode, decode, ids, eos, stream, allTokens, opts, prefillStart)
 	}
@@ -97,8 +112,9 @@ func (m *Model) Generate(
 
 	decodeStart := time.Now()
 	generatedCount := 0
+	thinkClosed := false
 
-	for step := 0; step < opts.MaxTokens; step++ {
+	for generatedCount < opts.MaxTokens {
 		banSpecials(logits, eos)
 		if opts.RepetitionPenalty > 1 {
 			sampling.ApplyRepetitionPenalty(logits, allTokens, opts.RepetitionPenalty, opts.RepetitionWindow)
@@ -111,14 +127,31 @@ func (m *Model) Generate(
 		allTokens = append(allTokens, tok)
 		generatedCount++
 		stream.Push(allTokens, opts.Silent, opts.StreamCallback)
-		if opts.NoRepeatNGram > 0 && sampling.HasRepeatedNGram(allTokens[len(ids):], opts.NoRepeatNGram) {
+		gen := allTokens[len(ids):]
+
+		if opts.EnableThinking && stream.InThink() && !thinkClosed &&
+			(shouldStopRepeat(gen, opts) || thinkLen(stream) >= thinkTokenBudget) {
+			closeIDs := encode("</think>\n\n", false)
+			stream.ForceCloseThink(opts.Silent, opts.StreamCallback)
+			thinkClosed = true
+			if len(closeIDs) > 0 {
+				logits, err = m.ForwardTokens(closeIDs)
+				if err != nil {
+					metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
+					return finalizeAssistantReply(stream.String(), true), metrics, fmt.Errorf("close think: %w", err)
+				}
+				allTokens = append(allTokens, closeIDs...)
+			}
+			continue
+		}
+		if !stream.InThink() && shouldStopRepeat(gen, opts) {
 			break
 		}
 
 		logits, err = m.ForwardTokens([]uint32{tok})
 		if err != nil {
 			metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
-			return stream.String(), metrics, fmt.Errorf("decode step %d: %w", step, err)
+			return stream.String(), metrics, fmt.Errorf("decode step %d: %w", generatedCount, err)
 		}
 	}
 	decodeElapsed := time.Since(decodeStart)
@@ -130,7 +163,7 @@ func (m *Model) Generate(
 	if !opts.Silent {
 		fmt.Println()
 	}
-	return stream.String(), metrics, nil
+	return finalizeAssistantReply(stream.String(), opts.EnableThinking && m.SupportsThinking()), metrics, nil
 }
 
 func (m *Model) generateHybridGPUSample(
@@ -144,8 +177,6 @@ func (m *Model) generateHybridGPUSample(
 	opts GenOptions,
 	prefillStart time.Time,
 ) (string, GenMetrics, error) {
-	_ = encode
-	_ = decode
 	var zero GenMetrics
 	tok, err := he.PrefillSample(ids)
 	m.Quiet = false
@@ -159,9 +190,10 @@ func (m *Model) generateHybridGPUSample(
 			float64(len(ids))/math.Max(prefillElapsed.Seconds(), 1e-9))
 	}
 
-	// Chunking didn't help on M5 (compute-bound); keep 1-token sync for lower latency.
 	decodeStart := time.Now()
 	generatedCount := 0
+	thinkClosed := false
+
 	for generatedCount < opts.MaxTokens {
 		if _, stop := eos[int(tok)]; stop {
 			break
@@ -169,7 +201,27 @@ func (m *Model) generateHybridGPUSample(
 		allTokens = append(allTokens, tok)
 		generatedCount++
 		stream.Push(allTokens, opts.Silent, opts.StreamCallback)
-		if opts.NoRepeatNGram > 0 && sampling.HasRepeatedNGram(allTokens[len(ids):], opts.NoRepeatNGram) {
+		gen := allTokens[len(ids):]
+
+		if opts.EnableThinking && stream.InThink() && !thinkClosed &&
+			(shouldStopRepeat(gen, opts) || thinkLen(stream) >= thinkTokenBudget) {
+			// Force-close think, re-prefill so far + </think>, then continue for the answer.
+			closeIDs := encode("</think>\n\n", false)
+			stream.ForceCloseThink(opts.Silent, opts.StreamCallback)
+			thinkClosed = true
+			allTokens = append(allTokens, closeIDs...)
+			if err := he.Reset(); err != nil {
+				metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
+				return finalizeAssistantReply(stream.String(), true), metrics, err
+			}
+			tok, err = he.PrefillSample(allTokens)
+			if err != nil {
+				metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
+				return finalizeAssistantReply(stream.String(), true), metrics, fmt.Errorf("reprefill after think: %w", err)
+			}
+			continue
+		}
+		if !stream.InThink() && shouldStopRepeat(gen, opts) {
 			break
 		}
 
@@ -194,7 +246,57 @@ func (m *Model) generateHybridGPUSample(
 	if !opts.Silent {
 		fmt.Println()
 	}
-	return stream.String(), metrics, nil
+	return finalizeAssistantReply(stream.String(), opts.EnableThinking), metrics, nil
+}
+
+func thinkLen(s *Streamer) int {
+	if s == nil {
+		return 0
+	}
+	t := s.String()
+	start := strings.Index(t, "<think>")
+	if start < 0 {
+		return 0
+	}
+	body := t[start+len("<think>"):]
+	if end := strings.Index(body, "</think>"); end >= 0 {
+		body = body[:end]
+	}
+	// Rough token proxy: ~4 chars/token.
+	return len(body) / 4
+}
+
+// shouldStopRepeat stops classic adjacent n-gram loops and recent lookback loops.
+func shouldStopRepeat(gen []uint32, opts GenOptions) bool {
+	n := opts.NoRepeatNGram
+	if n <= 0 {
+		return false
+	}
+	if sampling.HasRepeatedNGram(gen, n) {
+		return true
+	}
+	look := 256
+	if opts.EnableThinking {
+		look = 320
+	}
+	if n >= 6 && sampling.HasRepeatedNGramRecent(gen, n, look) {
+		return true
+	}
+	if opts.EnableThinking && sampling.HasRepeatedNGramRecent(gen, 10, look) {
+		return true
+	}
+	return false
+}
+
+func finalizeAssistantReply(reply string, thinking bool) string {
+	reply = strings.TrimSpace(reply)
+	if !thinking || reply == "" {
+		return reply
+	}
+	if strings.Contains(reply, "<think>") && !strings.Contains(reply, "</think>") {
+		return reply + "\n</think>"
+	}
+	return reply
 }
 
 func buildMetrics(m *Model, promptTokens, generatedCount int, prefillElapsed, decodeElapsed time.Duration) GenMetrics {
@@ -226,12 +328,8 @@ func buildMetrics(m *Model, promptTokens, generatedCount int, prefillElapsed, de
 	return metrics
 }
 
-// banSpecials masks ChatML control tokens so greedy decode cannot emit a new
-// turn mid-reply. EOS ids stay unmasked so generation can stop cleanly.
 func banSpecials(logits []float32, eos map[int]struct{}) {
-	// Common ChatML / Qwen specials (ids differ by vocab; only mask in-range).
-	// SmolLM2: <|im_start|>=1, <|im_end|>=2. Qwen: im_end=151645, im_start=151644.
-	candidates := []int{1, 151644, 151643 /* <|endoftext|> qwen */}
+	candidates := []int{1, 151644, 151643}
 	var ban []int
 	for _, id := range candidates {
 		if _, isEOS := eos[id]; isEOS {

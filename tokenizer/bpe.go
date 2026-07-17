@@ -380,26 +380,37 @@ func gpt2ByteEncode(b byte) rune {
 }
 
 func decodeGPT2Bytes(text string) string {
-	var result strings.Builder
+	// GPT-2 BPE maps each UTF-8 byte to a unicode codepoint; reverse into raw
+	// bytes, then decode as UTF-8 (WriteRune would turn 0xF0 into U+00F0 "ð").
+	buf := make([]byte, 0, len(text))
 	for _, r := range text {
-		decoded := gpt2ByteDecode(r)
-		result.WriteRune(decoded)
+		buf = append(buf, gpt2ByteToByte(r))
 	}
-	return result.String()
+	return string(buf)
 }
 
-func gpt2ByteDecode(r rune) rune {
-	if r >= 0x100 && r <= 0x1FF {
-		offset := int(r) - 0x100
-		if offset <= 0x20 {
-			return rune(offset)
-		} else if offset == 0x21 {
-			return 0x7F
-		} else if offset >= 0x22 && offset <= 0x42 {
-			return rune(0x80 + (offset - 0x22))
-		}
+func gpt2ByteToByte(r rune) byte {
+	if r < 0x100 {
+		return byte(r)
 	}
-	return r
+	offset := int(r) - 0x100
+	// Matches gpt2ByteEncode: 0x00-0x20 → 0x100-0x120, 0x7F → 0x121,
+	// 0x80-0xFF → 0x122-0x1A1.
+	if offset <= 0x20 {
+		return byte(offset)
+	}
+	if offset == 0x21 {
+		return 0x7F
+	}
+	if offset >= 0x22 && offset <= 0xA1 {
+		return byte(0x80 + (offset - 0x22))
+	}
+	return '?'
+}
+
+// gpt2ByteDecode kept for callers that want the mapped codepoint (tests / debug).
+func gpt2ByteDecode(r rune) rune {
+	return rune(gpt2ByteToByte(r))
 }
 
 func (t *Tokenizer) decodeByteFallback(text string) string {

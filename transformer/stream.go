@@ -13,6 +13,8 @@ type Streamer struct {
 	sb           strings.Builder
 	replacer     *strings.Replacer
 	inThink      bool
+	// HideThink drops <think>…</think> spans from the streamed view (thinking off).
+	HideThink bool
 }
 
 // NewStreamer creates a stream decoder. promptTokens is the encoded prompt prefix.
@@ -41,7 +43,16 @@ func (s *Streamer) Push(allTokens []uint32, silent bool, callback func(string)) 
 	}
 	diff := full[s.lastLen:]
 	diff = s.replacer.Replace(diff)
-	diff = filterThinkDelta(diff, &s.inThink)
+	if s.HideThink {
+		diff = filterThinkDelta(diff, &s.inThink)
+	} else {
+		if strings.Contains(diff, "<think>") {
+			s.inThink = true
+		}
+		if strings.Contains(diff, "</think>") {
+			s.inThink = false
+		}
+	}
 	if diff == "" {
 		s.lastLen = len(full)
 		return
@@ -55,6 +66,25 @@ func (s *Streamer) Push(allTokens []uint32, silent bool, callback func(string)) 
 	s.sb.WriteString(diff)
 	s.lastLen = len(full)
 }
+
+// ForceCloseThink emits </think> when the model got stuck inside a think block.
+func (s *Streamer) ForceCloseThink(silent bool, callback func(string)) {
+	if s == nil || !s.inThink {
+		return
+	}
+	piece := "</think>\n\n"
+	s.inThink = false
+	if !silent {
+		fmt.Print(piece)
+	}
+	if callback != nil {
+		callback(piece)
+	}
+	s.sb.WriteString(piece)
+}
+
+// InThink reports whether the stream is currently inside a <think> block.
+func (s *Streamer) InThink() bool { return s != nil && s.inThink }
 
 // String returns the streamed assistant text (trimmed).
 func (s *Streamer) String() string {

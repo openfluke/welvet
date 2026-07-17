@@ -102,6 +102,20 @@ func (m *Model) HybridGPUFuse() bool {
 	return m != nil && m.isHybrid() && m.Exec.Backend == core.BackendWebGPU && m.Fused
 }
 
+// SupportsThinking reports Qwen3 / Bonsai chat models that can emit <think> blocks.
+// SmolLM2 and other ChatML instruct models are not thinking models.
+func (m *Model) SupportsThinking() bool {
+	if m == nil {
+		return false
+	}
+	switch m.Architecture {
+	case "qwen3_dense", "qwen35_hybrid":
+		return true
+	default:
+		return false
+	}
+}
+
 // LMHeadPackedBlob returns baked tied-head logits matrix when present.
 func (m *Model) LMHeadPackedBlob() *quant.Blob { return m.lmHeadPacked }
 

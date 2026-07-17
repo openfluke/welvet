@@ -57,3 +57,33 @@ func HasRepeatedNGram(tokens []uint32, n int) bool {
 	}
 	return true
 }
+
+// HasRepeatedNGramRecent reports whether the last n tokens appear anywhere in
+// the preceding lookback window (catches paragraph loops that aren't adjacent).
+func HasRepeatedNGramRecent(tokens []uint32, n, lookback int) bool {
+	if n <= 0 || len(tokens) < n+n {
+		return false
+	}
+	if lookback < n {
+		lookback = n
+	}
+	needle := tokens[len(tokens)-n:]
+	end := len(tokens) - n
+	start := end - lookback
+	if start < 0 {
+		start = 0
+	}
+	for i := start; i <= end-n; i++ {
+		match := true
+		for j := 0; j < n; j++ {
+			if tokens[i+j] != needle[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}

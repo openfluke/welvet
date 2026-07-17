@@ -34,17 +34,34 @@ var ChatML = Template{
 
 // BuildPrompt constructs a full prompt from turns + current user message.
 func (t Template) BuildPrompt(turns []Turn, systemPrompt, userMsg string) string {
-	return t.buildPrompt(turns, systemPrompt, userMsg, false)
+	return t.buildPrompt(turns, systemPrompt, userMsg, thinkModeDefault)
 }
 
 // BuildPromptNoThink uses Qwen3's hard switch: empty <think></think> after the
 // assistant generation prompt (enable_thinking=False). Soft /no_think alone is
 // not enough when the tokenizer has no Jinja chat_template.
 func (t Template) BuildPromptNoThink(turns []Turn, systemPrompt, userMsg string) string {
-	return t.buildPrompt(turns, systemPrompt, userMsg, true)
+	return t.buildPrompt(turns, systemPrompt, userMsg, thinkModeOff)
 }
 
-func (t Template) buildPrompt(turns []Turn, systemPrompt, userMsg string, noThink bool) string {
+// BuildPromptThink enables Qwen3 hybrid thinking via the soft /think switch only.
+// Do NOT hard-open <think> — that traps Bonsai-4B/8B into answer-in-think or loops.
+func (t Template) BuildPromptThink(turns []Turn, systemPrompt, userMsg string) string {
+	msg := strings.TrimSpace(userMsg)
+	if msg != "" && !strings.Contains(msg, "/think") && !strings.Contains(msg, "/no_think") {
+		msg = msg + "\n/think"
+	}
+	return t.buildPrompt(turns, systemPrompt, msg, thinkModeDefault)
+}
+
+type thinkMode int
+
+const (
+	thinkModeDefault thinkMode = iota
+	thinkModeOff
+)
+
+func (t Template) buildPrompt(turns []Turn, systemPrompt, userMsg string, mode thinkMode) string {
 	var sb strings.Builder
 	sb.WriteString(t.GlobalPrefix)
 	if systemPrompt != "" {
@@ -74,7 +91,8 @@ func (t Template) buildPrompt(turns []Turn, systemPrompt, userMsg string, noThin
 	if pre, ok := t.RolePrefixes["assistant"]; ok {
 		sb.WriteString(pre)
 	}
-	if noThink {
+	switch mode {
+	case thinkModeOff:
 		// Qwen3 enable_thinking=False hard switch (empty think block already closed).
 		sb.WriteString("<think>\n\n</think>\n\n")
 	}
