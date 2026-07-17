@@ -91,8 +91,15 @@ func (m *Model) SyncHybridFused() error {
 
 	spec, err := m.ExportHybridFusedGPUSpec()
 	if err != nil {
-		_ = m.ensureHostPackedWeights()
-		return err
+		// Host weights may have been released after a prior GPU fuse (FinchKit
+		// re-ApplyExec). Reload from entity and retry once.
+		if rerr := m.ensureHostPackedWeights(); rerr != nil {
+			return fmt.Errorf("%w (reload host: %v)", err, rerr)
+		}
+		spec, err = m.ExportHybridFusedGPUSpec()
+		if err != nil {
+			return err
+		}
 	}
 	runtime.GC()
 	debug.FreeOSMemory()

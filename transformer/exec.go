@@ -5,6 +5,7 @@ import (
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/dense"
+	"github.com/openfluke/welvet/fusedgpu"
 	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/simd"
 	"github.com/openfluke/welvet/webgpu"
@@ -156,21 +157,28 @@ func (m *Model) ApplyExec(p ExecProfile) error {
 				return fmt.Errorf("fused gpu: %w", err)
 			}
 		} else if m.IsHybrid() {
-			m.CloseGPU()
-			m.CloseHybridGPU()
-			m.Fused = true
-			if err := m.SyncHybridFused(); err != nil {
-				return fmt.Errorf("hybrid gpu fuse: %w", err)
-			}
-			name := m.GPUAdapterName()
-			vramHint := "needs ~8GB+ VRAM for 27B; ~2–3GB for dense 8B"
-			if m.Architecture == "qwen3_dense" {
-				vramHint = "dense BinaryG128 (~2–3GB VRAM)"
-			}
-			if name != "" {
-				fmt.Printf("  gpu_fuse (BinaryG128): full on-device fuse on %s (%s)\n", name, vramHint)
+			// Keep a resident HybridEngine. FinchKit re-calls ApplyExec on every
+			// generate; tearing down after releaseHostPackedWeights made the next
+			// Export fail and silently fell back to simd_fuse (Octo only ApplyExec once).
+			if _, ok := m.gpu.(*fusedgpu.HybridEngine); ok && m.HybridGPUFuse() {
+				m.Fused = true
 			} else {
-				fmt.Printf("  gpu_fuse (BinaryG128): full on-device fuse (%s)\n", vramHint)
+				m.CloseGPU()
+				m.CloseHybridGPU()
+				m.Fused = true
+				if err := m.SyncHybridFused(); err != nil {
+					return fmt.Errorf("hybrid gpu fuse: %w", err)
+				}
+				name := m.GPUAdapterName()
+				vramHint := "needs ~8GB+ VRAM for 27B; ~2–3GB for dense 8B"
+				if m.Architecture == "qwen3_dense" {
+					vramHint = "dense BinaryG128 (~2–3GB VRAM)"
+				}
+				if name != "" {
+					fmt.Printf("  gpu_fuse (BinaryG128): full on-device fuse on %s (%s)\n", name, vramHint)
+				} else {
+					fmt.Printf("  gpu_fuse (BinaryG128): full on-device fuse (%s)\n", vramHint)
+				}
 			}
 		} else {
 			return fmt.Errorf("gpu_fuse requires a baked packed entity (got %s)", m.PackFormat.String())
