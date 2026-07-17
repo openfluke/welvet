@@ -161,8 +161,16 @@ func matVecBinaryG128(b *Blob, x, y []float32) error {
 	if len(x) < cols || len(y) < rows {
 		return fmt.Errorf("matVecBinaryG128: shape")
 	}
+	// Exact float: w=±s_g → acc += s_g*(2*sum₁ − sum_all).
+	// sum_all depends only on x — compute once per 32-col word, share across all rows.
+	wordsPerRow := cols / 32
+	sumAll := make([]float32, wordsPerRow)
+	for w := 0; w < wordsPerRow; w++ {
+		sumAll[w] = sum32(x[w*32 : w*32+32])
+	}
+
 	if rows < 64 || runtime.NumCPU() < 2 {
-		matVecBinaryG128Rows(b, x, y, 0, rows)
+		matVecBinaryG128Rows(b, x, y, sumAll, 0, rows)
 		return nil
 	}
 	workers := runtime.GOMAXPROCS(0)
@@ -184,19 +192,31 @@ func matVecBinaryG128(b *Blob, x, y []float32) error {
 			break
 		}
 		wg.Add(1)
-		go func(r0, r1 int) {
+		go func(rowLo, rowHi int) {
 			defer wg.Done()
-			matVecBinaryG128Rows(b, x, y, r0, r1)
+			matVecBinaryG128Rows(b, x, y, sumAll, rowLo, rowHi)
 		}(lo, hi)
 	}
 	wg.Wait()
 	return nil
 }
 
-func matVecBinaryG128Rows(b *Blob, x, y []float32, rowLo, rowHi int) {
-	cols := b.Cols
-	groupsPerRow := cols / BinaryG128Group
-	wordsPerRow := cols / 32
+func sum32(x []float32) float32 {
+	var s0, s1, s2, s3 float32
+	for i := 0; i < 32; i += 4 {
+		s0 += x[i]
+		s1 += x[i+1]
+		s2 += x[i+2]
+		s3 += x[i+3]
+	}
+	return s0 + s1 + s2 + s3
+}
+
+// matVecBinaryG128Rows is the exact float32 BinaryG128 GEMV for [rowLo, rowHi).
+// sumAll[w] = Σ x[w*32:w*32+32] (shared across rows).
+func matVecBinaryG128Rows(b *Blob, x, y, sumAll []float32, rowLo, rowHi int) {
+	groupsPerRow := b.Cols / BinaryG128Group
+	wordsPerRow := b.Cols / 32
 	raw := b.Raw
 	scales := b.Scales
 	for r := rowLo; r < rowHi; r++ {
@@ -204,31 +224,23 @@ func matVecBinaryG128Rows(b *Blob, x, y []float32, rowLo, rowHi int) {
 		rowWords := r * wordsPerRow
 		rowScale := r * groupsPerRow
 		for g := 0; g < groupsPerRow; g++ {
-			scale := float32(1)
-			si := rowScale + g
-			if si < len(scales) {
-				scale = scales[si]
-			}
+			scale := scales[rowScale+g]
 			baseWord := rowWords + g*4
 			colBase := g * BinaryG128Group
+			wordIdx := g * 4
 			for wi := 0; wi < 4; wi++ {
 				word := getU32(raw[(baseWord+wi)*4:])
-				base := colBase + wi*32
-				// ±scale * x[j] — pull scale out of the bit loop
-				var s float32
-				for j := 0; j < 32; j++ {
-					v := x[base+j]
-					if (word>>uint(j))&1 != 0 {
-						s += v
-					} else {
-						s -= v
-					}
-				}
-				acc += scale * s
+				sum1 := binaryWordSum1(x[colBase+wi*32:], word)
+				acc += scale * (2*sum1 - sumAll[wordIdx+wi])
 			}
 		}
 		y[r] = acc
 	}
+}
+
+// binaryWordSum1 = Σ x[j] for bit j set. Exact float; AVX2 on amd64.
+func binaryWordSum1(x []float32, word uint32) float32 {
+	return binaryWordSum1Impl(x, word)
 }
 
 // F16BitsToFloat32 converts IEEE754 binary16 bits to float32.

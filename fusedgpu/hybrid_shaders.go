@@ -737,6 +737,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `
 
+// Qwen3 / Lucy rotate_half inside the rotary prefix (pair d with d+half).
 const shaderPartialRoPE = `
 struct Params {
     numHeads: u32,
@@ -756,15 +757,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let theta = bitcast<f32>(params.thetaBits);
     let base = h * params.headDim;
     let rot = params.rotDim;
-    for (var i: u32 = 0u; i < rot; i += 2u) {
-        let freq = 1.0 / pow(theta, f32(i) / f32(rot));
+    let half = rot / 2u;
+    for (var d: u32 = 0u; d < half; d++) {
+        let freq = 1.0 / pow(theta, f32(d * 2u) / f32(rot));
         let ang = f32(pos) * freq;
         let c = cos(ang);
         let s = sin(ang);
-        let u = x[base + i];
-        let v = x[base + i + 1u];
-        x[base + i] = u * c - v * s;
-        x[base + i + 1u] = u * s + v * c;
+        let x0 = x[base + d];
+        let x1 = x[base + d + half];
+        x[base + d] = x0 * c - x1 * s;
+        x[base + d + half] = x0 * s + x1 * c;
     }
 }
 `

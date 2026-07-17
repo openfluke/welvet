@@ -41,6 +41,10 @@ func (m *Model) Generate(
 	}
 
 	prompt := ChatML.BuildPrompt(turns, systemPrompt, userMsg)
+	// Qwen3 / Bonsai: hard-disable thinking via empty <think></think> in the prompt.
+	if m.Architecture == "qwen3_dense" || m.Architecture == "qwen35_hybrid" {
+		prompt = ChatML.BuildPromptNoThink(turns, systemPrompt, userMsg)
+	}
 	ids := encode(prompt, false)
 	if len(ids) == 0 {
 		return "", zero, fmt.Errorf("tokenizer produced empty prompt")

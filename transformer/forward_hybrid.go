@@ -40,6 +40,9 @@ func (m *Model) forwardTokensHybrid(ids []uint32) ([]float32, error) {
 	}
 
 	nBlocks := len(m.Blocks)
+	n1t := core.NewTensor[float32](1, 1, hSize)
+	n2t := core.NewTensor[float32](1, 1, hSize)
+	mix := make([]float32, hSize)
 	for i := range m.Blocks {
 		if !m.Quiet && nTok >= 4 && (i == 0 || (i+1)%4 == 0 || i+1 == nBlocks) {
 			elapsed := time.Since(t0)
@@ -49,13 +52,12 @@ func (m *Model) forwardTokensHybrid(ids []uint32) ([]float32, error) {
 		b := &m.Blocks[i]
 		for t := 0; t < nTok; t++ {
 			h := hs[t]
-			n1t := core.NewTensor[float32](1, 1, hSize)
 			copy(n1t.Data, h)
 			_, n1, err := rmsnorm.Forward(b.AttnNorm, n1t)
 			if err != nil {
 				return nil, fmt.Errorf("block %d attn_norm: %w", i, err)
 			}
-			mix := make([]float32, hSize)
+			clear(mix)
 			switch b.LayerType {
 			case "linear_attention":
 				if b.GDN != nil {
@@ -74,7 +76,6 @@ func (m *Model) forwardTokensHybrid(ids []uint32) ([]float32, error) {
 			for j := range h {
 				h[j] += mix[j]
 			}
-			n2t := core.NewTensor[float32](1, 1, hSize)
 			copy(n2t.Data, h)
 			_, n2, err := rmsnorm.Forward(b.FFNNorm, n2t)
 			if err != nil {
@@ -264,6 +265,9 @@ func rmsNormVec(x, gamma []float32, eps float64) {
 	}
 }
 
+// applyPartialRoPE matches Qwen3 / Lucy rotate_half: pair dim d with d+half
+// inside the rotary prefix (not adjacent NeoX pairs). partial_rotary_factor
+// limits rotation to the first rotDim dims; the rest of the head is untouched.
 func applyPartialRoPE(x []float32, nHeads, headDim int, partial, theta float64, pos int) {
 	rotDim := int(float64(headDim) * partial)
 	if rotDim <= 0 {
@@ -272,16 +276,20 @@ func applyPartialRoPE(x []float32, nHeads, headDim int, partial, theta float64, 
 	if rotDim%2 != 0 {
 		rotDim--
 	}
+	half := rotDim / 2
+	if half <= 0 || theta <= 0 {
+		return
+	}
 	for h := 0; h < nHeads; h++ {
 		base := h * headDim
-		for i := 0; i < rotDim; i += 2 {
-			freq := 1 / math.Pow(theta, float64(i)/float64(rotDim))
+		for d := 0; d < half; d++ {
+			freq := 1 / math.Pow(theta, float64(2*d)/float64(rotDim))
 			angle := float64(pos) * freq
-			cos := float32(math.Cos(angle))
-			sin := float32(math.Sin(angle))
-			u, v := x[base+i], x[base+i+1]
-			x[base+i] = u*cos - v*sin
-			x[base+i+1] = u*sin + v*cos
+			c := float32(math.Cos(angle))
+			s := float32(math.Sin(angle))
+			v0, v1 := x[base+d], x[base+d+half]
+			x[base+d] = v0*c - v1*s
+			x[base+d+half] = v0*s + v1*c
 		}
 	}
 }

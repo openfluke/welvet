@@ -12,6 +12,7 @@ type Streamer struct {
 	promptLenRaw int
 	sb           strings.Builder
 	replacer     *strings.Replacer
+	inThink      bool
 }
 
 // NewStreamer creates a stream decoder. promptTokens is the encoded prompt prefix.
@@ -40,6 +41,11 @@ func (s *Streamer) Push(allTokens []uint32, silent bool, callback func(string)) 
 	}
 	diff := full[s.lastLen:]
 	diff = s.replacer.Replace(diff)
+	diff = filterThinkDelta(diff, &s.inThink)
+	if diff == "" {
+		s.lastLen = len(full)
+		return
+	}
 	if !silent {
 		fmt.Print(diff)
 	}
@@ -53,4 +59,32 @@ func (s *Streamer) Push(allTokens []uint32, silent bool, callback func(string)) 
 // String returns the streamed assistant text (trimmed).
 func (s *Streamer) String() string {
 	return strings.TrimSpace(s.sb.String())
+}
+
+// filterThinkDelta hides Qwen3 <think>…</think> spans while streaming.
+func filterThinkDelta(diff string, inThink *bool) string {
+	if diff == "" {
+		return ""
+	}
+	var out strings.Builder
+	i := 0
+	for i < len(diff) {
+		if !*inThink {
+			if j := strings.Index(diff[i:], "<think>"); j >= 0 {
+				out.WriteString(diff[i : i+j])
+				*inThink = true
+				i += j + len("<think>")
+				continue
+			}
+			out.WriteString(diff[i:])
+			break
+		}
+		if j := strings.Index(diff[i:], "</think>"); j >= 0 {
+			*inThink = false
+			i += j + len("</think>")
+			continue
+		}
+		break // still inside think — drop rest of this chunk
+	}
+	return out.String()
 }

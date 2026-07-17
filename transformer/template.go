@@ -34,6 +34,17 @@ var ChatML = Template{
 
 // BuildPrompt constructs a full prompt from turns + current user message.
 func (t Template) BuildPrompt(turns []Turn, systemPrompt, userMsg string) string {
+	return t.buildPrompt(turns, systemPrompt, userMsg, false)
+}
+
+// BuildPromptNoThink uses Qwen3's hard switch: empty <think></think> after the
+// assistant generation prompt (enable_thinking=False). Soft /no_think alone is
+// not enough when the tokenizer has no Jinja chat_template.
+func (t Template) BuildPromptNoThink(turns []Turn, systemPrompt, userMsg string) string {
+	return t.buildPrompt(turns, systemPrompt, userMsg, true)
+}
+
+func (t Template) buildPrompt(turns []Turn, systemPrompt, userMsg string, noThink bool) string {
 	var sb strings.Builder
 	sb.WriteString(t.GlobalPrefix)
 	if systemPrompt != "" {
@@ -51,7 +62,7 @@ func (t Template) BuildPrompt(turns []Turn, systemPrompt, userMsg string) string
 		}
 		if pre, ok := t.RolePrefixes["assistant"]; ok {
 			sb.WriteString(pre)
-			sb.WriteString(turn.Assistant)
+			sb.WriteString(stripThinkBlocks(turn.Assistant))
 			sb.WriteString(t.RoleSuffixes["assistant"])
 		}
 	}
@@ -63,6 +74,26 @@ func (t Template) BuildPrompt(turns []Turn, systemPrompt, userMsg string) string
 	if pre, ok := t.RolePrefixes["assistant"]; ok {
 		sb.WriteString(pre)
 	}
+	if noThink {
+		// Qwen3 enable_thinking=False hard switch (empty think block already closed).
+		sb.WriteString("<think>\n\n</think>\n\n")
+	}
 	sb.WriteString(t.GlobalSuffix)
 	return sb.String()
+}
+
+func stripThinkBlocks(s string) string {
+	for {
+		start := strings.Index(s, "<think>")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(s[start:], "</think>")
+		if end < 0 {
+			s = s[:start]
+			break
+		}
+		s = s[:start] + s[start+end+len("</think>"):]
+	}
+	return strings.TrimSpace(s)
 }
