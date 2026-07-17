@@ -14,3 +14,6 @@ w2a
 w2a/logs/
 **/logs/
 octo
+
+# upstream dumps for porting
+mosstts/_ref/

@@ -62,6 +62,11 @@ type session struct {
 	affCacheBytes uint64
 	affCacheFull  bool
 	pipeAffine    *wgpu.ComputePipeline
+
+	// Sticky dense FP32 weights (MOSS-TTS / generic dense fuse).
+	f32Cache      map[uintptr]*f32GPU
+	f32CacheBytes uint64
+	f32CacheFull  bool
 }
 
 // Available reports whether a real WebGPU device was acquired.
