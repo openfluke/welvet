@@ -18,6 +18,12 @@ type GenOptions struct {
 	PrintMetrics bool
 	// StreamCallback receives each streamed text chunk (after ChatML cleanup).
 	StreamCallback func(piece string)
+	// RepetitionPenalty > 1 down-weights recent tokens (0 = default 1.15; <0 disables).
+	RepetitionPenalty float32
+	// RepetitionWindow is how many recent tokens the penalty considers (0 = 64).
+	RepetitionWindow int
+	// NoRepeatNGram stops when the last n tokens repeat immediately (0 = 8; <0 disables).
+	NoRepeatNGram int
 }
 
 // Generate runs greedy decode for one user message (ChatML by default).
@@ -38,6 +44,15 @@ func (m *Model) Generate(
 	}
 	if !opts.Silent && !opts.PrintMetrics {
 		opts.PrintMetrics = true
+	}
+	if opts.RepetitionPenalty == 0 {
+		opts.RepetitionPenalty = 1.15
+	}
+	if opts.RepetitionWindow <= 0 {
+		opts.RepetitionWindow = 64
+	}
+	if opts.NoRepeatNGram == 0 {
+		opts.NoRepeatNGram = 8
 	}
 
 	prompt := ChatML.BuildPrompt(turns, systemPrompt, userMsg)
@@ -85,6 +100,9 @@ func (m *Model) Generate(
 
 	for step := 0; step < opts.MaxTokens; step++ {
 		banSpecials(logits, eos)
+		if opts.RepetitionPenalty > 1 {
+			sampling.ApplyRepetitionPenalty(logits, allTokens, opts.RepetitionPenalty, opts.RepetitionWindow)
+		}
 		next := sampling.ArgMax(logits)
 		if _, stop := eos[next]; stop {
 			break
@@ -93,6 +111,9 @@ func (m *Model) Generate(
 		allTokens = append(allTokens, tok)
 		generatedCount++
 		stream.Push(allTokens, opts.Silent, opts.StreamCallback)
+		if opts.NoRepeatNGram > 0 && sampling.HasRepeatedNGram(allTokens[len(ids):], opts.NoRepeatNGram) {
+			break
+		}
 
 		logits, err = m.ForwardTokens([]uint32{tok})
 		if err != nil {
@@ -148,6 +169,9 @@ func (m *Model) generateHybridGPUSample(
 		allTokens = append(allTokens, tok)
 		generatedCount++
 		stream.Push(allTokens, opts.Silent, opts.StreamCallback)
+		if opts.NoRepeatNGram > 0 && sampling.HasRepeatedNGram(allTokens[len(ids):], opts.NoRepeatNGram) {
+			break
+		}
 
 		if generatedCount >= opts.MaxTokens {
 			break
@@ -195,6 +219,20 @@ func buildMetrics(promptTokens, generatedCount int, prefillElapsed, decodeElapse
 	return metrics
 }
 
+// banSpecials masks ChatML control tokens so greedy decode cannot emit a new
+// turn mid-reply. EOS ids stay unmasked so generation can stop cleanly.
 func banSpecials(logits []float32, eos map[int]struct{}) {
-	_ = eos
+	// Common ChatML / Qwen specials (ids differ by vocab; only mask in-range).
+	// SmolLM2: <|im_start|>=1, <|im_end|>=2. Qwen: im_end=151645, im_start=151644.
+	candidates := []int{1, 151644, 151643 /* <|endoftext|> qwen */}
+	var ban []int
+	for _, id := range candidates {
+		if _, isEOS := eos[id]; isEOS {
+			continue
+		}
+		if id >= 0 && id < len(logits) {
+			ban = append(ban, id)
+		}
+	}
+	sampling.BanIDs(logits, ban)
 }
