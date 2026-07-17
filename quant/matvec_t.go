@@ -27,6 +27,8 @@ func MatVecT(b *Blob, gy, gx []float32) error {
 		return matVecTTernary(b, gy, gx)
 	case FormatBinaryPacked:
 		return matVecTBinary(b, gy, gx)
+	case FormatAffinePacked:
+		return matVecTAffine(b, gy, gx)
 	default:
 		return ErrUnsupported(b.Format, "MatVecT")
 	}

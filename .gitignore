@@ -9,6 +9,7 @@
 bin/
 dist/
 .DS_Store
+.gotmp/
 w2a
 w2a/logs/
 **/logs/

@@ -56,6 +56,12 @@ type session struct {
 	binCache      map[uintptr]*binGPU
 	binCacheBytes uint64
 	binCacheFull  bool
+
+	// Sticky AffinePacked (Qwen3 text encoder 4-bit g64).
+	affCache      map[uintptr]*affGPU
+	affCacheBytes uint64
+	affCacheFull  bool
+	pipeAffine    *wgpu.ComputePipeline
 }
 
 // Available reports whether a real WebGPU device was acquired.

@@ -30,6 +30,8 @@ func DecodeRow(b *Blob, row int, dst []float32) error {
 		return decodeRowTernary(b, row, dst)
 	case FormatBinaryPacked:
 		return decodeRowBinary(b, row, dst)
+	case FormatAffinePacked:
+		return decodeRowAffine(b, row, dst)
 	default:
 		return ErrUnsupported(b.Format, "DecodeRow")
 	}

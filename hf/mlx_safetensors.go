@@ -116,6 +116,27 @@ func DecodeF16Tensor(data []byte, n int) ([]float32, error) {
 	return out, nil
 }
 
+// DecodeBF16Tensor decodes a BF16 safetensors payload to float32.
+func DecodeBF16Tensor(data []byte, n int) ([]float32, error) {
+	out := make([]float32, n)
+	if err := decodeTensorData(data, "BF16", n, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DecodeHalfTensor decodes F16 or BF16 payload to float32.
+func DecodeHalfTensor(data []byte, dtype string, n int) ([]float32, error) {
+	switch dtype {
+	case "F16":
+		return DecodeF16Tensor(data, n)
+	case "BF16":
+		return DecodeBF16Tensor(data, n)
+	default:
+		return nil, fmt.Errorf("DecodeHalfTensor: unsupported dtype %s", dtype)
+	}
+}
+
 // DecodeU32Tensor decodes a U32 safetensors payload.
 func DecodeU32Tensor(data []byte, n int) ([]uint32, error) {
 	if len(data) < n*4 {
@@ -129,6 +150,7 @@ func DecodeU32Tensor(data []byte, n int) ([]uint32, error) {
 }
 
 // LoadMLX1BitMatrix loads weight+scales+biases for an MLX 1-bit linear and builds a BinaryG128 blob.
+// Scales/biases may be F16 or BF16 (Bonsai Flux2 uses BF16).
 // base is the tensor prefix without ".weight"/".scales"/".biases" (e.g. "...gate_proj").
 func LoadMLX1BitMatrix(filepath string, index map[string]TensorInfo, base string) (*quant.Blob, error) {
 	wInfo, ok := index[base+".weight"]
@@ -143,8 +165,11 @@ func LoadMLX1BitMatrix(filepath string, index map[string]TensorInfo, base string
 	if !ok {
 		return nil, fmt.Errorf("missing %s.biases", base)
 	}
-	if wInfo.Dtype != "U32" || sInfo.Dtype != "F16" || bInfo.Dtype != "F16" {
-		return nil, fmt.Errorf("%s: unexpected dtypes %s/%s/%s", base, wInfo.Dtype, sInfo.Dtype, bInfo.Dtype)
+	if wInfo.Dtype != "U32" {
+		return nil, fmt.Errorf("%s: unexpected weight dtype %s", base, wInfo.Dtype)
+	}
+	if (sInfo.Dtype != "F16" && sInfo.Dtype != "BF16") || (bInfo.Dtype != "F16" && bInfo.Dtype != "BF16") {
+		return nil, fmt.Errorf("%s: unexpected scale/bias dtypes %s/%s (want F16 or BF16)", base, sInfo.Dtype, bInfo.Dtype)
 	}
 	if len(wInfo.Shape) != 2 || len(sInfo.Shape) != 2 {
 		return nil, fmt.Errorf("%s: bad shapes", base)
@@ -168,15 +193,77 @@ func LoadMLX1BitMatrix(filepath string, index map[string]TensorInfo, base string
 		return nil, err
 	}
 	ns := sInfo.Shape[0] * sInfo.Shape[1]
-	scales, err := DecodeF16Tensor(sBytes, ns)
+	scales, err := DecodeHalfTensor(sBytes, sInfo.Dtype, ns)
 	if err != nil {
 		return nil, err
 	}
-	biases, err := DecodeF16Tensor(bBytes, ns)
+	biases, err := DecodeHalfTensor(bBytes, bInfo.Dtype, ns)
 	if err != nil {
 		return nil, err
 	}
 	return quant.BlobFromMLX1Bit(wu, scales, biases, rows, cols)
+}
+
+// LoadMLXAffineMatrix loads weight+scales+biases for an MLX AffineQuantized linear.
+// Scales/biases may be F16 or BF16. bits/groupSize default to 4/64 when ≤0.
+// Weight U32 shape is [rows, cols*bits/32]; scales/biases [rows, cols/groupSize].
+func LoadMLXAffineMatrix(filepath string, index map[string]TensorInfo, base string, bits, groupSize int) (*quant.Blob, error) {
+	if bits <= 0 {
+		bits = 4
+	}
+	if groupSize <= 0 {
+		groupSize = quant.AffineG64Group
+	}
+	wInfo, ok := index[base+".weight"]
+	if !ok {
+		return nil, fmt.Errorf("missing %s.weight", base)
+	}
+	sInfo, ok := index[base+".scales"]
+	if !ok {
+		return nil, fmt.Errorf("missing %s.scales", base)
+	}
+	bInfo, ok := index[base+".biases"]
+	if !ok {
+		return nil, fmt.Errorf("missing %s.biases", base)
+	}
+	if wInfo.Dtype != "U32" {
+		return nil, fmt.Errorf("%s: unexpected weight dtype %s", base, wInfo.Dtype)
+	}
+	if (sInfo.Dtype != "F16" && sInfo.Dtype != "BF16") || (bInfo.Dtype != "F16" && bInfo.Dtype != "BF16") {
+		return nil, fmt.Errorf("%s: unexpected scale/bias dtypes %s/%s (want F16 or BF16)", base, sInfo.Dtype, bInfo.Dtype)
+	}
+	if len(wInfo.Shape) != 2 || len(sInfo.Shape) != 2 {
+		return nil, fmt.Errorf("%s: bad shapes", base)
+	}
+	rows, words := wInfo.Shape[0], wInfo.Shape[1]
+	codesPerWord := 32 / bits
+	cols := words * codesPerWord
+	wBytes, err := ReadTensorBytes(filepath, wInfo)
+	if err != nil {
+		return nil, err
+	}
+	sBytes, err := ReadTensorBytes(filepath, sInfo)
+	if err != nil {
+		return nil, err
+	}
+	bBytes, err := ReadTensorBytes(filepath, bInfo)
+	if err != nil {
+		return nil, err
+	}
+	wu, err := DecodeU32Tensor(wBytes, rows*words)
+	if err != nil {
+		return nil, err
+	}
+	ns := sInfo.Shape[0] * sInfo.Shape[1]
+	scales, err := DecodeHalfTensor(sBytes, sInfo.Dtype, ns)
+	if err != nil {
+		return nil, err
+	}
+	biases, err := DecodeHalfTensor(bBytes, bInfo.Dtype, ns)
+	if err != nil {
+		return nil, err
+	}
+	return quant.BlobFromMLXAffine4(wu, scales, biases, rows, cols, groupSize, bits)
 }
 
 // LoadF16Vector loads a 1-D F16 tensor as float32 (for norms, biases, A_log, …).

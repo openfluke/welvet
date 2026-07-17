@@ -26,6 +26,8 @@ func Unpack(b *Blob) ([]float32, error) {
 		return unpackTernary(b)
 	case FormatBinaryPacked:
 		return unpackBinary(b)
+	case FormatAffinePacked:
+		return unpackAffine(b)
 	default:
 		return nil, ErrUnsupported(b.Format, "Unpack")
 	}

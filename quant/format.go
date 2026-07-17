@@ -35,6 +35,7 @@ const (
 	// Extreme packs
 	FormatTernaryPacked // BitNet 1.58
 	FormatBinaryPacked
+	FormatAffinePacked // MLX AffineQuantized (e.g. 4-bit g64)
 )
 
 // AllFormats is the full quant matrix Welvet must implement natively.
@@ -43,7 +44,7 @@ var AllFormats = []Format{
 	FormatQ8_0, FormatQ4_0, FormatQ4_1, FormatQ5_0, FormatQ5_1,
 	FormatQ2_K, FormatQ3_K, FormatQ4_K, FormatQ5_K, FormatQ6_K,
 	FormatIQ1_S, FormatIQ2_XXS, FormatIQ2_XS, FormatIQ3_XXS, FormatIQ3_S, FormatIQ4_NL, FormatIQ4_XS,
-	FormatTernaryPacked, FormatBinaryPacked,
+	FormatTernaryPacked, FormatBinaryPacked, FormatAffinePacked,
 }
 
 func (f Format) String() string {
@@ -88,6 +89,8 @@ func (f Format) String() string {
 		return "TernaryPacked"
 	case FormatBinaryPacked:
 		return "BinaryPacked"
+	case FormatAffinePacked:
+		return "AffinePacked"
 	default:
 		return fmt.Sprintf("Format(%d)", int(f))
 	}
@@ -145,7 +148,7 @@ func Supported(f Format) bool {
 		FormatQ8_0, FormatQ4_0, FormatQ4_1, FormatQ5_0, FormatQ5_1,
 		FormatQ2_K, FormatQ3_K, FormatQ4_K, FormatQ5_K, FormatQ6_K,
 		FormatIQ1_S, FormatIQ2_XXS, FormatIQ2_XS, FormatIQ3_XXS, FormatIQ3_S, FormatIQ4_NL, FormatIQ4_XS,
-		FormatTernaryPacked, FormatBinaryPacked:
+		FormatTernaryPacked, FormatBinaryPacked, FormatAffinePacked:
 		return true
 	default:
 		return false
