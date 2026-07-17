@@ -221,9 +221,13 @@ func loadHybridEntity(ef *entity.File, m *Model, spec *entity.TransformerSpec) e
 	return nil
 }
 
-// unbakeHybridNormsIfNeeded fixes entities packed with a mistaken extra (1+w) on
-// MLX norms (MLX already stores the nn.RMSNorm multiplicative γ). Detected when
-// final-norm mean is clearly >2 (raw Bonsai final mean ≈2.0; double-baked ≈3.0).
+// unbakeHybridNormsIfNeeded undoes a mistaken extra (1+w) bake on entities that
+// were packed twice. MLX Bonsai already stores multiplicative γ (not HF OffsetRMS).
+//
+// Dense Bonsai final γ often sits near ~2.0–2.8 naturally; early layer norms can
+// be near 0.02. Thresholding on final mean alone false-triggers and destroys the
+// model (subtracting 1 from tiny layer norms). Only unbake when layer-0 attn norm
+// also looks double-baked (mean ≳ 1.5), which marks the bad pack path.
 func unbakeHybridNormsIfNeeded(m *Model) {
 	if m == nil || m.FinalNorm == nil || m.FinalNorm.Gamma == nil {
 		return
@@ -232,15 +236,22 @@ func unbakeHybridNormsIfNeeded(m *Model) {
 	if !ok || len(g) == 0 {
 		return
 	}
-	var sum float64
-	for _, v := range g {
-		sum += float64(v)
-	}
-	mean := sum / float64(len(g))
-	if mean < 2.4 {
+	finalMean := meanF32(g)
+	if finalMean < 2.4 {
 		return
 	}
-	fmt.Printf("  undoing double-baked RMSNorm (final γ mean=%.2f → %.2f)\n", mean, mean-1)
+	layer0Mean := 0.0
+	if len(m.Blocks) > 0 && m.Blocks[0].AttnNorm != nil && m.Blocks[0].AttnNorm.Gamma != nil {
+		if w, ok := m.Blocks[0].AttnNorm.Gamma.MasterF32(); ok && len(w) > 0 {
+			layer0Mean = meanF32(w)
+		}
+	}
+	// Healthy dense Bonsai: final ~2.5+, layer0 attn ~0.02. Double-baked: both high.
+	if layer0Mean < 1.5 {
+		return
+	}
+	fmt.Printf("  undoing double-baked RMSNorm (final γ mean=%.2f → %.2f, layer0 attn=%.2f)\n",
+		finalMean, finalMean-1, layer0Mean)
 	sub1 := func(s []float32) {
 		for i := range s {
 			s[i]--
@@ -265,6 +276,17 @@ func unbakeHybridNormsIfNeeded(m *Model) {
 			sub1(b.GDN.NormGamma)
 		}
 	}
+}
+
+func meanF32(s []float32) float64 {
+	if len(s) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, v := range s {
+		sum += float64(v)
+	}
+	return sum / float64(len(s))
 }
 
 func loadLMHeadPacked(ef *entity.File, m *Model) error {
