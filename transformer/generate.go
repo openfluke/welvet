@@ -1,6 +1,7 @@
 package transformer
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strings"
@@ -15,6 +16,9 @@ const thinkTokenBudget = 256 // max tokens inside <think> before we force-close 
 // GenOptions controls greedy generation + streaming.
 type GenOptions struct {
 	MaxTokens int
+	// Context cancels generation between model steps. A nil context is treated
+	// as context.Background().
+	Context context.Context
 	// Silent suppresses stdout streaming (metrics footer still prints unless PrintMetrics is false).
 	Silent bool
 	// PrintMetrics prints the Lucy-style tok/s footer when generation produced tokens.
@@ -47,6 +51,12 @@ func (m *Model) Generate(
 	}
 	if opts.MaxTokens <= 0 {
 		opts.MaxTokens = 1024
+	}
+	if opts.Context == nil {
+		opts.Context = context.Background()
+	}
+	if err := opts.Context.Err(); err != nil {
+		return "", zero, err
 	}
 	if !opts.Silent && !opts.PrintMetrics {
 		opts.PrintMetrics = true
@@ -104,6 +114,9 @@ func (m *Model) Generate(
 	if err != nil {
 		return "", zero, fmt.Errorf("prefill: %w", err)
 	}
+	if err := opts.Context.Err(); err != nil {
+		return "", buildMetrics(m, len(ids), 0, prefillElapsed, 0), err
+	}
 	if !opts.Silent {
 		fmt.Printf("  prompt loaded in %s (%.2f tok/s)\nAssistant: ",
 			prefillElapsed.Round(time.Millisecond),
@@ -115,6 +128,10 @@ func (m *Model) Generate(
 	thinkClosed := false
 
 	for generatedCount < opts.MaxTokens {
+		if err := opts.Context.Err(); err != nil {
+			metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
+			return finalizeAssistantReply(stream.String(), opts.EnableThinking && m.SupportsThinking()), metrics, err
+		}
 		banSpecials(logits, eos)
 		if opts.RepetitionPenalty > 1 {
 			sampling.ApplyRepetitionPenalty(logits, allTokens, opts.RepetitionPenalty, opts.RepetitionWindow)
@@ -184,6 +201,9 @@ func (m *Model) generateHybridGPUSample(
 	if err != nil {
 		return "", zero, fmt.Errorf("prefill: %w", err)
 	}
+	if err := opts.Context.Err(); err != nil {
+		return "", buildMetrics(m, len(ids), 0, prefillElapsed, 0), err
+	}
 	if !opts.Silent {
 		fmt.Printf("  prompt loaded in %s (%.2f tok/s) [gpu sample]\nAssistant: ",
 			prefillElapsed.Round(time.Millisecond),
@@ -195,6 +215,10 @@ func (m *Model) generateHybridGPUSample(
 	thinkClosed := false
 
 	for generatedCount < opts.MaxTokens {
+		if err := opts.Context.Err(); err != nil {
+			metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
+			return finalizeAssistantReply(stream.String(), opts.EnableThinking), metrics, err
+		}
 		if _, stop := eos[int(tok)]; stop {
 			break
 		}
