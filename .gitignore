@@ -14,6 +14,7 @@ w2a
 w2a/logs/
 **/logs/
 octo
+tools
 
 # upstream dumps for porting
 mosstts/_ref/
