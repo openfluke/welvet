@@ -6,9 +6,22 @@
 |------|------|
 | **[openfluke/welvet](https://github.com/openfluke/welvet)** (this tree) | **Engine only** — layers, quant, SIMD (Plan 9 `.s`), WebGPU, ENTITY, dispatch |
 | **[openfluke/w2a](https://github.com/openfluke/w2a)** (`w2a/`) | Tests, CABI, docs, menus — **never** in engine packages |
-| **[openfluke/octo](octo/)** (`octo/`) | Model shell — HF download, convert→ENTITY, quantize, run (Lucy successor) |
+| **[openfluke/octo](apps/octo/)** (`apps/octo/`) | Model shell — HF download, convert→ENTITY, quantize, run (Lucy successor) |
 
 `loom/poly` is legacy reference only. Welvet is the rewrite.
+
+### Tree layout
+
+| Folder | Contains |
+|--------|----------|
+| (top) | `core`, `weights`, `quant`, `simd`, `webgpu`, `tiling`, `architecture`, `layers/` |
+| `runtime/` | `forward`, `backward`, `training`, `step` |
+| `systems/` | `dna`, `evolution`, `tween`, `tanhi`, `telemetry` |
+| `model/` | `transformer`, `entity`, `tokenizer`, `sampling`, `hf` |
+| `apps/` | `octo`, `flux2`, `mosstts` |
+| `stub/` | future: `accel`, `donate`, `fountain`, `hardware`, `memory`, `seed`, `serialization` |
+| `w2a/`, `tools/` | harness (not engine) |
+
 
 **Status: pre-v1.** v1 ships only when every row below is ✅.
 
@@ -34,11 +47,11 @@
 | **Dense** FormatNone × 34 × CPU/SIMD/WebGPU fwd+bwd | ✅ |
 | **Dense** block-quant × SIMD/WebGPU (all 20 formats on-device fwd+bwd) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
-| `forward/` / `backward/` volumetric Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential + Residual walk | ✅ |
-| `training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential + Residual) | ✅ |
+| `runtime/forward/` / `runtime/backward/` volumetric Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential + Residual walk | ✅ |
+| `runtime/training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential + Residual) | ✅ |
 | Remaining layers (parallel, …) | ⬜ |
 | Model IO / transformer / entity / tokenizer / hf | 🚧 |
-| `octo/` interactive model shell (download / convert / chat) | 🚧 |
+| `apps/octo/` interactive model shell (download / convert / chat) | 🚧 |
 | Accel / donate / fountain / … | ⬜ |
 | Full v1 matrix | ⬜ |
 
@@ -203,9 +216,9 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `layers/sequential/` | Dense→Dense Sequential compose; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `layers/residual/` | Residual y=F(x)+x (Dense F); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | ✅ |
-| `forward/` | Grid walk z→y→x→l; Dense … Sequential + Residual dispatch | ✅ |
-| `backward/` | Reverse tape over Dense … Sequential + Residual | ✅ |
-| `training/` | MSE + SGD; ApplyGradSGD for Dense … Sequential / Residual | ✅ |
+| `runtime/forward/` | Grid walk z→y→x→l; Dense … Sequential + Residual dispatch | ✅ |
+| `runtime/backward/` | Reverse tape over Dense … Sequential + Residual | ✅ |
+| `runtime/training/` | MSE + SGD; ApplyGradSGD for Dense … Sequential / Residual | ✅ |
 
 ### Layers (each needs CPU + SIMD + WebGPU × all dtype × all quant × fwd/bwd)
 
@@ -447,28 +460,28 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | Package | Features | Status |
 |---------|----------|:------:|
 | `entity/` | `.entity` native checkpoints | 🚧 |
-| `transformer/` | Decoder generate, KV cache, LM head (all quants) | 🚧 |
-| `sampling/` | TopK, greedy, penalties | 🚧 |
-| `tokenizer/` | BPE / HF tokenizers | ✅ |
-| `hf/` | HuggingFace → native packs | 🚧 |
-| `seed/` | Seed manifests / infinite init | ⬜ |
-| `serialization/` | Bit-perfect native I/O | ⬜ |
+| `model/transformer/` | Decoder generate, KV cache, LM head (all quants) | 🚧 |
+| `model/sampling/` | TopK, greedy, penalties | 🚧 |
+| `model/tokenizer/` | BPE / HF tokenizers | ✅ |
+| `model/hf/` | HuggingFace → native packs | 🚧 |
+| `stub/seed/` | Seed manifests / infinite init | ⬜ |
+| `stub/serialization/` | Bit-perfect native I/O | ⬜ |
 
 ### Systems
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `accel/` | Intel NPU / Qualcomm / Apple Metal / … | ⬜ |
-| `hardware/` | Host probes | ⬜ |
-| `memory/` | Footprint / VRAM accounting | ⬜ |
-| `fountain/` | Fountain codes | ⬜ |
-| `donate/` | LAN donate-compute | ⬜ |
-| `tanhi/` | UDP HUD telemetry — all implemented Ops × dtype/quant via FlattenOp | ✅ |
-| `dna/` | Topology DNA — all implemented Ops + GDN blobs; FlattenF32 across dtype×quant | ✅ |
-| `evolution/` | DNA splice + NEAT — clones all implemented Ops; dtype/quant preserved via SetFromF32 | ✅ |
-| `telemetry/` | Structural blueprint — all implemented Ops (+ meta estimates) | ✅ |
-| `tween/` | Target prop — BackendSIMD DotTile/Saxpy chain-rule; Hebbian Saxpy + DotTile budgets; all weighted Ops | ✅ |
-| `step/` | Discrete-time volumetric step mesh — Forward/Backward/ApplyTween; all Ops × dtype × quant × CPU/SIMD | ✅ |
+| `stub/accel/` | Intel NPU / Qualcomm / Apple Metal / … | ⬜ |
+| `stub/hardware/` | Host probes | ⬜ |
+| `stub/memory/` | Footprint / VRAM accounting | ⬜ |
+| `stub/fountain/` | Fountain codes | ⬜ |
+| `stub/donate/` | LAN donate-compute | ⬜ |
+| `systems/tanhi/` | UDP HUD telemetry — all implemented Ops × dtype/quant via FlattenOp | ✅ |
+| `systems/dna/` | Topology DNA — all implemented Ops + GDN blobs; FlattenF32 across dtype×quant | ✅ |
+| `systems/evolution/` | DNA splice + NEAT — clones all implemented Ops; dtype/quant preserved via SetFromF32 | ✅ |
+| `systems/telemetry/` | Structural blueprint — all implemented Ops (+ meta estimates) | ✅ |
+| `systems/tween/` | Target prop — BackendSIMD DotTile/Saxpy chain-rule; Hebbian Saxpy + DotTile budgets; all weighted Ops | ✅ |
+| `runtime/step/` | Discrete-time volumetric step mesh — Forward/Backward/ApplyTween; all Ops × dtype × quant × CPU/SIMD | ✅ |
 
 ### Harness (not engine)
 

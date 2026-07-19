@@ -13,8 +13,10 @@ dist/
 w2a
 w2a/logs/
 **/logs/
-octo
 tools
 
-# upstream dumps for porting
-mosstts/_ref/
+# local app trees (nested / port dumps)
+apps/octo
+apps/flux2
+apps/mosstts
+apps/mosstts/_ref/
