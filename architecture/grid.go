@@ -42,6 +42,10 @@ type Grid struct {
 	Cells         []Cell
 	Exec          core.ExecConfig
 	NativeExact   bool
+
+	// Tanhi holds optional live HUD config (*tanhi.UDPConfig). Typed as any so
+	// architecture stays free of a tanhi import cycle; forward/backward assert.
+	Tanhi any
 }
 
 // VolumetricNetwork is an alias matching loom/poly naming.

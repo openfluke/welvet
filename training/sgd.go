@@ -7,6 +7,7 @@ package training
 import (
 	"fmt"
 
+	"github.com/openfluke/welvet/architecture"
 	"github.com/openfluke/welvet/backward"
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/cnn1"
@@ -24,6 +25,7 @@ import (
 	"github.com/openfluke/welvet/layers/sequential"
 	"github.com/openfluke/welvet/layers/softmax"
 	"github.com/openfluke/welvet/layers/swiglu"
+	"github.com/openfluke/welvet/tween"
 )
 
 // Config is shared train hyper-params.
@@ -162,4 +164,38 @@ func Step[T core.Numeric](fwd *forward.Result[T], target *core.Tensor[T], lr flo
 		return 0, err
 	}
 	return loss, nil
+}
+
+// ApplyTween runs one target-propagation step from a forward tape + target.
+// Uses chain-rule tween by default (Config.UseChainRule).
+func ApplyTween[T core.Numeric](g *architecture.Grid, fwd *forward.Result[T], input, target *core.Tensor[T], lr float64) (*tween.State[T], error) {
+	if g == nil || fwd == nil || target == nil {
+		return nil, fmt.Errorf("training: ApplyTween nil args")
+	}
+	cfg := tween.DefaultConfig()
+	cfg.LearningRate = float32(lr)
+	st := tween.NewState[T](g, cfg)
+	tween.CaptureFromForward(st, fwd, input)
+	if err := tween.Backward(g, st, target); err != nil {
+		return nil, err
+	}
+	st.CalculateLinkBudgets()
+	if err := tween.ApplyGaps(g, st, float32(lr)); err != nil {
+		return nil, err
+	}
+	return st, nil
+}
+
+// StepTween is forward → MSE → tween gap update (alternative to Step/SGD).
+func StepTween[T core.Numeric](g *architecture.Grid, input, target *core.Tensor[T], lr float64) (loss float64, st *tween.State[T], err error) {
+	fwd, err := forward.Forward(g, input)
+	if err != nil {
+		return 0, nil, err
+	}
+	loss, err = MSE(fwd.Output, target)
+	if err != nil {
+		return 0, nil, err
+	}
+	st, err = ApplyTween(g, fwd, input, target, lr)
+	return loss, st, err
 }

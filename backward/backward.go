@@ -3,6 +3,7 @@ package backward
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/openfluke/welvet/architecture"
 	"github.com/openfluke/welvet/core"
@@ -21,6 +22,7 @@ import (
 	"github.com/openfluke/welvet/layers/sequential"
 	"github.com/openfluke/welvet/layers/softmax"
 	"github.com/openfluke/welvet/layers/swiglu"
+	"github.com/openfluke/welvet/tanhi"
 )
 
 // GradW is one cell's weight gradient (Dense / MHA concat, …).
@@ -43,16 +45,24 @@ func Backward[T core.Numeric](fwd *forward.Result[T], gradOut *core.Tensor[T]) (
 	}
 	gy := gradOut
 	out := &Result[T]{GradWs: make([]GradW[T], 0, len(fwd.Steps))}
+	tanhiCfg := tanhi.ConfigFromGrid(fwd.Grid)
 
 	for i := len(fwd.Steps) - 1; i >= 0; i-- {
 		st := fwd.Steps[i]
+		t0 := time.Now()
 		gx, dw, err := dispatchBwd[T](st, gy)
+		t1 := time.Now()
 		if err != nil {
 			return nil, fmt.Errorf("backward %v: %w", st.Coord, err)
 		}
 		if dw != nil {
 			out.GradWs = append(out.GradWs, GradW[T]{Coord: st.Coord, DW: dw})
 		}
+		var shape []int
+		if tanhiCfg != nil && tanhiCfg.SendShape && gx != nil {
+			shape = append([]int(nil), gx.Shape...)
+		}
+		tanhi.Emit(tanhiCfg, "bwd", i, st.Cell, t0, t1, shape)
 		gy = gx
 	}
 	out.GradIn = gy

@@ -1,5 +1,6 @@
-// Package evolution is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package evolution extends DNA with splice crossover and NEAT-style mutation
+// (loom/poly evolution rebuild). Operates on architecture.Grid; children are
+// CPU-resident clones (no GPU device state).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Tests live in github.com/openfluke/w2a — not here.
 package evolution

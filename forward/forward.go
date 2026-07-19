@@ -6,6 +6,7 @@ package forward
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/openfluke/welvet/architecture"
 	"github.com/openfluke/welvet/core"
@@ -23,6 +24,7 @@ import (
 	"github.com/openfluke/welvet/layers/sequential"
 	"github.com/openfluke/welvet/layers/softmax"
 	"github.com/openfluke/welvet/layers/swiglu"
+	"github.com/openfluke/welvet/tanhi"
 )
 
 // Step records one executed cell for backward (and debugging).
@@ -38,6 +40,7 @@ type Step[T core.Numeric] struct {
 type Result[T core.Numeric] struct {
 	Output *core.Tensor[T]
 	Steps  []Step[T]
+	Grid   *architecture.Grid // owning grid (for tanhi / diagnostics)
 }
 
 // Forward walks Depth→Rows→Cols→LayersPerCell (z→y→x→l), chaining activations.
@@ -50,8 +53,9 @@ func Forward[T core.Numeric](g *architecture.Grid, input *core.Tensor[T]) (*Resu
 	current := input
 	posts := make(map[architecture.Coord]*core.Tensor[T], g.StackLayerCount())
 	var steps []Step[T]
+	tanhiCfg := tanhi.ConfigFromGrid(g)
 
-	for _, coord := range g.HopOrder() {
+	for hopIdx, coord := range g.HopOrder() {
 		cell := g.At(coord.Z, coord.Y, coord.X, coord.L)
 		if cell == nil || cell.Layer.IsDisabled {
 			continue
@@ -70,10 +74,17 @@ func Forward[T core.Numeric](g *architecture.Grid, input *core.Tensor[T]) (*Resu
 			in = src
 		}
 
+		t0 := time.Now()
 		pre, post, err := dispatch[T](cell, in)
+		t1 := time.Now()
 		if err != nil {
 			return nil, fmt.Errorf("forward %v: %w", coord, err)
 		}
+		var shape []int
+		if tanhiCfg != nil && tanhiCfg.SendShape && post != nil {
+			shape = append([]int(nil), post.Shape...)
+		}
+		tanhi.Emit(tanhiCfg, "fwd", hopIdx, cell, t0, t1, shape)
 		steps = append(steps, Step[T]{Coord: coord, Input: in, Pre: pre, Post: post, Cell: cell})
 		posts[coord] = post
 		current = post
@@ -82,7 +93,7 @@ func Forward[T core.Numeric](g *architecture.Grid, input *core.Tensor[T]) (*Resu
 	if len(steps) == 0 {
 		return nil, fmt.Errorf("forward: grid has no enabled cells with ops")
 	}
-	return &Result[T]{Output: current, Steps: steps}, nil
+	return &Result[T]{Output: current, Steps: steps, Grid: g}, nil
 }
 
 func dispatch[T core.Numeric](cell *architecture.Cell, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {

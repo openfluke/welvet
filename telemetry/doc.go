@@ -1,5 +1,5 @@
-// Package telemetry is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package telemetry extracts static structural blueprints from architecture.Grid
+// (loom/poly telemetry rebuild). Live UDP HUD events live in package tanhi.
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Tests live in github.com/openfluke/w2a — not here.
 package telemetry

@@ -36,3 +36,13 @@ func (t *Tensor[T]) Len() int {
 	}
 	return len(t.Data)
 }
+
+// Clone returns a deep copy of the tensor (nil-safe → nil).
+func (t *Tensor[T]) Clone() *Tensor[T] {
+	if t == nil {
+		return nil
+	}
+	out := NewTensor[T](t.Shape...)
+	copy(out.Data, t.Data)
+	return out
+}

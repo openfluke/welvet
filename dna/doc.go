@@ -1,5 +1,5 @@
-// Package dna is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package dna is Welvet's hierarchical spatial correlation / topology fingerprint engine
+// (loom/poly DNA rebuild). Operates on architecture.Grid + weights.Store.
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Tests live in github.com/openfluke/w2a — not here.
 package dna

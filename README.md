@@ -39,7 +39,7 @@
 | Remaining layers (parallel, …) | ⬜ |
 | Model IO / transformer / entity / tokenizer / hf | 🚧 |
 | `octo/` interactive model shell (download / convert / chat) | 🚧 |
-| Accel / donate / fountain / dna / … | ⬜ |
+| Accel / donate / fountain / … | ⬜ |
 | Full v1 matrix | ⬜ |
 
 Validate live:
@@ -463,17 +463,17 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | `memory/` | Footprint / VRAM accounting | ⬜ |
 | `fountain/` | Fountain codes | ⬜ |
 | `donate/` | LAN donate-compute | ⬜ |
-| `layers/tanhi/` | UDP telemetry | ⬜ |
-| `dna/` | Topology DNA | ⬜ |
-| `evolution/` | Evolution | ⬜ |
-| `telemetry/` | Telemetry | ⬜ |
-| `tween/` | Tween / misc | ⬜ |
+| `tanhi/` | UDP HUD telemetry — all implemented Ops × dtype/quant via FlattenOp | ✅ |
+| `dna/` | Topology DNA — all implemented Ops + GDN blobs; FlattenF32 across dtype×quant | ✅ |
+| `evolution/` | DNA splice + NEAT — clones all implemented Ops; dtype/quant preserved via SetFromF32 | ✅ |
+| `telemetry/` | Structural blueprint — all implemented Ops (+ meta estimates) | ✅ |
+| `tween/` | Target prop — chain-rule Backward + layerwise Hebbian on all weighted Ops | ✅ |
 
 ### Harness (not engine)
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `w2a/` | Interactive menu, dense + mha + swiglu + rmsnorm + layernorm + cnn1–3 + rnn + lstm + embedding + softmax + sequential + residual suites, timed matrices, gap census | 🚧 |
+| `w2a/` | Interactive menu: dense + mha + swiglu + rmsnorm + layernorm + cnn1–3 + rnn + lstm + embedding + softmax + sequential + residual + dna + evolution + tween suites; timed matrices, gap census | 🚧 |
 
 ---
 
