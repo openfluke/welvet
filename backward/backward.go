@@ -69,6 +69,14 @@ func Backward[T core.Numeric](fwd *forward.Result[T], gradOut *core.Tensor[T]) (
 	return out, nil
 }
 
+// Cell dispatches one cell Op backward (used by volumetric step mesh).
+func Cell[T core.Numeric](cell *architecture.Cell, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+	if cell == nil {
+		return nil, nil, fmt.Errorf("backward: nil cell")
+	}
+	return dispatchBwd(forward.Step[T]{Cell: cell, Input: input, Pre: pre}, gradOut)
+}
+
 func dispatchBwd[T core.Numeric](st forward.Step[T], gradOut *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
 	if st.Cell == nil {
 		return nil, nil, fmt.Errorf("nil cell")

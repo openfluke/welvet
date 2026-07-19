@@ -468,12 +468,13 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | `evolution/` | DNA splice + NEAT — clones all implemented Ops; dtype/quant preserved via SetFromF32 | ✅ |
 | `telemetry/` | Structural blueprint — all implemented Ops (+ meta estimates) | ✅ |
 | `tween/` | Target prop — BackendSIMD DotTile/Saxpy chain-rule; Hebbian Saxpy + DotTile budgets; all weighted Ops | ✅ |
+| `step/` | Discrete-time volumetric step mesh — Forward/Backward/ApplyTween; all Ops × dtype × quant × CPU/SIMD | ✅ |
 
 ### Harness (not engine)
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `w2a/` | Interactive menu: layer suites + dna/evolution/tween with **14 layers × 34 dtypes × 21 quants** full census (~10k cells each); timed matrices, gap census | 🚧 |
+| `w2a/` | Interactive menu: layer suites + dna/evolution/tween/step with **14 layers × 34 dtypes × 21 quants × CPU/SIMD** full census; timed matrices | 🚧 |
 
 ---
 

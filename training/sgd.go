@@ -25,6 +25,7 @@ import (
 	"github.com/openfluke/welvet/layers/sequential"
 	"github.com/openfluke/welvet/layers/softmax"
 	"github.com/openfluke/welvet/layers/swiglu"
+	"github.com/openfluke/welvet/step"
 	"github.com/openfluke/welvet/tween"
 )
 
@@ -198,4 +199,35 @@ func StepTween[T core.Numeric](g *architecture.Grid, input, target *core.Tensor[
 	}
 	st, err = ApplyTween(g, fwd, input, target, lr)
 	return loss, st, err
+}
+
+// StepMesh runs ticks of volumetric step.Forward then ApplyTween (gap-based).
+// Honors g.Exec / per-Op Backend (CPU tiled / SIMD).
+func StepMesh[T core.Numeric](g *architecture.Grid, input, target *core.Tensor[T], ticks int, lr float64) (loss float64, st *step.State[T], err error) {
+	if g == nil || input == nil || target == nil {
+		return 0, nil, fmt.Errorf("training: StepMesh nil args")
+	}
+	if ticks < 1 {
+		ticks = 1
+	}
+	st = step.New[T](g)
+	st.SetInput(input)
+	for t := 0; t < ticks; t++ {
+		capture := t == ticks-1
+		if _, err := step.Forward(g, st, capture); err != nil {
+			return 0, st, err
+		}
+	}
+	out := st.LayerData[len(st.LayerData)-1]
+	if out == nil {
+		return 0, st, fmt.Errorf("training: StepMesh nil mesh output")
+	}
+	loss, err = MSE(out, target)
+	if err != nil {
+		return loss, st, err
+	}
+	if err := step.ApplyTween(g, st, target, float32(lr)); err != nil {
+		return loss, st, err
+	}
+	return loss, st, nil
 }

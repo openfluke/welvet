@@ -96,6 +96,14 @@ func Forward[T core.Numeric](g *architecture.Grid, input *core.Tensor[T]) (*Resu
 	return &Result[T]{Output: current, Steps: steps, Grid: g}, nil
 }
 
+// Cell dispatches one cell Op forward (used by volumetric step mesh).
+func Cell[T core.Numeric](cell *architecture.Cell, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+	if cell == nil {
+		return nil, nil, fmt.Errorf("forward: nil cell")
+	}
+	return dispatch(cell, input)
+}
+
 func dispatch[T core.Numeric](cell *architecture.Cell, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
 	switch cell.Layer.Type {
 	case core.LayerDense:
