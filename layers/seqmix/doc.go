@@ -7,8 +7,9 @@
 // can swap mixers without rewriting the volumetric walk.
 //
 //	mha/     KindAttention  (done)
-//	mamba/   KindSSM        (stub)
-//	…        KindLinearAttn / KindConvMix (future)
+//	mamba/   KindSSM        (CPU selective scan)
+//	gdn/     KindLinearAttn (decode / gated delta)
+//	…        KindConvMix    (future)
 //
 // Tests live in github.com/openfluke/w2a — not here.
 package seqmix
@@ -21,7 +22,7 @@ type Kind int
 const (
 	KindAttention  Kind = iota // MHA / GQA / MQA / cross / local / ALiBi …
 	KindSSM                    // Mamba / S6 / related state-space
-	KindLinearAttn             // Performer / Linear Transformer / RetNet-style
+	KindLinearAttn             // Performer / Linear Transformer / RetNet / GDN-style
 	KindConvMix                // Hyena / FFT conv mixers
 )
 
@@ -38,4 +39,17 @@ func (k Kind) String() string {
 	default:
 		return fmt.Sprintf("Kind(%d)", int(k))
 	}
+}
+
+// Contract documents the shared I/O shape for sequence mixers.
+// Implementors expose package-level Forward/Backward matching Dense:
+//
+//	Forward(l, x[B,T,D]) → (pre, post[B,T,D])
+//	Backward(l, gy, x, pre) → (gx, dW)
+//
+// State (SSM/GDN) is owned by the layer; call Reset between independent sequences.
+type Contract struct {
+	Kind   Kind
+	DModel int
+	MaxT   int
 }

@@ -1,5 +1,7 @@
-// Package convt1 is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package convt1 is ConvTranspose1d (loom ConvTransposed1D).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Weights live on Proj (Dense Filters × InChannels·Kernel), same layout as cnn1.
+// Forward scatters input × kernel into an upsampled map; backward is the adjoint.
+// Contract: CPU tiled + SIMD + WebGPU (host layout + Dense MatVec), dtype × k-quant.
+// No QAT. Tests live in github.com/openfluke/w2a — not here.
 package convt1

@@ -13,18 +13,25 @@ import (
 	"github.com/openfluke/welvet/layers/cnn1"
 	"github.com/openfluke/welvet/layers/cnn2"
 	"github.com/openfluke/welvet/layers/cnn3"
+	"github.com/openfluke/welvet/layers/convt1"
+	"github.com/openfluke/welvet/layers/convt2"
+	"github.com/openfluke/welvet/layers/convt3"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/layers/embedding"
-	"github.com/openfluke/welvet/runtime/forward"
+	"github.com/openfluke/welvet/layers/kmeans"
 	"github.com/openfluke/welvet/layers/layernorm"
 	"github.com/openfluke/welvet/layers/lstm"
+	"github.com/openfluke/welvet/layers/mamba"
+	"github.com/openfluke/welvet/layers/metacognition"
 	"github.com/openfluke/welvet/layers/mha"
+	"github.com/openfluke/welvet/layers/parallel"
 	"github.com/openfluke/welvet/layers/residual"
 	"github.com/openfluke/welvet/layers/rmsnorm"
 	"github.com/openfluke/welvet/layers/rnn"
 	"github.com/openfluke/welvet/layers/sequential"
 	"github.com/openfluke/welvet/layers/softmax"
 	"github.com/openfluke/welvet/layers/swiglu"
+	"github.com/openfluke/welvet/runtime/forward"
 	"github.com/openfluke/welvet/runtime/step"
 	"github.com/openfluke/welvet/systems/tween"
 )
@@ -137,6 +144,20 @@ func applyCell[T core.Numeric](op any, dW *core.Tensor[T], lr float64) error {
 		return sequential.ApplyGradSGD(v, dW, lr)
 	case *residual.Layer:
 		return residual.ApplyGradSGD(v, dW, lr)
+	case *convt1.Layer:
+		return convt1.ApplyGradSGD(v, dW, lr)
+	case *convt2.Layer:
+		return convt2.ApplyGradSGD(v, dW, lr)
+	case *convt3.Layer:
+		return convt3.ApplyGradSGD(v, dW, lr)
+	case *parallel.Layer:
+		return parallel.ApplyGradSGD(v, dW, lr)
+	case *kmeans.Layer:
+		return kmeans.ApplyGradSGD(v, dW, lr)
+	case *metacognition.Layer:
+		return metacognition.ApplyGradSGD(v, dW, lr)
+	case *mamba.Layer:
+		return mamba.ApplyGradSGD(v, dW, lr)
 	case GradApplier[T]:
 		return v.ApplyGradSGD(dW, lr)
 	default:

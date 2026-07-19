@@ -13,11 +13,19 @@ import (
 	"github.com/openfluke/welvet/layers/cnn1"
 	"github.com/openfluke/welvet/layers/cnn2"
 	"github.com/openfluke/welvet/layers/cnn3"
+	"github.com/openfluke/welvet/layers/convt1"
+	"github.com/openfluke/welvet/layers/convt2"
+	"github.com/openfluke/welvet/layers/convt3"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/layers/embedding"
+	"github.com/openfluke/welvet/layers/gdn"
+	"github.com/openfluke/welvet/layers/kmeans"
 	"github.com/openfluke/welvet/layers/layernorm"
 	"github.com/openfluke/welvet/layers/lstm"
+	"github.com/openfluke/welvet/layers/mamba"
+	"github.com/openfluke/welvet/layers/metacognition"
 	"github.com/openfluke/welvet/layers/mha"
+	"github.com/openfluke/welvet/layers/parallel"
 	"github.com/openfluke/welvet/layers/residual"
 	"github.com/openfluke/welvet/layers/rmsnorm"
 	"github.com/openfluke/welvet/layers/rnn"
@@ -190,6 +198,54 @@ func dispatch[T core.Numeric](cell *architecture.Cell, input *core.Tensor[T]) (p
 			return nil, nil, fmt.Errorf("residual cell Op is %T, want *residual.Layer", cell.Op)
 		}
 		return residual.Forward(rl, input)
+	case core.LayerConvTransposed1D:
+		cl, ok := cell.Op.(*convt1.Layer)
+		if !ok || cl == nil {
+			return nil, nil, fmt.Errorf("convt1 cell Op is %T, want *convt1.Layer", cell.Op)
+		}
+		return convt1.Forward(cl, input)
+	case core.LayerConvTransposed2D:
+		cl, ok := cell.Op.(*convt2.Layer)
+		if !ok || cl == nil {
+			return nil, nil, fmt.Errorf("convt2 cell Op is %T, want *convt2.Layer", cell.Op)
+		}
+		return convt2.Forward(cl, input)
+	case core.LayerConvTransposed3D:
+		cl, ok := cell.Op.(*convt3.Layer)
+		if !ok || cl == nil {
+			return nil, nil, fmt.Errorf("convt3 cell Op is %T, want *convt3.Layer", cell.Op)
+		}
+		return convt3.Forward(cl, input)
+	case core.LayerParallel:
+		pl, ok := cell.Op.(*parallel.Layer)
+		if !ok || pl == nil {
+			return nil, nil, fmt.Errorf("parallel cell Op is %T, want *parallel.Layer", cell.Op)
+		}
+		return parallel.Forward(pl, input)
+	case core.LayerKMeans:
+		kl, ok := cell.Op.(*kmeans.Layer)
+		if !ok || kl == nil {
+			return nil, nil, fmt.Errorf("kmeans cell Op is %T, want *kmeans.Layer", cell.Op)
+		}
+		return kmeans.Forward(kl, input)
+	case core.LayerMetacognition:
+		ml, ok := cell.Op.(*metacognition.Layer)
+		if !ok || ml == nil {
+			return nil, nil, fmt.Errorf("metacognition cell Op is %T, want *metacognition.Layer", cell.Op)
+		}
+		return metacognition.Forward(ml, input)
+	case core.LayerMamba:
+		ml, ok := cell.Op.(*mamba.Layer)
+		if !ok || ml == nil {
+			return nil, nil, fmt.Errorf("mamba cell Op is %T, want *mamba.Layer", cell.Op)
+		}
+		return mamba.Forward(ml, input)
+	case core.LayerGDN:
+		gl, ok := cell.Op.(*gdn.Layer)
+		if !ok || gl == nil {
+			return nil, nil, fmt.Errorf("gdn cell Op is %T, want *gdn.Layer", cell.Op)
+		}
+		return gdn.Forward(gl, input)
 	default:
 		return nil, nil, fmt.Errorf("unsupported layer type %s", cell.Layer.Type)
 	}

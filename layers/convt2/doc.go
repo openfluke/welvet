@@ -1,5 +1,6 @@
-// Package convt2 is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package convt2 is ConvTranspose2d (loom ConvTransposed2D).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Weights live on Proj (Dense Filters × InChannels·Kernel²), same layout as cnn2.
+// Contract: CPU tiled + SIMD + WebGPU, dtype × k-quant. No QAT.
+// Tests live in github.com/openfluke/w2a — not here.
 package convt2

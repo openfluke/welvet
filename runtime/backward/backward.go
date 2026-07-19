@@ -10,18 +10,26 @@ import (
 	"github.com/openfluke/welvet/layers/cnn1"
 	"github.com/openfluke/welvet/layers/cnn2"
 	"github.com/openfluke/welvet/layers/cnn3"
+	"github.com/openfluke/welvet/layers/convt1"
+	"github.com/openfluke/welvet/layers/convt2"
+	"github.com/openfluke/welvet/layers/convt3"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/layers/embedding"
-	"github.com/openfluke/welvet/runtime/forward"
+	"github.com/openfluke/welvet/layers/gdn"
+	"github.com/openfluke/welvet/layers/kmeans"
 	"github.com/openfluke/welvet/layers/layernorm"
 	"github.com/openfluke/welvet/layers/lstm"
+	"github.com/openfluke/welvet/layers/mamba"
+	"github.com/openfluke/welvet/layers/metacognition"
 	"github.com/openfluke/welvet/layers/mha"
+	"github.com/openfluke/welvet/layers/parallel"
 	"github.com/openfluke/welvet/layers/residual"
 	"github.com/openfluke/welvet/layers/rmsnorm"
 	"github.com/openfluke/welvet/layers/rnn"
 	"github.com/openfluke/welvet/layers/sequential"
 	"github.com/openfluke/welvet/layers/softmax"
 	"github.com/openfluke/welvet/layers/swiglu"
+	"github.com/openfluke/welvet/runtime/forward"
 	"github.com/openfluke/welvet/systems/tanhi"
 )
 
@@ -166,6 +174,54 @@ func dispatchBwd[T core.Numeric](st forward.Step[T], gradOut *core.Tensor[T]) (g
 			return nil, nil, fmt.Errorf("residual cell Op is %T", st.Cell.Op)
 		}
 		return residual.Backward(rl, gradOut, st.Input, st.Pre)
+	case core.LayerConvTransposed1D:
+		cl, ok := st.Cell.Op.(*convt1.Layer)
+		if !ok || cl == nil {
+			return nil, nil, fmt.Errorf("convt1 cell Op is %T", st.Cell.Op)
+		}
+		return convt1.Backward(cl, gradOut, st.Input, st.Pre)
+	case core.LayerConvTransposed2D:
+		cl, ok := st.Cell.Op.(*convt2.Layer)
+		if !ok || cl == nil {
+			return nil, nil, fmt.Errorf("convt2 cell Op is %T", st.Cell.Op)
+		}
+		return convt2.Backward(cl, gradOut, st.Input, st.Pre)
+	case core.LayerConvTransposed3D:
+		cl, ok := st.Cell.Op.(*convt3.Layer)
+		if !ok || cl == nil {
+			return nil, nil, fmt.Errorf("convt3 cell Op is %T", st.Cell.Op)
+		}
+		return convt3.Backward(cl, gradOut, st.Input, st.Pre)
+	case core.LayerParallel:
+		pl, ok := st.Cell.Op.(*parallel.Layer)
+		if !ok || pl == nil {
+			return nil, nil, fmt.Errorf("parallel cell Op is %T", st.Cell.Op)
+		}
+		return parallel.Backward(pl, gradOut, st.Input, st.Pre)
+	case core.LayerKMeans:
+		kl, ok := st.Cell.Op.(*kmeans.Layer)
+		if !ok || kl == nil {
+			return nil, nil, fmt.Errorf("kmeans cell Op is %T", st.Cell.Op)
+		}
+		return kmeans.Backward(kl, gradOut, st.Input, st.Pre)
+	case core.LayerMetacognition:
+		ml, ok := st.Cell.Op.(*metacognition.Layer)
+		if !ok || ml == nil {
+			return nil, nil, fmt.Errorf("metacognition cell Op is %T", st.Cell.Op)
+		}
+		return metacognition.Backward(ml, gradOut, st.Input, st.Pre)
+	case core.LayerMamba:
+		ml, ok := st.Cell.Op.(*mamba.Layer)
+		if !ok || ml == nil {
+			return nil, nil, fmt.Errorf("mamba cell Op is %T", st.Cell.Op)
+		}
+		return mamba.Backward(ml, gradOut, st.Input, st.Pre)
+	case core.LayerGDN:
+		gl, ok := st.Cell.Op.(*gdn.Layer)
+		if !ok || gl == nil {
+			return nil, nil, fmt.Errorf("gdn cell Op is %T", st.Cell.Op)
+		}
+		return gdn.Backward(gl, gradOut, st.Input, st.Pre)
 	default:
 		return nil, nil, fmt.Errorf("unsupported layer type %s", st.Cell.Layer.Type)
 	}

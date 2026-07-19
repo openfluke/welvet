@@ -1,6 +1,6 @@
-// Package mamba is the Welvet SSM / Mamba sequence mixer (seqmix.KindSSM).
+// Package mamba is a selective SSM mixer (seqmix.KindSSM).
 //
-// Stub only — implement CPU/SIMD/WebGPU × dtype × quant × fwd/bwd here when
-// landing SSM. Do not overload mha for state-space models.
-// Tests live in github.com/openfluke/w2a — not here.
+// Minimal Mamba-style block: InProj → softplus(Δ) selective scan → OutProj.
+// Contract: CPU tiled + SIMD + WebGPU (host scan + Dense MatVec), dtype × k-quant.
+// No QAT. Tests live in github.com/openfluke/w2a — not here.
 package mamba

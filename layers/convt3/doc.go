@@ -1,5 +1,6 @@
-// Package convt3 is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package convt3 is ConvTranspose3d (loom ConvTransposed3D).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Weights live on Proj (Dense Filters × InChannels·Kernel³), same layout as cnn3.
+// Contract: CPU tiled + SIMD + WebGPU, dtype × k-quant. No QAT.
+// Tests live in github.com/openfluke/w2a — not here.
 package convt3

@@ -26,6 +26,8 @@ const (
 	LayerSequential         LayerType = 17
 	LayerResidual           LayerType = 18
 	LayerMetacognition      LayerType = 19
+	LayerMamba             LayerType = 20
+	LayerGDN               LayerType = 21
 )
 
 func (t LayerType) String() string {
@@ -70,6 +72,10 @@ func (t LayerType) String() string {
 		return "Residual"
 	case LayerMetacognition:
 		return "Metacognition"
+	case LayerMamba:
+		return "Mamba"
+	case LayerGDN:
+		return "GDN"
 	default:
 		return fmt.Sprintf("LayerType(%d)", int(t))
 	}

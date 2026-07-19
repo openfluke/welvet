@@ -1,5 +1,6 @@
-// Package metacognition is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package metacognition wraps an observed Dense with heuristic stability rules (loom Meta).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Welvet policy: no QAT / dtype morph-as-training. Rules may gate, scale, or reset
+// observed weights toward identity — they do not morph LayerType.
+// Contract: CPU tiled + SIMD + WebGPU via Observed Exec. Tests in w2a.
 package metacognition

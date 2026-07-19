@@ -1,5 +1,6 @@
-// Package parallel is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package parallel is Parallel / MoE combine (loom Parallel).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Branches are Dense children. Combine modes: concat (default), add, avg, filter (MoE gate).
+// Contract: CPU tiled + SIMD + WebGPU via children Exec; dtype × k-quant on branches/gate.
+// No QAT. Tests live in github.com/openfluke/w2a — not here.
 package parallel
