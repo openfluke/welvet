@@ -5,13 +5,13 @@ package transformer
 
 import (
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/dense"
-	"github.com/openfluke/welvet/embedding"
-	"github.com/openfluke/welvet/gdn"
-	"github.com/openfluke/welvet/mha"
+	"github.com/openfluke/welvet/layers/dense"
+	"github.com/openfluke/welvet/layers/embedding"
+	"github.com/openfluke/welvet/layers/gdn"
+	"github.com/openfluke/welvet/layers/mha"
 	"github.com/openfluke/welvet/quant"
-	"github.com/openfluke/welvet/rmsnorm"
-	"github.com/openfluke/welvet/swiglu"
+	"github.com/openfluke/welvet/layers/rmsnorm"
+	"github.com/openfluke/welvet/layers/swiglu"
 	"github.com/openfluke/welvet/weights"
 )
 

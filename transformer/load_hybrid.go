@@ -5,10 +5,10 @@ import (
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/entity"
-	"github.com/openfluke/welvet/gdn"
+	"github.com/openfluke/welvet/layers/gdn"
 	"github.com/openfluke/welvet/quant"
-	"github.com/openfluke/welvet/rmsnorm"
-	"github.com/openfluke/welvet/swiglu"
+	"github.com/openfluke/welvet/layers/rmsnorm"
+	"github.com/openfluke/welvet/layers/swiglu"
 )
 
 // loadHybridEntity loads Qwen3.5 / Bonsai text tower from ENTITY.

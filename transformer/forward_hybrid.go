@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/dense"
+	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/quant"
-	"github.com/openfluke/welvet/rmsnorm"
-	"github.com/openfluke/welvet/swiglu"
+	"github.com/openfluke/welvet/layers/rmsnorm"
+	"github.com/openfluke/welvet/layers/swiglu"
 	"github.com/openfluke/welvet/weights"
 )
 

@@ -188,20 +188,20 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | `simd/` | DotTile, DotI8/U8, DotQ4_0, Saxpy, BitNet helpers (amd64/arm64 `.s`) | 🚧 |
 | `webgpu/` | All FormatNone + all quant GEMV/GEMVT + DenseDW | ✅ |
 | `tiling/` | Tile size / SC / MC / GPU workgroup caps | ✅ |
-| `dense/` | FormatNone×34 + all quants × 3 backends; packed fwd/bwd; grad verify | ✅ |
-| `mha/` | Causal+RoPE+GQA; Q/K/V/O via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `swiglu/` | SiLU-gated FFN; Gate/Up/Down via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `rmsnorm/` | RMSNorm; γ store FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `layernorm/` | LayerNorm; γ+β stores FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `cnn1/` | Conv1d (im2col→Dense); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `cnn2/` | Conv2d (im2col→Dense); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `cnn3/` | Conv3d (im2col→Dense); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `rnn/` | Vanilla tanh RNN; IH/HH via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `lstm/` | LSTM i/f/g/o via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `embedding/` | Token gather/scatter; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `softmax/` | Weightless Softmax (last-axis/Grid); ALU × backends; harness dtype/quant axes | ✅ |
-| `sequential/` | Dense→Dense Sequential compose; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `residual/` | Residual y=F(x)+x (Dense F); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layers/dense/` | FormatNone×34 + all quants × 3 backends; packed fwd/bwd; grad verify | ✅ |
+| `layers/mha/` | Causal+RoPE+GQA; Q/K/V/O via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layers/swiglu/` | SiLU-gated FFN; Gate/Up/Down via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layers/rmsnorm/` | RMSNorm; γ store FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layers/layernorm/` | LayerNorm; γ+β stores FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layers/cnn1/` | Conv1d (im2col→Dense); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layers/cnn2/` | Conv2d (im2col→Dense); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layers/cnn3/` | Conv3d (im2col→Dense); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layers/rnn/` | Vanilla tanh RNN; IH/HH via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layers/lstm/` | LSTM i/f/g/o via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layers/embedding/` | Token gather/scatter; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layers/softmax/` | Weightless Softmax (last-axis/Grid); ALU × backends; harness dtype/quant axes | ✅ |
+| `layers/sequential/` | Dense→Dense Sequential compose; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layers/residual/` | Residual y=F(x)+x (Dense F); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
 | `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | ✅ |
 | `forward/` | Grid walk z→y→x→l; Dense … Sequential + Residual dispatch | ✅ |
 | `backward/` | Reverse tape over Dense … Sequential + Residual | ✅ |
@@ -211,28 +211,28 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `dense/` | FormatNone×34 + all quants × 3 backends; packed SIMD/GPU; grad verify | ✅ |
-| `mha/` | Policy Mask/Pos/Mode (decoder, encoder, diffusion, cross, PrefixLM, window, ALiBi); Dense proj coverage | ✅ |
-| `swiglu/` | SiLU-gated FFN; Gate/Up/Down via Dense; FormatNone×34 + all quants × 3 backends | ✅ |
-| `seqmix/` | Sequence-mixer kinds (attention / SSM / linear / conv) — contract only | ✅ |
-| `mamba/` | SSM / Mamba (KindSSM) | ⬜ |
-| `rmsnorm/` | RMSNorm; γ FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `layernorm/` | LayerNorm; γ+β FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `cnn1/` | Conv1d im2col→Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `cnn2/` | Conv2d im2col→Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `cnn3/` | Conv3d im2col→Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `rnn/` | Vanilla tanh RNN; IH/HH via Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `lstm/` | LSTM i/f/g/o via Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `embedding/` | Token gather/scatter; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `softmax/` | Weightless Softmax last-axis/Grid + temp; ALU × backends; act sweep; train grids | ✅ |
-| `sequential/` | Dense→Dense Sequential compose; FormatNone×34 + quants × backends; act sweep; train grids | ✅ |
-| `residual/` | Residual y=F(x)+x (Dense F); FormatNone×34 + quants × backends; act sweep; train grids | ✅ |
-| `convt1/` | 1D transposed conv | ⬜ |
-| `convt2/` | 2D transposed conv | ⬜ |
-| `convt3/` | 3D transposed conv | ⬜ |
-| `kmeans/` | K-means | ⬜ |
-| `parallel/` | Parallel compose | ⬜ |
-| `metacognition/` | Metacognition | ⬜ |
+| `layers/dense/` | FormatNone×34 + all quants × 3 backends; packed SIMD/GPU; grad verify | ✅ |
+| `layers/mha/` | Policy Mask/Pos/Mode (decoder, encoder, diffusion, cross, PrefixLM, window, ALiBi); Dense proj coverage | ✅ |
+| `layers/swiglu/` | SiLU-gated FFN; Gate/Up/Down via Dense; FormatNone×34 + all quants × 3 backends | ✅ |
+| `layers/seqmix/` | Sequence-mixer kinds (attention / SSM / linear / conv) — contract only | ✅ |
+| `layers/mamba/` | SSM / Mamba (KindSSM) | ⬜ |
+| `layers/rmsnorm/` | RMSNorm; γ FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
+| `layers/layernorm/` | LayerNorm; γ+β FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
+| `layers/cnn1/` | Conv1d im2col→Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
+| `layers/cnn2/` | Conv2d im2col→Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
+| `layers/cnn3/` | Conv3d im2col→Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
+| `layers/rnn/` | Vanilla tanh RNN; IH/HH via Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
+| `layers/lstm/` | LSTM i/f/g/o via Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
+| `layers/embedding/` | Token gather/scatter; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
+| `layers/softmax/` | Weightless Softmax last-axis/Grid + temp; ALU × backends; act sweep; train grids | ✅ |
+| `layers/sequential/` | Dense→Dense Sequential compose; FormatNone×34 + quants × backends; act sweep; train grids | ✅ |
+| `layers/residual/` | Residual y=F(x)+x (Dense F); FormatNone×34 + quants × backends; act sweep; train grids | ✅ |
+| `layers/convt1/` | 1D transposed conv | ⬜ |
+| `layers/convt2/` | 2D transposed conv | ⬜ |
+| `layers/convt3/` | 3D transposed conv | ⬜ |
+| `layers/kmeans/` | K-means | ⬜ |
+| `layers/parallel/` | Parallel compose | ⬜ |
+| `layers/metacognition/` | Metacognition | ⬜ |
 
 ### Dense detail
 
@@ -270,7 +270,7 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | On-device attention / RoPE shaders | ⬜ | ⬜ | ⬜ |
 | SoftmaxSigmoid / train Dropout | ⬜ hard-error | ⬜ | ⬜ |
 
-Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/` — they land under `seqmix.Kind*` in their own packages.
+Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layers/mha/` — they land under `seqmix.Kind*` in their own packages.
 
 ### SwiGLU detail
 
@@ -463,7 +463,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `mha/`
 | `memory/` | Footprint / VRAM accounting | ⬜ |
 | `fountain/` | Fountain codes | ⬜ |
 | `donate/` | LAN donate-compute | ⬜ |
-| `tanhi/` | UDP telemetry | ⬜ |
+| `layers/tanhi/` | UDP telemetry | ⬜ |
 | `dna/` | Topology DNA | ⬜ |
 | `evolution/` | Evolution | ⬜ |
 | `telemetry/` | Telemetry | ⬜ |

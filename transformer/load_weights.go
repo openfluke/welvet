@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/dense"
+	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/entity"
 	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/weights"

@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"runtime/debug"
 
-	"github.com/openfluke/welvet/dense"
+	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/fusedgpu"
 	"github.com/openfluke/welvet/quant"
 )

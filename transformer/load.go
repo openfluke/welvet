@@ -5,13 +5,13 @@ import (
 	"path/filepath"
 
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/embedding"
+	"github.com/openfluke/welvet/layers/embedding"
 	"github.com/openfluke/welvet/entity"
 	"github.com/openfluke/welvet/hf"
-	"github.com/openfluke/welvet/mha"
+	"github.com/openfluke/welvet/layers/mha"
 	"github.com/openfluke/welvet/quant"
-	"github.com/openfluke/welvet/rmsnorm"
-	"github.com/openfluke/welvet/swiglu"
+	"github.com/openfluke/welvet/layers/rmsnorm"
+	"github.com/openfluke/welvet/layers/swiglu"
 )
 
 // LoadEntity builds a Model from a packed Welvet .entity file.

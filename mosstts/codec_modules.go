@@ -5,7 +5,7 @@ import (
 	"math"
 	"unsafe"
 
-	"github.com/openfluke/welvet/dense"
+	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/simd"
 	"github.com/openfluke/welvet/webgpu"
 )

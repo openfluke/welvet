@@ -3,10 +3,10 @@ package transformer
 import (
 	"fmt"
 
-	"github.com/openfluke/welvet/dense"
+	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/fusedgpu"
 	"github.com/openfluke/welvet/quant"
-	"github.com/openfluke/welvet/rmsnorm"
+	"github.com/openfluke/welvet/layers/rmsnorm"
 	"github.com/openfluke/welvet/weights"
 )
 
