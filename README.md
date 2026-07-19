@@ -467,7 +467,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | `dna/` | Topology DNA — all implemented Ops + GDN blobs; FlattenF32 across dtype×quant | ✅ |
 | `evolution/` | DNA splice + NEAT — clones all implemented Ops; dtype/quant preserved via SetFromF32 | ✅ |
 | `telemetry/` | Structural blueprint — all implemented Ops (+ meta estimates) | ✅ |
-| `tween/` | Target prop — chain-rule Backward + layerwise Hebbian on all weighted Ops | ✅ |
+| `tween/` | Target prop — BackendSIMD DotTile/Saxpy chain-rule; Hebbian Saxpy + DotTile budgets; all weighted Ops | ✅ |
 
 ### Harness (not engine)
 

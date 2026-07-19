@@ -1,5 +1,9 @@
 // Package tween implements neural target propagation (loom/poly tween rebuild).
 //
+// Default UseChainRule path: forward.Forward + layer Backward honor Exec.Backend
+// (BackendSIMD → dense DotTile / Saxpy). Layerwise Hebbian updates use
+// simd.SaxpyF32AccF64 for outer products; link budgets use simd.DotTile.
+//
 // Tests live in github.com/openfluke/w2a — not here.
 package tween
 
@@ -12,6 +16,7 @@ import (
 	"github.com/openfluke/welvet/dna"
 	"github.com/openfluke/welvet/forward"
 	"github.com/openfluke/welvet/layers/dense"
+	"github.com/openfluke/welvet/simd"
 )
 
 // Config holds tunable parameters for neural target propagation.
@@ -255,23 +260,16 @@ func BackwardLayerwise[T core.Numeric](g *architecture.Grid, s *State[T], target
 			inSize := dl.Core.InputHeight
 			w, err := dl.Weights.FlattenF32()
 			if err == nil {
-				for in := 0; in < inSize && in < estimated.Len(); in++ {
-					var importance, totalWeight float32
-					for out := 0; out < outSize && out < currentTarget.Len(); out++ {
-						wIdx := out*inSize + in
-						if wIdx < 0 || wIdx >= len(w) {
-							continue
+				tgt := make([]float32, outSize)
+				for out := 0; out < outSize && out < currentTarget.Len(); out++ {
+					tgt[out] = float32(core.AsFloat64(currentTarget.Data[out]))
+				}
+				imp, l1, err := hebbianImportances(w, tgt, outSize, inSize)
+				if err == nil {
+					for in := 0; in < inSize && in < estimated.Len(); in++ {
+						if l1[in] > 0.01 {
+							estimated.Data[in] = core.FromFloat64[T](float64(imp[in] / l1[in]))
 						}
-						ww := w[wIdx]
-						importance += ww * float32(core.AsFloat64(currentTarget.Data[out]))
-						if ww < 0 {
-							totalWeight -= ww
-						} else {
-							totalWeight += ww
-						}
-					}
-					if totalWeight > 0.01 {
-						estimated.Data[in] = core.FromFloat64[T](float64(importance / totalWeight))
 					}
 				}
 			}
@@ -299,22 +297,26 @@ func (s *State[T]) CalculateLinkBudgets() {
 		if fwd == nil || bwd == nil || fwd.Len() == 0 || fwd.Len() != bwd.Len() {
 			continue
 		}
-		dot, fMag, bMag := 0.0, 0.0, 0.0
+		n := fwd.Len()
+		a := make([]float32, n)
+		b := make([]float32, n)
+		for j := 0; j < n; j++ {
+			a[j] = float32(core.AsFloat64(fwd.Data[j]))
+			b[j] = float32(core.AsFloat64(bwd.Data[j]))
+		}
+		dot := simd.DotTile(a, b, 0, n, 0)
+		fMag := simd.DotTile(a, a, 0, n, 0)
+		bMag := simd.DotTile(b, b, 0, n, 0)
 		gap := 0.0
-		for j := range fwd.Data {
-			fv := core.AsFloat64(fwd.Data[j])
-			bv := core.AsFloat64(bwd.Data[j])
-			dot += fv * bv
-			fMag += fv * fv
-			bMag += bv * bv
-			diff := fv - bv
+		for j := 0; j < n; j++ {
+			diff := float64(a[j] - b[j])
 			gap += diff * diff
 		}
 		if fMag > 0 && bMag > 0 {
 			cosine := dot / (math.Sqrt(fMag) * math.Sqrt(bMag))
 			s.LinkBudgets[i] = float32((cosine + 1) / 2)
 		}
-		s.Gaps[i] = float32(math.Sqrt(gap / float64(fwd.Len())))
+		s.Gaps[i] = float32(math.Sqrt(gap / float64(n)))
 	}
 }
 

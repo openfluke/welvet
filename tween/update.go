@@ -20,67 +20,7 @@ import (
 	"github.com/openfluke/welvet/layers/sequential"
 	"github.com/openfluke/welvet/layers/softmax"
 	"github.com/openfluke/welvet/layers/swiglu"
-	"github.com/openfluke/welvet/weights"
 )
-
-// applyStoreHebbian updates one weight store from input×gap (Dense out×in layout when shape matches).
-func applyStoreHebbian(s *weights.Store, input, gap []float32, layerRate, mom float32, vel *[]float32) error {
-	if s == nil || len(gap) == 0 {
-		return nil
-	}
-	w, err := s.FlattenF32()
-	if err != nil {
-		return err
-	}
-	outSize, inSize := s.Rows, s.Cols
-	need := outSize*inSize + outSize
-	if vel == nil {
-		tmp := make([]float32, need)
-		vel = &tmp
-	}
-	if len(*vel) != need {
-		*vel = make([]float32, need)
-	}
-	v := *vel
-
-	// Dense-style GEMM outer product when lengths align.
-	if len(input) >= inSize && len(gap) >= outSize {
-		for out := 0; out < outSize; out++ {
-			for in := 0; in < inSize; in++ {
-				wIdx := out*inSize + in
-				if wIdx >= len(w) {
-					continue
-				}
-				delta := layerRate * input[in%len(input)] * gap[out]
-				v[wIdx] = mom*v[wIdx] + (1-mom)*delta
-				w[wIdx] += v[wIdx]
-			}
-			if len(s.Bias) > out {
-				bIdx := outSize*inSize + out
-				delta := layerRate * gap[out]
-				v[bIdx] = mom*v[bIdx] + (1-mom)*delta
-				s.Bias[out] += float64(v[bIdx])
-			}
-		}
-	} else {
-		// Fallback: scale each weight by mean gap (norms / odd shapes).
-		var mean float32
-		for _, g := range gap {
-			mean += g
-		}
-		mean /= float32(len(gap))
-		for i := range w {
-			delta := layerRate * mean * 0.01
-			if i < len(v) {
-				v[i] = mom*v[i] + (1-mom)*delta
-				w[i] += v[i]
-			} else {
-				w[i] += delta
-			}
-		}
-	}
-	return s.SetFromF32(w)
-}
 
 func collectDenseChildren(op any) []*dense.Layer {
 	switch v := op.(type) {
