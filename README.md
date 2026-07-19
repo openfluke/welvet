@@ -473,7 +473,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `w2a/` | Interactive menu: dense + mha + swiglu + rmsnorm + layernorm + cnn1–3 + rnn + lstm + embedding + softmax + sequential + residual + dna + evolution + tween suites; timed matrices, gap census | 🚧 |
+| `w2a/` | Interactive menu: layer suites + dna/evolution/tween with **14 layers × 34 dtypes × 21 quants** full census (~10k cells each); timed matrices, gap census | 🚧 |
 
 ---
 
