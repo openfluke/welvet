@@ -353,6 +353,9 @@ func encodeSoftmax(ls LayerSpec, op *softmax.Layer) (LayerSpec, error) {
 	ls.SoftmaxKind = op.Cfg.Kind.String()
 	ls.SoftmaxRows = op.Cfg.Rows
 	ls.SoftmaxCols = op.Cfg.Cols
+	ls.SoftmaxMask = append([]bool(nil), op.Cfg.Mask...)
+	ls.EntmaxAlpha = op.Cfg.EntmaxAlpha
+	ls.HierarchyLevels = append([]int(nil), op.Cfg.HierarchyLevels...)
 	return ls, nil
 }
 

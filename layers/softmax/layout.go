@@ -42,8 +42,26 @@ func parseLayout[T core.Numeric](cfg Config, input *core.Tensor[T]) (layout, err
 		if lay.rows*lay.cols > lay.n {
 			return lay, fmt.Errorf("softmax: grid %d×%d > n=%d", lay.rows, lay.cols, lay.n)
 		}
+	case KindHierarchical:
+		if len(cfg.HierarchyLevels) > 0 {
+			lay.cols = cfg.HierarchyLevels[len(cfg.HierarchyLevels)-1]
+		} else if cfg.Cols > 0 {
+			lay.cols = cfg.Cols
+		} else {
+			lay.cols = cfg.Dim
+		}
+		lay.rows = cfg.Rows
+		if lay.rows <= 0 {
+			if lay.n%lay.cols != 0 {
+				return lay, fmt.Errorf("softmax: hierarchical n=%d not divisible by cols=%d", lay.n, lay.cols)
+			}
+			lay.rows = lay.n / lay.cols
+		}
+		if lay.rows*lay.cols > lay.n {
+			return lay, fmt.Errorf("softmax: hierarchical %d×%d > n=%d", lay.rows, lay.cols, lay.n)
+		}
 	default:
-		// Standard: Softmax over last axis.
+		// Standard and variants: Softmax over last axis.
 		if len(input.Shape) == 0 {
 			return lay, fmt.Errorf("softmax: scalar input")
 		}

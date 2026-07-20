@@ -67,9 +67,12 @@ type LayerSpec struct {
 	OutputMode  string  `json:"output_mode,omitempty"`
 	CombineMode string  `json:"combine_mode,omitempty"`
 	Temperature float64 `json:"temperature,omitempty"`
-	SoftmaxKind string  `json:"softmax_kind,omitempty"`
-	SoftmaxRows int     `json:"softmax_rows,omitempty"`
-	SoftmaxCols int     `json:"softmax_cols,omitempty"`
+	SoftmaxKind     string  `json:"softmax_kind,omitempty"`
+	SoftmaxRows     int     `json:"softmax_rows,omitempty"`
+	SoftmaxCols     int     `json:"softmax_cols,omitempty"`
+	SoftmaxMask     []bool  `json:"softmax_mask,omitempty"`
+	EntmaxAlpha     float64 `json:"entmax_alpha,omitempty"`
+	HierarchyLevels []int   `json:"hierarchy_levels,omitempty"`
 	Eps         float64 `json:"eps,omitempty"`
 
 	Expand          int `json:"expand,omitempty"`

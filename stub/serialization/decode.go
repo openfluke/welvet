@@ -420,6 +420,9 @@ func placeSoftmax(g *architecture.Grid, ls LayerSpec) error {
 		Dim: ls.InputHeight, SeqLen: ls.SeqLength,
 		Rows: ls.SoftmaxRows, Cols: ls.SoftmaxCols,
 		Temperature: ls.Temperature, Kind: parseSoftmaxKind(ls.SoftmaxKind),
+		Mask: append([]bool(nil), ls.SoftmaxMask...),
+		EntmaxAlpha: ls.EntmaxAlpha,
+		HierarchyLevels: append([]int(nil), ls.HierarchyLevels...),
 	}
 	l, err := softmax.New(cfg)
 	if err != nil {
@@ -635,12 +638,7 @@ func parseMask(s string) mha.MaskKind {
 }
 
 func parseSoftmaxKind(s string) softmax.Kind {
-	switch s {
-	case "grid":
-		return softmax.KindGrid
-	default:
-		return softmax.KindStandard
-	}
+	return softmax.ParseKind(s)
 }
 
 func f32ToF64(v []float32) []float64 {
