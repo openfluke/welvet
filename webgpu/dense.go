@@ -67,6 +67,15 @@ type session struct {
 	f32Cache      map[uintptr]*f32GPU
 	f32CacheBytes uint64
 	f32CacheFull  bool
+
+	// Non-Dense on-device kernels (RMSNorm / LayerNorm / Softmax / SwiGLU fuse).
+	pipeRMSNormFwd    *wgpu.ComputePipeline
+	pipeRMSNormBwd    *wgpu.ComputePipeline
+	pipeRMSNormBwdRed *wgpu.ComputePipeline
+	pipeLayerNormFwd  *wgpu.ComputePipeline
+	pipeSoftmaxFwd    *wgpu.ComputePipeline
+	pipeSoftmaxBwd    *wgpu.ComputePipeline
+	pipeSwiGLUFuse    *wgpu.ComputePipeline
 }
 
 // Available reports whether a real WebGPU device was acquired.
