@@ -12,14 +12,15 @@ import (
 
 // WeightBlob indexes one payload in the blob section (F32 or packed quant).
 type WeightBlob struct {
-	Path   string `json:"path"`
-	Offset uint64 `json:"offset"`
-	Length uint64 `json:"length"`
-	DType  string `json:"dtype"`  // "FLOAT32" for norms/embed
-	Format string `json:"format"` // "none", "Q4_0", "Q4_K", …
-	Rows   int    `json:"rows,omitempty"`
-	Cols   int    `json:"cols,omitempty"`
-	Native bool   `json:"native"`
+	Path   string  `json:"path"`
+	Offset uint64  `json:"offset"`
+	Length uint64  `json:"length"`
+	DType  string  `json:"dtype"`  // "FLOAT32" for norms/embed; also welvet dtype names
+	Format string  `json:"format"` // "none", "Q4_0", "Q4_K", …
+	Rows   int     `json:"rows,omitempty"`
+	Cols   int     `json:"cols,omitempty"`
+	Scale  float32 `json:"scale,omitempty"`
+	Native bool    `json:"native"`
 }
 
 // TransformerDims records decoder hyperparameters.
@@ -65,6 +66,7 @@ type headerDoc struct {
 	FormatVersion uint16           `json:"format_version"`
 	Engine        string           `json:"engine"`
 	Status        string           `json:"status"`
+	Network       json.RawMessage  `json:"network,omitempty"`
 	Transformer   *TransformerSpec `json:"transformer,omitempty"`
 	Blobs         []WeightBlob     `json:"blobs"`
 }

@@ -1,5 +1,6 @@
-// Package seed is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package seed is Welvet seeded init / manifests / invert (loom seed_* + seedrng).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// SeedFrom / RNG / He-init are bit-compatible with loom/poly and seedrng.
+// Dense manifests + infinite (sparse chunk) dense-first. No QAT.
+// Tests live in github.com/openfluke/w2a — not here.
 package seed

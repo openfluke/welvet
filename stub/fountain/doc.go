@@ -1,5 +1,6 @@
-// Package fountain is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package fountain is Luby Transform + neural fountain recover (loom fountain_lt / neural_fountain).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// LT codec is bit-compatible with loom (SeedFrom("loom-fountain-lt", …)).
+// RecoverWeightBlobs simulates a lossy channel. Neural Dense factory is v0.
+// Tests live in github.com/openfluke/w2a — not here.
 package fountain

@@ -1,5 +1,8 @@
-// Package serialization is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package serialization is JSON + ENTITY checkpoint I/O for volumetric grids.
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Storage truth: FormatNone × dtype uses native bytes (LE f32 for float32);
+// block quants persist EncodePackedWire(Packed) — never Flatten→re-Pack as truth.
+// Welvet does not do QAT.
+//
+// Tests live in github.com/openfluke/w2a — not here.
 package serialization

@@ -1,5 +1,5 @@
-// Package memory is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package memory tracks host/GPU weight footprints, sample history, and OS release.
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Env WELVET_MEMORY_HISTORY=1 enables Global recording (loom used LOOM_MEMORY_HISTORY).
+// Tests live in github.com/openfluke/w2a — not here.
 package memory

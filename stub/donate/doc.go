@@ -1,5 +1,5 @@
-// Package donate is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package donate is the networked compute-offload protocol (loom donate_compute_*).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// TCP frames: u32 LE length + JSON. Modes: model_push | local_lm.
+// v0 workers stub-echo infer/prompt. Tests in github.com/openfluke/w2a.
 package donate

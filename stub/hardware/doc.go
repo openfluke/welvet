@@ -1,5 +1,5 @@
-// Package hardware is a Welvet engine subpackage (loom/poly feature rebuild).
+// Package hardware probes host OS/CPU/RAM/GPU/disk/network (loom hardware_*).
 //
-// Contract: CPU tiled + SIMD + WebGPU, native dtype × k-quant forward/backward.
-// No QAT. Tests/docs/CABI live in github.com/openfluke/w2a — not here.
+// Audit() is pure Go /proc+sysfs on Linux; other GOOS use fallbacks.
+// Tests live in github.com/openfluke/w2a — not here.
 package hardware
