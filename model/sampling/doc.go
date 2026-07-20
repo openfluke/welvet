@@ -1,2 +1,3 @@
-// Package sampling provides token selection helpers (greedy ArgMax for v0).
+// Package sampling provides token selection helpers for causal LM decode:
+// greedy ArgMax, TopK+temperature, repetition penalties, and chat-reply hygiene.
 package sampling

@@ -4,10 +4,10 @@
 
 | | |
 |--|--|
-| **Version** | **v0.73** |
-| **Toward v1.0** | **72.75 / 100** pts (see [Version scorecard](#version-scorecard)) |
+| **Version** | **v0.76** |
+| **Toward v1.0** | **76 / 100** pts (see [Version scorecard](#version-scorecard)) |
 
-Not v1 yet — peak-fused kernels, extended layers, model/IO, apps, and stubs still leave points on the table.
+Not v1 yet — peak-fused kernels, extended layers, apps, and stubs still leave points on the table.
 
 | Repo | Role |
 |------|------|
@@ -50,7 +50,7 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v0.73 (pre-v1).** v1.0 ships only when the scorecard hits **100/100** (every board row ✅).
+**Status: v0.76 (pre-v1).** v1.0 ships only when the scorecard hits **100/100** (every board row ✅).
 
 | Legend | Meaning | Pts credit |
 |--------|---------|------------|
@@ -62,7 +62,7 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 
 ## Version scorecard
 
-**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0** (today: `round(72.75)` → **v0.73**).  
+**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0** (today: `round(76)` → **v0.76**).  
 Recompute whenever a board row flips status. Weights sum to **100**.
 
 | # | Section | Wt | How scored today | Earned |
@@ -74,14 +74,14 @@ Recompute whenever a board row flips status. Weights sum to **100**.
 | 5 | **Extended layers** — GDN, ConvT1–3, Mamba, KMeans, Parallel, Metacognition | 7 | all 🚧 (smoke+census, not full matrix) | **3.5** |
 | 6 | **Runtime + architecture** — volumetric grid, forward, backward, training, step | 8 | all ✅ | **8.0** |
 | 7 | **Systems** — dna, evolution, tween, tanhi, telemetry | 5 | all ✅ | **5.0** |
-| 8 | **Model / IO** — tokenizer ✅; entity / transformer / sampling / hf 🚧 | 8 | mixed (see board) | **4.75** |
+| 8 | **Model / IO** — tokenizer, entity, transformer, sampling, hf | 8 | all ✅ | **8.0** |
 | 9 | **Apps** — `octo` model shell | 3 | 🚧 | **1.5** |
 | 10 | **Stubs (non-accel)** — seed, serialization, hardware, memory, fountain, donate | 3 | all 🚧 | **1.5** |
 | 11 | **Accel** — NPU / Metal / QNN plugins | 2 | ⬜ | **0.0** |
 | 12 | **Peak fused / no host ALU** — fused k/IQ `.s`, on-device attn/RoPE, LN bwd GPU, tiled CNN, Softmax/SiLU SIMD, GDN `Exec`, exotic Softmax GPU, … | 14 | ⬜ (partial shaders exist but row stays ⬜ until *every* cell is peak) | **0.0** |
-| | **Total → v1.0** | **100** | | **72.75** |
+| | **Total → v1.0** | **100** | | **76.0** |
 
-**v0.73 readout** (round `72.75` → **73**): foundation + Dense + transformer/CNN timed stacks + runtime/systems carry most of the score. Biggest remaining chunks: **§12 peak fused (14)**, **§5 extended layers (~3.5 left)**, **§8 model/IO (~3.25 left)**, then apps/stubs/accel.
+**v0.76 readout:** foundation + Dense + transformer/CNN timed stacks + runtime/systems + **Model/IO** carry most of the score. Biggest remaining chunks: **§12 peak fused (14)**, **§5 extended layers (~3.5 left)**, then apps/stubs/accel.
 
 Detail tables below still list per-feature ✅/🚧/⬜; they feed honesty, but **only this scorecard sets the version number**.
 
@@ -106,7 +106,7 @@ Status rollup — version points live in the [scorecard](#version-scorecard) onl
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
 | `runtime/forward/` / `backward` / `training` — Dense…Residual + ConvT1–3 + Parallel + KMeans + Mamba + Metacognition + GDN | ✅ |
 | ConvT / Parallel / KMeans / Mamba / Metacognition / GDN — lighter w2a suites (smoke+census, not full 34×20 timed matrix) | 🚧 |
-| Model IO / transformer / entity / tokenizer / hf | 🚧 |
+| Model IO / transformer / entity / tokenizer / hf | ✅ |
 | `apps/octo/` interactive model shell (download / convert / chat) | 🚧 |
 | `stub/` seed · serialization · hardware · memory · fountain · donate | 🚧 |
 | `stub/accel/` (NPU/Metal/QNN plugins) | ⬜ |
@@ -516,16 +516,16 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
 | Nested non-Dense F / Parallel residual graft | ⬜ | ⬜ | ⬜ |
 
-### Model / IO / runtime — scorecard §8 (8 pts)
+### Model / IO — scorecard §8 (8 pts)
 
 | Package | Features | Wt | Status | Earned |
 |---------|----------|---:|:------:|-------:|
 | `model/tokenizer/` | BPE / HF tokenizers | 1.5 | ✅ | 1.5 |
-| `entity/` | `.entity` native checkpoints | 2 | 🚧 | 1.0 |
-| `model/transformer/` | Decoder generate, KV cache, LM head (all quants) | 2.5 | 🚧 | 1.25 |
-| `model/sampling/` | TopK, greedy, penalties | 1 | 🚧 | 0.5 |
-| `model/hf/` | HuggingFace → native packs | 1 | 🚧 | 0.5 |
-| | **§8 subtotal** | **8** | | **4.75** |
+| `model/entity/` | `.entity` Open/Inspect/Write + PackFromHF/ImportFromHF; F32/F16/BF16/F64 LoadBlob | 2 | ✅ | 2.0 |
+| `model/transformer/` | Decoder generate, KV cache, LM head; TopK/temp/greedy GenOptions | 2.5 | ✅ | 2.5 |
+| `model/sampling/` | ArgMax, SampleTopK, penalties, BanIDs, chat sanitize | 1 | ✅ | 1.0 |
+| `model/hf/` | InspectSnapshot + DetectArchitecture + safetensors/MLX loaders | 1 | ✅ | 1.0 |
+| | **§8 subtotal** | **8** | | **8.0** |
 
 ### Systems — scorecard §7 (5 pts)
 

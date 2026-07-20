@@ -13,7 +13,7 @@ import (
 
 const thinkTokenBudget = 256 // max tokens inside <think> before we force-close + answer
 
-// GenOptions controls greedy generation + streaming.
+// GenOptions controls generation + streaming.
 type GenOptions struct {
 	MaxTokens int
 	// Context cancels generation between model steps. A nil context is treated
@@ -25,6 +25,14 @@ type GenOptions struct {
 	PrintMetrics bool
 	// StreamCallback receives each streamed text chunk (after ChatML cleanup).
 	StreamCallback func(piece string)
+	// Temperature scales logits before TopK (≤0 → greedy ArgMax). Default 0 (greedy).
+	Temperature float32
+	// TopK keeps the K highest logits after temperature (≤0 = full vocab; 1 = greedy).
+	TopK int
+	// Deterministic forces ArgMax even when Temperature/TopK would sample.
+	Deterministic bool
+	// BannedTokens are never sampled (host path; hybrid GPU sample skips host masks).
+	BannedTokens []int
 	// RepetitionPenalty > 1 down-weights recent tokens (0 = default 1.15; <0 disables).
 	RepetitionPenalty float32
 	// RepetitionWindow is how many recent tokens the penalty considers (0 = 64).
@@ -36,7 +44,8 @@ type GenOptions struct {
 	EnableThinking bool
 }
 
-// Generate runs greedy decode for one user message (ChatML by default).
+// Generate runs decode for one user message (ChatML by default).
+// Default sampling is greedy (Temperature≤0 / TopK=1 / Deterministic).
 // Streams tokens to stdout unless Silent. Returns metrics like Lucy ENTITY Talk.
 func (m *Model) Generate(
 	encode func(text string, addSpecial bool) []uint32,
@@ -133,10 +142,13 @@ func (m *Model) Generate(
 			return finalizeAssistantReply(stream.String(), opts.EnableThinking && m.SupportsThinking()), metrics, err
 		}
 		banSpecials(logits, eos)
+		if len(opts.BannedTokens) > 0 {
+			sampling.BanIDs(logits, opts.BannedTokens)
+		}
 		if opts.RepetitionPenalty > 1 {
 			sampling.ApplyRepetitionPenalty(logits, allTokens, opts.RepetitionPenalty, opts.RepetitionWindow)
 		}
-		next := sampling.ArgMax(logits)
+		next := sampling.SampleTopK(logits, opts.TopK, opts.Temperature, opts.Deterministic)
 		if _, stop := eos[next]; stop {
 			break
 		}

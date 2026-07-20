@@ -2,9 +2,7 @@ package entity
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -280,56 +278,11 @@ func PackFromHF(snapshotDir, outPath string, opts PackOptions) error {
 		spec.LMHeadPacked = true
 	}
 
-	doc := headerDoc{
-		FormatVersion: FormatVersion,
-		Engine:        "welvet",
-		Status:        "packed",
-		Transformer:   spec,
-		Blobs:         blobs,
-	}
-	headerJSON, err := json.Marshal(doc)
+	payload, err := os.ReadFile(payloadPath)
 	if err != nil {
 		return err
 	}
-	if len(headerJSON) > headerMaxSize {
-		return fmt.Errorf("entity header too large: %d", len(headerJSON))
-	}
-
-	out, err := os.Create(outPath)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	if _, err := out.Write([]byte(Magic)); err != nil {
-		return err
-	}
-	var ver [2]byte
-	binary.LittleEndian.PutUint16(ver[:], FormatVersion)
-	if _, err := out.Write(ver[:]); err != nil {
-		return err
-	}
-	if _, err := out.Write([]byte{0, 0}); err != nil { // flags
-		return err
-	}
-	var hlen [8]byte
-	binary.LittleEndian.PutUint64(hlen[:], uint64(len(headerJSON)))
-	if _, err := out.Write(hlen[:]); err != nil {
-		return err
-	}
-	if _, err := out.Write(headerJSON); err != nil {
-		return err
-	}
-
-	payload, err := os.Open(payloadPath)
-	if err != nil {
-		return err
-	}
-	defer payload.Close()
-	if _, err := io.Copy(out, payload); err != nil {
-		return err
-	}
-	return nil
+	return WriteTransformerFile(outPath, spec, blobs, payload)
 }
 
 type payloadAcc struct {

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 
+	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/quant"
 )
 
@@ -157,7 +159,9 @@ func (ef *File) readHeader() error {
 	return nil
 }
 
-// LoadBlob reads one blob by path into a Float32 slice.
+// LoadBlob reads one FormatNone numeric blob and returns float32 values.
+// Supports FLOAT32 / FLOAT64 / FLOAT16 / BFLOAT16 (and lowercase welvet names).
+// Packed quants use LoadQuantBlob; tokenizer JSON uses LoadTokenizerJSON.
 func (ef *File) LoadBlob(path string) ([]float32, error) {
 	if ef == nil || ef.hdr == nil {
 		return nil, fmt.Errorf("entity: not open")
@@ -166,22 +170,22 @@ func (ef *File) LoadBlob(path string) ([]float32, error) {
 	if err != nil {
 		return nil, err
 	}
+	format := strings.ToLower(strings.TrimSpace(blob.Format))
+	if format != "" && format != "none" {
+		return nil, fmt.Errorf("entity blob %q: packed format %q — use LoadQuantBlob", path, blob.Format)
+	}
+	dtype := strings.ToUpper(strings.TrimSpace(blob.DType))
+	switch dtype {
+	case "PACKED":
+		return nil, fmt.Errorf("entity blob %q: packed payload — use LoadQuantBlob", path)
+	case "JSON":
+		return nil, fmt.Errorf("entity blob %q: JSON payload — use LoadBlobBytes / LoadTokenizerJSON", path)
+	}
 	raw, err := ef.LoadBlobBytes(path)
 	if err != nil {
 		return nil, err
 	}
-	if blob.DType != "FLOAT32" && blob.DType != "" {
-		return nil, fmt.Errorf("entity blob %q: unsupported dtype %s (only FLOAT32 this pass)", path, blob.DType)
-	}
-	if len(raw)%4 != 0 {
-		return nil, fmt.Errorf("entity blob %q: length %d not multiple of 4", path, len(raw))
-	}
-	n := len(raw) / 4
-	out := make([]float32, n)
-	for i := 0; i < n; i++ {
-		out[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4 : i*4+4]))
-	}
-	return out, nil
+	return decodeNumericBlob(path, dtype, raw, blob.Scale)
 }
 
 // LoadBlobBytes reads raw payload bytes for a blob path.
@@ -261,4 +265,67 @@ func PeekMagic(path string) (string, error) {
 		return "", fmt.Errorf("short read")
 	}
 	return string(buf[:]), nil
+}
+
+func decodeNumericBlob(path, dtype string, raw []byte, scale float32) ([]float32, error) {
+	if dtype == "" {
+		dtype = "FLOAT32"
+	}
+	dt := core.ParseDType(dtype)
+	switch strings.ToUpper(dtype) {
+	case "FLOAT32", "F32", "":
+		dt = core.DTypeFloat32
+	case "FLOAT64", "F64", "DOUBLE":
+		dt = core.DTypeFloat64
+	case "FLOAT16", "F16", "FP16":
+		dt = core.DTypeFloat16
+	case "BFLOAT16", "BF16":
+		dt = core.DTypeBFloat16
+	}
+	switch dt {
+	case core.DTypeFloat32:
+		if len(raw)%4 != 0 {
+			return nil, fmt.Errorf("entity blob %q: length %d not multiple of 4", path, len(raw))
+		}
+		n := len(raw) / 4
+		out := make([]float32, n)
+		for i := 0; i < n; i++ {
+			out[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4 : i*4+4]))
+		}
+		return out, nil
+	case core.DTypeFloat64:
+		if len(raw)%8 != 0 {
+			return nil, fmt.Errorf("entity blob %q: length %d not multiple of 8", path, len(raw))
+		}
+		n := len(raw) / 8
+		out := make([]float32, n)
+		for i := 0; i < n; i++ {
+			bits := binary.LittleEndian.Uint64(raw[i*8 : i*8+8])
+			out[i] = float32(math.Float64frombits(bits))
+		}
+		return out, nil
+	case core.DTypeFloat16:
+		if len(raw)%2 != 0 {
+			return nil, fmt.Errorf("entity blob %q: length %d not multiple of 2", path, len(raw))
+		}
+		n := len(raw) / 2
+		out := make([]float32, n)
+		for i := 0; i < n; i++ {
+			out[i] = core.Float16ToFloat32(binary.LittleEndian.Uint16(raw[i*2 : i*2+2]))
+		}
+		return out, nil
+	case core.DTypeBFloat16:
+		if len(raw)%2 != 0 {
+			return nil, fmt.Errorf("entity blob %q: length %d not multiple of 2", path, len(raw))
+		}
+		n := len(raw) / 2
+		out := make([]float32, n)
+		for i := 0; i < n; i++ {
+			out[i] = core.BFloat16ToFloat32(binary.LittleEndian.Uint16(raw[i*2 : i*2+2]))
+		}
+		return out, nil
+	default:
+		_ = scale
+		return nil, fmt.Errorf("entity blob %q: unsupported FormatNone dtype %q (use LoadBlobBytes)", path, dtype)
+	}
 }
