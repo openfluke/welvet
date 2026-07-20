@@ -9,18 +9,25 @@ import (
 	"github.com/openfluke/welvet/layers/cnn1"
 	"github.com/openfluke/welvet/layers/cnn2"
 	"github.com/openfluke/welvet/layers/cnn3"
+	"github.com/openfluke/welvet/layers/convt1"
+	"github.com/openfluke/welvet/layers/convt2"
+	"github.com/openfluke/welvet/layers/convt3"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/layers/embedding"
+	"github.com/openfluke/welvet/layers/gdn"
+	"github.com/openfluke/welvet/layers/kmeans"
 	"github.com/openfluke/welvet/layers/layernorm"
 	"github.com/openfluke/welvet/layers/lstm"
+	"github.com/openfluke/welvet/layers/mamba"
+	"github.com/openfluke/welvet/layers/metacognition"
 	"github.com/openfluke/welvet/layers/mha"
+	"github.com/openfluke/welvet/layers/parallel"
 	"github.com/openfluke/welvet/layers/residual"
 	"github.com/openfluke/welvet/layers/rmsnorm"
 	"github.com/openfluke/welvet/layers/rnn"
 	"github.com/openfluke/welvet/layers/sequential"
 	"github.com/openfluke/welvet/layers/softmax"
 	"github.com/openfluke/welvet/layers/swiglu"
-	"github.com/openfluke/welvet/layers/gdn"
 	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/weights"
 )
@@ -180,6 +187,12 @@ func CollectStores(op any) []*weights.Store {
 		return storesFromDense(v.Proj)
 	case *cnn3.Layer:
 		return storesFromDense(v.Proj)
+	case *convt1.Layer:
+		return storesFromDense(v.Proj)
+	case *convt2.Layer:
+		return storesFromDense(v.Proj)
+	case *convt3.Layer:
+		return storesFromDense(v.Proj)
 	case *rnn.Layer:
 		var out []*weights.Store
 		out = append(out, storesFromDense(v.IH)...)
@@ -203,6 +216,22 @@ func CollectStores(op any) []*weights.Store {
 			out = append(out, storesFromDense(ch)...)
 		}
 		return out
+	case *parallel.Layer:
+		var out []*weights.Store
+		for _, ch := range v.Branches {
+			out = append(out, storesFromDense(ch)...)
+		}
+		out = append(out, storesFromDense(v.Gate)...)
+		return out
+	case *kmeans.Layer:
+		return storesFromDense(v.Centers)
+	case *mamba.Layer:
+		var out []*weights.Store
+		out = append(out, storesFromDense(v.InProj)...)
+		out = append(out, storesFromDense(v.OutProj)...)
+		return out
+	case *metacognition.Layer:
+		return storesFromDense(v.Observed)
 	case *softmax.Layer:
 		return nil
 	case *gdn.Layer:

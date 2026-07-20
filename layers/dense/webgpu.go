@@ -582,10 +582,7 @@ func matVecBinaryResident(b *quant.Blob, x, y []float32, batch, in, out int) err
 	}
 	// Tiny mats: host is faster than create/dispatch/readback.
 	if len(b.Raw) < 512<<10 {
-		if batch != 1 {
-			return fmt.Errorf("dense: binary tiny host path needs batch=1")
-		}
-		return MatVecPackedBlob(b, x, y)
+		return matVecPackedBatch(b, x, y, batch, in, out)
 	}
 	scales, words, g128, ok := BinaryBlobStaging(b)
 	if !ok {
@@ -598,10 +595,7 @@ func matVecBinaryResident(b *quant.Blob, x, y []float32, batch, in, out int) err
 	if !webgpu.IsBinaryVRAMFull(err) {
 		return err
 	}
-	if batch != 1 {
-		return fmt.Errorf("dense: binary VRAM full and batch!=1")
-	}
-	return MatVecPackedBlob(b, x, y)
+	return matVecPackedBatch(b, x, y, batch, in, out)
 }
 
 // matVecAffineResident runs AffinePacked GEMV on device with sticky (cached) weights,
@@ -613,10 +607,7 @@ func matVecAffineResident(b *quant.Blob, x, y []float32, batch, in, out int) err
 	}
 	// Tiny mats: host is faster than create/dispatch/readback.
 	if len(b.Raw) < 512<<10 {
-		if batch != 1 {
-			return fmt.Errorf("dense: affine tiny host path needs batch=1")
-		}
-		return MatVecPackedBlob(b, x, y)
+		return matVecPackedBatch(b, x, y, batch, in, out)
 	}
 	scales, biases, words, group, ok := AffineBlobStaging(b)
 	if !ok {
@@ -629,10 +620,17 @@ func matVecAffineResident(b *quant.Blob, x, y []float32, batch, in, out int) err
 	if !webgpu.IsAffineVRAMFull(err) {
 		return err
 	}
-	if batch != 1 {
-		return fmt.Errorf("dense: affine VRAM full and batch!=1")
+	return matVecPackedBatch(b, x, y, batch, in, out)
+}
+
+// matVecPackedBatch runs MatVecPackedBlob once per batch row (host path).
+func matVecPackedBatch(b *quant.Blob, x, y []float32, batch, in, out int) error {
+	for bat := 0; bat < batch; bat++ {
+		if err := MatVecPackedBlob(b, x[bat*in:(bat+1)*in], y[bat*out:(bat+1)*out]); err != nil {
+			return err
+		}
 	}
-	return MatVecPackedBlob(b, x, y)
+	return nil
 }
 
 // BinaryBlobStaging prepares host scales/words for BinaryPacked WebGPU upload.
