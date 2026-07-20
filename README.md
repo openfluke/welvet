@@ -1,6 +1,13 @@
 # Welvet
 
-**Welvet** is the AI engine: layers, numerical types, quants / k-quants, and backends (CPU tiled · Plan 9 SIMD · WebGPU). **Pre-v1** — the full dtype×quant×backend matrix is not green everywhere; see honesty notes below.
+**Welvet** is the AI engine: layers, numerical types, quants / k-quants, and backends (CPU tiled · Plan 9 SIMD · WebGPU).
+
+| | |
+|--|--|
+| **Version** | **v0.73** |
+| **Toward v1.0** | **72.75 / 100** pts (see [Version scorecard](#version-scorecard)) |
+
+Not v1 yet — peak-fused kernels, extended layers, model/IO, apps, and stubs still leave points on the table.
 
 | Repo | Role |
 |------|------|
@@ -43,17 +50,46 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: pre-v1.** v1 ships only when every row below is ✅.
+**Status: v0.73 (pre-v1).** v1.0 ships only when the scorecard hits **100/100** (every board row ✅).
 
-| Legend | Meaning |
-|--------|---------|
-| ✅ | **Implemented** — layer/runtime/stub API works; w2a suite passes (full timed matrix for transformer stack; smoke+census for ConvT/Parallel/Mamba/etc.) |
-| 🚧 | **Partial** — works but lighter coverage, inflate-not-fused SIMD, or host ALU on GPU/SIMD path |
-| ⬜ | **Not started** — stub `doc.go` only, hard-error everywhere, or peak fused kernel explicitly missing |
+| Legend | Meaning | Pts credit |
+|--------|---------|------------|
+| ✅ | **Implemented** — layer/runtime/stub API works; w2a suite passes (full timed matrix for transformer stack; smoke+census for ConvT/Parallel/Mamba/etc.) | **100%** of row weight |
+| 🚧 | **Partial** — works but lighter coverage, inflate-not-fused SIMD, or host ALU on GPU/SIMD path | **50%** of row weight |
+| ⬜ | **Not started** — stub `doc.go` only, hard-error everywhere, or peak fused kernel explicitly missing | **0%** |
+
+---
+
+## Version scorecard
+
+**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0** (today: `round(72.75)` → **v0.73**).  
+Recompute whenever a board row flips status. Weights sum to **100**.
+
+| # | Section | Wt | How scored today | Earned |
+|--:|---------|---:|------------------|-------:|
+| 1 | **Foundation** — layout, rules, `core`, `weights`, `quant`, `simd`, `webgpu` base, `tiling` | 15 | all ✅ | **15.0** |
+| 2 | **Dense MatVec microkernel** — FormatNone×34 + quants × backends, train/grad; k/IQ/Affine SIMD still inflate | 15 | ✅ majority; k/IQ/Affine SIMD 🚧 (~3 wt) | **13.5** |
+| 3 | **Transformer stack** — MHA, SwiGLU, RMSNorm, LayerNorm, Softmax, Embedding, Sequential, Residual, seqmix | 14 | all ✅ (suite-complete; some ALU still host — counted in §12) | **14.0** |
+| 4 | **CNN / RNN / LSTM** — full timed 34×20×3 matrices; tiled-conv / recurrence shaders in §12 | 6 | all ✅ | **6.0** |
+| 5 | **Extended layers** — GDN, ConvT1–3, Mamba, KMeans, Parallel, Metacognition | 7 | all 🚧 (smoke+census, not full matrix) | **3.5** |
+| 6 | **Runtime + architecture** — volumetric grid, forward, backward, training, step | 8 | all ✅ | **8.0** |
+| 7 | **Systems** — dna, evolution, tween, tanhi, telemetry | 5 | all ✅ | **5.0** |
+| 8 | **Model / IO** — tokenizer ✅; entity / transformer / sampling / hf 🚧 | 8 | mixed (see board) | **4.75** |
+| 9 | **Apps** — `octo` model shell | 3 | 🚧 | **1.5** |
+| 10 | **Stubs (non-accel)** — seed, serialization, hardware, memory, fountain, donate | 3 | all 🚧 | **1.5** |
+| 11 | **Accel** — NPU / Metal / QNN plugins | 2 | ⬜ | **0.0** |
+| 12 | **Peak fused / no host ALU** — fused k/IQ `.s`, on-device attn/RoPE, LN bwd GPU, tiled CNN, Softmax/SiLU SIMD, GDN `Exec`, exotic Softmax GPU, … | 14 | ⬜ (partial shaders exist but row stays ⬜ until *every* cell is peak) | **0.0** |
+| | **Total → v1.0** | **100** | | **72.75** |
+
+**v0.73 readout** (round `72.75` → **73**): foundation + Dense + transformer/CNN timed stacks + runtime/systems carry most of the score. Biggest remaining chunks: **§12 peak fused (14)**, **§5 extended layers (~3.5 left)**, **§8 model/IO (~3.25 left)**, then apps/stubs/accel.
+
+Detail tables below still list per-feature ✅/🚧/⬜; they feed honesty, but **only this scorecard sets the version number**.
 
 ---
 
 ## Snapshot (honest)
+
+Status rollup — version points live in the [scorecard](#version-scorecard) only.
 
 | Area | Status |
 |------|--------|
@@ -103,7 +139,7 @@ cd w2a && go test ./tests/residual -v
 3. **Nothing hardcoded to float32** — APIs are `Tensor[T]` / generics. Host wires are `WireF32` / `WireF64` / `WireI8` via `weights.SelectWire` (float64 & integers are **not** forced through f32). WebGPU WGSL ALU is f32 on typical adapters — narrowing happens only at the device boundary.
 4. **No QAT** — `DType` + `QuantFormat` are storage truth.
 5. **One poly feature → one folder.**
-6. **v1 = checklist all ✅.**
+6. **v1.0 = scorecard 100/100** (every board row ✅).
 
 ---
 
@@ -216,70 +252,61 @@ Legend for this table:
 
 ## Package feature board
 
-### Core / infra
+Row **Wt** is the share of that package inside its scorecard section (not additive across the whole README — see [Version scorecard](#version-scorecard) for the 100-pt total).
 
-| Package | Features | Status |
-|---------|----------|:------:|
-| `core/` | 34 DTypes, `Numeric`, `Tensor[T]`, activations, Layer/Network, Backend enum | ✅ |
-| `weights/` | FormatNone pack/stream MatVec (f64 acc), SelectWire F32/F64/I8, DecodeRow(F64) | ✅ |
-| `quant/` | All 20 formats Pack/Unpack/MatVec/MatVecT | ✅ |
-| `simd/` | DotTile, DotI8/U8, DotQ4_0, Saxpy, BitNet helpers (amd64/arm64 `.s`) | ✅ |
-| `webgpu/` | Dense GEMV/GEMVT/DenseDW + `norm` / `softmax` / `swiglu_fuse` shaders | ✅ |
-| `tiling/` | Tile size / SC / MC / GPU workgroup caps | ✅ |
-| `layers/dense/` | Shared MatVec microkernel; FormatNone×34 + quants × 3 backends; grad verify | ✅ |
-| `layers/mha/` | Causal+RoPE+GQA; Q/K/V/O via Dense; attn ALU host; full w2a timed matrix | ✅ |
-| `layers/swiglu/` | Gate/Up/Down via Dense; WebGPU SiLU⊙ fuse (fwd); full w2a timed matrix | ✅ |
-| `layers/rmsnorm/` | Native RMS; WebGPU fwd+bwd shaders; full w2a timed matrix | ✅ |
-| `layers/layernorm/` | Native LN; WebGPU fwd / bwd host; full w2a timed matrix | ✅ |
-| `layers/cnn1/` | Conv1d im2col→Dense; full w2a timed matrix; tiled conv shader ⬜ | ✅ |
-| `layers/cnn2/` | Conv2d im2col→Dense; full w2a timed matrix; tiled conv shader ⬜ | ✅ |
-| `layers/cnn3/` | Conv3d im2col→Dense; full w2a timed matrix; tiled conv shader ⬜ | ✅ |
-| `layers/rnn/` | Vanilla tanh RNN; IH/HH via Dense; full w2a timed matrix | ✅ |
-| `layers/lstm/` | LSTM gates via Dense; full w2a timed matrix | ✅ |
-| `layers/embedding/` | Token gather/scatter; full w2a timed matrix; fused GPU gather ⬜ | ✅ |
-| `layers/softmax/` | All kinds on CPU/SIMD; std family on WebGPU; full w2a timed matrix | ✅ |
-| `layers/sequential/` | Dense→Dense Sequential compose; full w2a timed matrix | ✅ |
-| `layers/residual/` | Residual y=F(x)+x (Dense F); full w2a timed matrix; heterogeneous F ⬜ | ✅ |
-| `layers/gdn/` | Gated DeltaNet; runtime+SGD+w2a suite; truncated BPTT; no `Core.Exec` grid dispatch | 🚧 |
-| `layers/convt1/` | Transposed conv1d; runtime wired; smoke+census suite | 🚧 |
-| `layers/convt2/` | Transposed conv2d; runtime wired; smoke+census suite | 🚧 |
-| `layers/convt3/` | Transposed conv3d; runtime wired; smoke+census suite | 🚧 |
-| `layers/mamba/` | SSM selective scan; runtime wired; smoke+census suite | 🚧 |
-| `layers/kmeans/` | Soft k-means; runtime wired; smoke+census suite | 🚧 |
-| `layers/parallel/` | MoE concat/add/avg/filter; runtime wired; smoke+census suite | 🚧 |
-| `layers/metacognition/` | Observed Dense + rules; runtime wired; smoke+census suite | 🚧 |
-| `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | ✅ |
-| `runtime/forward/` | Grid walk; Dense…Residual + ConvT + Parallel + KMeans + Mamba + Metacognition + GDN | ✅ |
-| `runtime/backward/` | Reverse tape; same layer set | ✅ |
-| `runtime/training/` | MSE + SGD; ApplyGradSGD for same layer set | ✅ |
+### Core / infra — scorecard §1 (15 pts) + Dense §2 (15 pts) share
+
+| Package | Features | Wt | Status |
+|---------|----------|---:|:------:|
+| `core/` | 34 DTypes, `Numeric`, `Tensor[T]`, activations, Layer/Network, Backend enum | 3 | ✅ |
+| `weights/` | FormatNone pack/stream MatVec (f64 acc), SelectWire F32/F64/I8, DecodeRow(F64) | 3 | ✅ |
+| `quant/` | All 20 formats Pack/Unpack/MatVec/MatVecT | 3 | ✅ |
+| `simd/` | DotTile, DotI8/U8, DotQ4_0, Saxpy, BitNet helpers (amd64/arm64 `.s`) | 3 | ✅ |
+| `webgpu/` | Dense GEMV/GEMVT/DenseDW + `norm` / `softmax` / `swiglu_fuse` shaders | 2 | ✅ |
+| `tiling/` | Tile size / SC / MC / GPU workgroup caps | 1 | ✅ |
+| `layers/dense/` | Shared MatVec microkernel; FormatNone×34 + quants × 3 backends; grad verify | 15 | ✅† |
+
+† Dense package is ✅ for API/suites; **3 of the 15 Dense pts** stay 🚧 until k/IQ/Affine SIMD is true fused `.s` (scorecard §2 → 13.5 earned).
+
+### Runtime / architecture — scorecard §6 (8 pts)
+
+| Package | Features | Wt | Status |
+|---------|----------|---:|:------:|
+| `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | 2 | ✅ |
+| `runtime/forward/` | Grid walk; Dense…Residual + ConvT + Parallel + KMeans + Mamba + Metacognition + GDN | 2 | ✅ |
+| `runtime/backward/` | Reverse tape; same layer set | 2 | ✅ |
+| `runtime/training/` | MSE + SGD; ApplyGradSGD for same layer set | 1 | ✅ |
+| `runtime/step/` | Discrete-time volumetric step mesh — Forward/Backward/ApplyTween; all Ops × dtype × quant × CPU/SIMD | 1 | ✅ |
 
 ### Layers (transformer stack = full w2a timed matrix; others = smoke+census)
 
-| Package | Features | Status |
-|---------|----------|:------:|
-| `layers/dense/` | Shared MatVec microkernel; FormatNone×34 + quants × 3 backends; packed SIMD/GPU; grad verify | ✅ |
-| `layers/mha/` | Policy Mask/Pos/Mode; Dense proj coverage; attn ALU host; full timed matrix + train grids | ✅ |
-| `layers/swiglu/` | Gate/Up/Down via Dense; WebGPU SiLU⊙ fuse (fwd); full timed matrix + train grids | ✅ |
-| `layers/seqmix/` | Sequence-mixer kinds (attention / SSM / linear / conv) — contract only | ✅ |
-| `layers/rmsnorm/` | Native RMS; WebGPU fwd+bwd; full timed matrix + train grids | ✅ |
-| `layers/layernorm/` | Native LN; WebGPU fwd / bwd host; full timed matrix + train grids | ✅ |
-| `layers/cnn1/` | Conv1d im2col→Dense; full timed matrix; tiled conv shader ⬜ | ✅ |
-| `layers/cnn2/` | Conv2d im2col→Dense; full timed matrix; tiled conv shader ⬜ | ✅ |
-| `layers/cnn3/` | Conv3d im2col→Dense; full timed matrix; tiled conv shader ⬜ | ✅ |
-| `layers/rnn/` | Vanilla tanh RNN; IH/HH via Dense; full timed matrix + train grids | ✅ |
-| `layers/lstm/` | LSTM i/f/g/o via Dense; full timed matrix + train grids | ✅ |
-| `layers/embedding/` | Token gather/scatter; full timed matrix + train grids | ✅ |
-| `layers/softmax/` | All kinds CPU/SIMD; std/grid/hierarchical WebGPU; full timed matrix | ✅ |
-| `layers/sequential/` | Dense→Dense Sequential compose; full timed matrix + train grids | ✅ |
-| `layers/residual/` | Residual y=F(x)+x (Dense F); full timed matrix; heterogeneous F ⬜ | ✅ |
-| `layers/gdn/` | Gated DeltaNet; runtime+SGD; w2a suite; truncated BPTT; grid `Exec` ⬜ | 🚧 |
-| `layers/mamba/` | SSM selective scan; runtime wired; smoke+census w2a | 🚧 |
-| `layers/convt1/` | Transposed conv1d; runtime wired; smoke+census w2a | 🚧 |
-| `layers/convt2/` | Transposed conv2d; runtime wired; smoke+census w2a | 🚧 |
-| `layers/convt3/` | Transposed conv3d; runtime wired; smoke+census w2a | 🚧 |
-| `layers/kmeans/` | Soft k-means; runtime wired; smoke+census w2a | 🚧 |
-| `layers/parallel/` | MoE concat/add/avg/filter; runtime wired; smoke+census w2a | 🚧 |
-| `layers/metacognition/` | Observed Dense + rules; runtime wired; smoke+census w2a | 🚧 |
+**§3 Transformer stack (14 pts)** · **§4 CNN/RNN/LSTM (6 pts)** · **§5 Extended (7 pts)**
+
+| Package | Features | Wt | Section | Status |
+|---------|----------|---:|---------|:------:|
+| `layers/dense/` | Shared MatVec microkernel; FormatNone×34 + quants × 3 backends; packed SIMD/GPU; grad verify | — | §2 | ✅ |
+| `layers/mha/` | Policy Mask/Pos/Mode; Dense proj coverage; attn ALU host; full timed matrix + train grids | 3 | §3 | ✅ |
+| `layers/swiglu/` | Gate/Up/Down via Dense; WebGPU SiLU⊙ fuse (fwd); full timed matrix + train grids | 2 | §3 | ✅ |
+| `layers/seqmix/` | Sequence-mixer kinds (attention / SSM / linear / conv) — contract only | 1 | §3 | ✅ |
+| `layers/rmsnorm/` | Native RMS; WebGPU fwd+bwd; full timed matrix + train grids | 2 | §3 | ✅ |
+| `layers/layernorm/` | Native LN; WebGPU fwd / bwd host; full timed matrix + train grids | 2 | §3 | ✅ |
+| `layers/embedding/` | Token gather/scatter; full timed matrix + train grids | 1 | §3 | ✅ |
+| `layers/softmax/` | All kinds CPU/SIMD; std/grid/hierarchical WebGPU; full timed matrix | 1 | §3 | ✅ |
+| `layers/sequential/` | Dense→Dense Sequential compose; full timed matrix + train grids | 1 | §3 | ✅ |
+| `layers/residual/` | Residual y=F(x)+x (Dense F); full timed matrix; heterogeneous F ⬜ | 1 | §3 | ✅ |
+| `layers/cnn1/` | Conv1d im2col→Dense; full timed matrix; tiled conv shader ⬜ | 1 | §4 | ✅ |
+| `layers/cnn2/` | Conv2d im2col→Dense; full timed matrix; tiled conv shader ⬜ | 1 | §4 | ✅ |
+| `layers/cnn3/` | Conv3d im2col→Dense; full timed matrix; tiled conv shader ⬜ | 1 | §4 | ✅ |
+| `layers/rnn/` | Vanilla tanh RNN; IH/HH via Dense; full timed matrix + train grids | 1.5 | §4 | ✅ |
+| `layers/lstm/` | LSTM i/f/g/o via Dense; full timed matrix + train grids | 1.5 | §4 | ✅ |
+| `layers/gdn/` | Gated DeltaNet; runtime+SGD; w2a suite; truncated BPTT; grid `Exec` ⬜ | 1.5 | §5 | 🚧 |
+| `layers/mamba/` | SSM selective scan; runtime wired; smoke+census w2a | 1 | §5 | 🚧 |
+| `layers/convt1/` | Transposed conv1d; runtime wired; smoke+census w2a | 0.7 | §5 | 🚧 |
+| `layers/convt2/` | Transposed conv2d; runtime wired; smoke+census w2a | 0.7 | §5 | 🚧 |
+| `layers/convt3/` | Transposed conv3d; runtime wired; smoke+census w2a | 0.6 | §5 | 🚧 |
+| `layers/kmeans/` | Soft k-means; runtime wired; smoke+census w2a | 0.5 | §5 | 🚧 |
+| `layers/parallel/` | MoE concat/add/avg/filter; runtime wired; smoke+census w2a | 1 | §5 | 🚧 |
+| `layers/metacognition/` | Observed Dense + rules; runtime wired; smoke+census w2a | 1 | §5 | 🚧 |
 
 ### Dense detail
 
@@ -489,35 +516,42 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
 | Nested non-Dense F / Parallel residual graft | ⬜ | ⬜ | ⬜ |
 
-### Model / IO / runtime
+### Model / IO / runtime — scorecard §8 (8 pts)
 
-| Package | Features | Status |
-|---------|----------|:------:|
-| `entity/` | `.entity` native checkpoints | 🚧 |
-| `model/transformer/` | Decoder generate, KV cache, LM head (all quants) | 🚧 |
-| `model/sampling/` | TopK, greedy, penalties | 🚧 |
-| `model/tokenizer/` | BPE / HF tokenizers | ✅ |
-| `model/hf/` | HuggingFace → native packs | 🚧 |
-| `stub/seed/` | Seed manifests / infinite init / He / mixed grids | 🚧 |
-| `stub/serialization/` | ENTITY encode/decode / native I/O | 🚧 |
+| Package | Features | Wt | Status | Earned |
+|---------|----------|---:|:------:|-------:|
+| `model/tokenizer/` | BPE / HF tokenizers | 1.5 | ✅ | 1.5 |
+| `entity/` | `.entity` native checkpoints | 2 | 🚧 | 1.0 |
+| `model/transformer/` | Decoder generate, KV cache, LM head (all quants) | 2.5 | 🚧 | 1.25 |
+| `model/sampling/` | TopK, greedy, penalties | 1 | 🚧 | 0.5 |
+| `model/hf/` | HuggingFace → native packs | 1 | 🚧 | 0.5 |
+| | **§8 subtotal** | **8** | | **4.75** |
 
-### Systems
+### Systems — scorecard §7 (5 pts)
 
-| Package | Features | Status |
-|---------|----------|:------:|
-| `stub/accel/` | Intel NPU / Qualcomm / Apple Metal / … | ⬜ |
-| `stub/hardware/` | Host probes / audit | 🚧 |
-| `stub/memory/` | Footprint / VRAM accounting | 🚧 |
-| `stub/fountain/` | Fountain codes + neural recover | 🚧 |
-| `stub/donate/` | LAN donate-compute protocol (infer stub-echo) | 🚧 |
-| `systems/tanhi/` | UDP HUD telemetry — all implemented Ops × dtype/quant via FlattenOp | ✅ |
-| `systems/dna/` | Topology DNA — all implemented Ops + GDN blobs; FlattenF32 across dtype×quant | ✅ |
-| `systems/evolution/` | DNA splice + NEAT — clones all implemented Ops; dtype/quant preserved via SetFromF32 | ✅ |
-| `systems/telemetry/` | Structural blueprint — all implemented Ops (+ meta estimates) | ✅ |
-| `systems/tween/` | Target prop — BackendSIMD DotTile/Saxpy chain-rule; Hebbian Saxpy + DotTile budgets; all weighted Ops | ✅ |
-| `runtime/step/` | Discrete-time volumetric step mesh — Forward/Backward/ApplyTween; all Ops × dtype × quant × CPU/SIMD | ✅ |
+| Package | Features | Wt | Status |
+|---------|----------|---:|:------:|
+| `systems/dna/` | Topology DNA — all implemented Ops + GDN blobs; FlattenF32 across dtype×quant | 1 | ✅ |
+| `systems/evolution/` | DNA splice + NEAT — clones all implemented Ops; dtype/quant preserved via SetFromF32 | 1 | ✅ |
+| `systems/tween/` | Target prop — BackendSIMD DotTile/Saxpy chain-rule; Hebbian Saxpy + DotTile budgets; all weighted Ops | 1 | ✅ |
+| `systems/tanhi/` | UDP HUD telemetry — all implemented Ops × dtype/quant via FlattenOp | 1 | ✅ |
+| `systems/telemetry/` | Structural blueprint — all implemented Ops (+ meta estimates) | 1 | ✅ |
 
-### Harness (not engine)
+### Stubs / apps / peak — scorecard §9–§12
+
+| Package | Features | Wt | Section | Status | Earned |
+|---------|----------|---:|---------|:------:|-------:|
+| `apps/octo/` | Interactive model shell (download / convert / chat) | 3 | §9 | 🚧 | 1.5 |
+| `stub/seed/` | Seed manifests / infinite init / He / mixed grids | 0.5 | §10 | 🚧 | 0.25 |
+| `stub/serialization/` | ENTITY encode/decode / native I/O | 0.5 | §10 | 🚧 | 0.25 |
+| `stub/hardware/` | Host probes / audit | 0.5 | §10 | 🚧 | 0.25 |
+| `stub/memory/` | Footprint / VRAM accounting | 0.5 | §10 | 🚧 | 0.25 |
+| `stub/fountain/` | Fountain codes + neural recover | 0.5 | §10 | 🚧 | 0.25 |
+| `stub/donate/` | LAN donate-compute protocol (infer stub-echo) | 0.5 | §10 | 🚧 | 0.25 |
+| `stub/accel/` | Intel NPU / Qualcomm / Apple Metal / … | 2 | §11 | ⬜ | 0.0 |
+| *(peak fused / no host ALU)* | Fused k/IQ `.s`, attn/RoPE GPU, LN bwd GPU, tiled CNN, Softmax/SiLU SIMD, GDN `Exec`, … | 14 | §12 | ⬜ | 0.0 |
+
+### Harness (not engine — does not count toward v1 pts)
 
 | Package | Features | Status |
 |---------|----------|:------:|
@@ -587,4 +621,4 @@ Welvet is the fabric where **any AI op** can run on **any quant** at **any preci
 
 If something is hard, we **implement it** or **fail loudly**. We do not paper over gaps.
 
-**v1 ships when this README’s feature board is all ✅.**
+**v1.0 ships when the [Version scorecard](#version-scorecard) hits 100/100.**
