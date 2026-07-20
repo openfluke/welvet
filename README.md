@@ -1,6 +1,6 @@
 # Welvet
 
-**Welvet** is the AI engine: every layer, every numerical type, every quant / k-quant, every backend — native execution, no compromises.
+**Welvet** is the AI engine: layers, numerical types, quants / k-quants, and backends (CPU tiled · Plan 9 SIMD · WebGPU). **Pre-v1** — the full dtype×quant×backend matrix is not green everywhere; see honesty notes below.
 
 | Repo | Role |
 |------|------|
@@ -9,6 +9,26 @@
 | **[openfluke/octo](apps/octo/)** (`apps/octo/`) | Model shell — HF download, convert→ENTITY, quantize, run (Lucy successor) |
 
 `loom/poly` is legacy reference only. Welvet is the rewrite.
+
+### Architecture: Dense is the shared MatVec microkernel
+
+Most transformer / CNN FLOPs are **weights × activations**. Welvet keeps **one** Dense stack for that (FormatNone×34 + 20 quants × CPU/SIMD/WebGPU). Layers whose expensive bit is GEMV **reuse** it; layer-specific ALU stays local.
+
+| Kind | Examples | What runs where |
+|------|----------|-----------------|
+| **Native layer math** | Dense, RMSNorm, LayerNorm, Softmax, Embedding | Own fwd/bwd; norms/softmax have real WebGPU shaders; SIMD may still be DotTile+host scale or host ALU |
+| **Composite → Dense projs** | MHA (Q/K/V/O), SwiGLU (Gate/Up/Down), RNN/LSTM/Residual/Sequential | Projections = Dense children (`syncProjExec`); attn / SiLU / recurrence ALU separate |
+| **im2col → Dense** | CNN1/2/3 | Host im2col, then Dense GEMV (intentional; tiled conv shaders still ⬜) |
+
+**This is intentional**, not a missing abstraction: one MatVec surface means one place for quant bugs, dtype wires, and backend parity. Separate native kernels pay off when the calc is **not** GEMV (fused attention, tiled CNN, Softmax/SiLU SIMD, true fused k-quant asm).
+
+**Not “fully native” yet (honest):**
+- k/IQ/**AffinePacked** SIMD often = **inflate-once F32Cache + DotTile** (not true fused k-quant `.s`)
+- MHA attn, SwiGLU SiLU⊙ (SIMD), Softmax/Embedding under SIMD, CNN im2col = **host ALU**
+- WebGPU device ALU is typically **f32** at the boundary (storage dtype narrows on upload)
+- Suite honesty: `w2a/suites.StampBackendNote` / `AffinePackable` — no silent host counted as “WebGPU/SIMD done”
+
+Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolist.md).
 
 ### Tree layout
 
@@ -43,9 +63,9 @@
 | `weights` FormatNone × 34 stream pack/MatVec | ✅ |
 | `quant` Pack/Unpack/MatVec all 20 formats (CPU) | ✅ |
 | `simd` Plan 9 kernels linked (amd64/arm64) | ✅ |
-| webgpu | Real device; all FormatNone + all quant fwd; GEMVT; DenseDW | ✅ |
+| webgpu | Dense GEMV family + RMSNorm/Softmax/LayerNorm-fwd/SwiGLU-fuse shaders; no host fake-GPU | 🚧 |
 | **Dense** FormatNone × 34 × CPU/SIMD/WebGPU fwd+bwd | ✅ |
-| **Dense** block-quant × SIMD/WebGPU (all 20 formats on-device fwd+bwd) | ✅ |
+| **Dense** all 20 quants × SIMD/WebGPU (k/IQ/Affine SIMD = inflate+DotTile 🚧) | 🚧 |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
 | `runtime/forward/` / `runtime/backward/` volumetric Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential + Residual walk | ✅ |
 | `runtime/training/` SGD on volumetric tape (Dense + MHA + SwiGLU + RMSNorm + LayerNorm + CNN1–3 + RNN + LSTM + Embedding + Softmax + Sequential + Residual) | ✅ |
@@ -160,24 +180,26 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | Q4_1 | ✅ | ✅ block decode+DotTile | ✅ on-device Q4_1 |
 | Q5_0 | ✅ | ✅ block decode+DotTile | ✅ on-device Q5 |
 | Q5_1 | ✅ | ✅ block decode+DotTile | ✅ on-device Q5 |
-| Q2_K | ✅ | ✅ group decode+DotTile | ✅ on-device k GEMV |
-| Q3_K | ✅ | ✅ group decode+DotTile | ✅ on-device k GEMV |
-| Q4_K | ✅ | ✅ group decode+DotTile | ✅ on-device k GEMV |
-| Q5_K | ✅ | ✅ group decode+DotTile | ✅ on-device k GEMV |
-| Q6_K | ✅ | ✅ group decode+DotTile | ✅ on-device k GEMV |
-| IQ1_S | ✅ | ✅ group decode+DotTile | ✅ on-device IQ GEMV |
-| IQ2_XXS | ✅ | ✅ group decode+DotTile | ✅ on-device IQ GEMV |
-| IQ2_XS | ✅ | ✅ group decode+DotTile | ✅ on-device IQ GEMV |
-| IQ3_XXS | ✅ | ✅ group decode+DotTile | ✅ on-device IQ GEMV |
-| IQ3_S | ✅ | ✅ group decode+DotTile | ✅ on-device IQ GEMV |
-| IQ4_NL | ✅ | ✅ group decode+DotTile | ✅ on-device IQ GEMV |
-| IQ4_XS | ✅ | ✅ group decode+DotTile | ✅ on-device IQ GEMV |
+| Q2_K | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device k GEMV |
+| Q3_K | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device k GEMV |
+| Q4_K | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device k GEMV |
+| Q5_K | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device k GEMV |
+| Q6_K | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device k GEMV |
+| IQ1_S | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
+| IQ2_XXS | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
+| IQ2_XS | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
+| IQ3_XXS | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
+| IQ3_S | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
+| IQ4_NL | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
+| IQ4_XS | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
 | TernaryPacked | ✅ | ✅ BitNet code-dot SIMD | ✅ on-device ternary GEMV |
 | BinaryPacked | ✅ | ✅ bit-fused DotBinaryWord | ✅ on-device binary GEMV |
-| AffinePacked | ✅ | ✅ inflate-once F32Cache + DotTile | ✅ resident Affine GEMV |
+| AffinePacked | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ resident Affine GEMV |
 
-✅ for a quant×backend cell = **fused** packed kernel (no full-matrix host unpack). 🚧 = functional via f32 SSBO stage.
-AffinePacked SIMD uses once-inflated F32Cache (same schedule as k/IQ); native packed `matVecAffine` is the fallback when inflate is refused (size cap).
+Legend for this table:
+- ✅ = fused / native packed path for that backend (no per-call full-matrix unpack)
+- 🚧 = works via **once-inflated F32Cache + DotTile** (or f32 SSBO stage on GPU) — correct, not peak fused asm
+- AffinePacked SIMD falls back to native `matVecAffine` when inflate is refused (size cap)
 
 ---
 
@@ -201,22 +223,22 @@ AffinePacked SIMD uses once-inflated F32Cache (same schedule as k/IQ); native pa
 | `weights/` | FormatNone pack/stream MatVec (f64 acc), SelectWire F32/F64/I8, DecodeRow(F64) | 🚧 |
 | `quant/` | All 20 formats Pack/Unpack/MatVec/MatVecT | 🚧 |
 | `simd/` | DotTile, DotI8/U8, DotQ4_0, Saxpy, BitNet helpers (amd64/arm64 `.s`) | 🚧 |
-| `webgpu/` | All FormatNone + all quant GEMV/GEMVT + DenseDW | ✅ |
+| `webgpu/` | Dense GEMV/GEMVT/DenseDW + `norm` / `softmax` / `swiglu_fuse` shaders | 🚧 |
 | `tiling/` | Tile size / SC / MC / GPU workgroup caps | ✅ |
-| `layers/dense/` | FormatNone×34 + all quants × 3 backends; packed fwd/bwd; grad verify | ✅ |
-| `layers/mha/` | Causal+RoPE+GQA; Q/K/V/O via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `layers/swiglu/` | SiLU-gated FFN; Gate/Up/Down via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `layers/rmsnorm/` | RMSNorm; γ store FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `layers/layernorm/` | LayerNorm; γ+β stores FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `layers/cnn1/` | Conv1d (im2col→Dense); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `layers/cnn2/` | Conv2d (im2col→Dense); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `layers/cnn3/` | Conv3d (im2col→Dense); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `layers/rnn/` | Vanilla tanh RNN; IH/HH via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `layers/lstm/` | LSTM i/f/g/o via Dense; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `layers/embedding/` | Token gather/scatter; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `layers/softmax/` | Weightless Softmax (last-axis/Grid); ALU × backends; harness dtype/quant axes | ✅ |
-| `layers/sequential/` | Dense→Dense Sequential compose; FormatNone×34 + all quants × 3 backends; train grids | ✅ |
-| `layers/residual/` | Residual y=F(x)+x (Dense F); FormatNone×34 + all quants × 3 backends; train grids | ✅ |
+| `layers/dense/` | Shared MatVec microkernel; FormatNone×34 + quants × 3 backends; grad verify | ✅ |
+| `layers/mha/` | Causal+RoPE+GQA; Q/K/V/O via Dense; attn ALU host; train grids | 🚧 |
+| `layers/swiglu/` | Gate/Up/Down via Dense; SiLU⊙ host (SIMD) / device fuse (WebGPU fwd) | 🚧 |
+| `layers/rmsnorm/` | Native RMS; DotTile SIMD; WebGPU fwd+bwd shaders; γ stores | 🚧 |
+| `layers/layernorm/` | Native LN; DotTile SIMD; WebGPU fwd / bwd host; γ+β stores | 🚧 |
+| `layers/cnn1/` | Conv1d im2col→Dense; no tiled conv shader yet | 🚧 |
+| `layers/cnn2/` | Conv2d im2col→Dense; no tiled conv shader yet | 🚧 |
+| `layers/cnn3/` | Conv3d im2col→Dense; no tiled conv shader yet | 🚧 |
+| `layers/rnn/` | Vanilla tanh RNN; IH/HH via Dense; recurrence ALU host on GPU path | 🚧 |
+| `layers/lstm/` | LSTM gates via Dense; recurrence ALU host on GPU path | 🚧 |
+| `layers/embedding/` | Token gather/scatter; SIMD/WebGPU still host ALU | 🚧 |
+| `layers/softmax/` | Softmax ALU; WebGPU std family; SIMD host | 🚧 |
+| `layers/sequential/` | Dense→Dense Sequential compose | ✅ |
+| `layers/residual/` | Residual y=F(x)+x (Dense F); heterogeneous residual ⬜ | 🚧 |
 | `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | ✅ |
 | `runtime/forward/` | Grid walk z→y→x→l; Dense … Sequential + Residual dispatch | ✅ |
 | `runtime/backward/` | Reverse tape over Dense … Sequential + Residual | ✅ |
@@ -224,24 +246,26 @@ AffinePacked SIMD uses once-inflated F32Cache (same schedule as k/IQ); native pa
 
 ### Layers (each needs CPU + SIMD + WebGPU × all dtype × all quant × fwd/bwd)
 
+Status here = **layer API + suite coverage**. GEMV-shaped work reuses Dense; 🚧 means host ALU or missing fused kernel remains (see Architecture).
+
 | Package | Features | Status |
 |---------|----------|:------:|
-| `layers/dense/` | FormatNone×34 + all quants × 3 backends; packed SIMD/GPU; grad verify | ✅ |
-| `layers/mha/` | Policy Mask/Pos/Mode (decoder, encoder, diffusion, cross, PrefixLM, window, ALiBi); Dense proj coverage | ✅ |
-| `layers/swiglu/` | SiLU-gated FFN; Gate/Up/Down via Dense; FormatNone×34 + all quants × 3 backends | ✅ |
+| `layers/dense/` | Shared MatVec microkernel; FormatNone×34 + quants × 3 backends; packed SIMD/GPU; grad verify | ✅ |
+| `layers/mha/` | Policy Mask/Pos/Mode; Dense proj coverage; attn ALU host; no on-device attn yet | 🚧 |
+| `layers/swiglu/` | Gate/Up/Down via Dense; WebGPU SiLU⊙ fuse (fwd); SIMD SiLU host | 🚧 |
 | `layers/seqmix/` | Sequence-mixer kinds (attention / SSM / linear / conv) — contract only | ✅ |
 | `layers/mamba/` | SSM / Mamba (KindSSM) | ⬜ |
-| `layers/rmsnorm/` | RMSNorm; γ FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `layers/layernorm/` | LayerNorm; γ+β FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `layers/cnn1/` | Conv1d im2col→Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `layers/cnn2/` | Conv2d im2col→Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `layers/cnn3/` | Conv3d im2col→Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `layers/rnn/` | Vanilla tanh RNN; IH/HH via Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `layers/lstm/` | LSTM i/f/g/o via Dense; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `layers/embedding/` | Token gather/scatter; FormatNone×34 + all quants × backends; act sweep; train grids | ✅ |
-| `layers/softmax/` | Weightless Softmax last-axis/Grid + temp; ALU × backends; act sweep; train grids | ✅ |
-| `layers/sequential/` | Dense→Dense Sequential compose; FormatNone×34 + quants × backends; act sweep; train grids | ✅ |
-| `layers/residual/` | Residual y=F(x)+x (Dense F); FormatNone×34 + quants × backends; act sweep; train grids | ✅ |
+| `layers/rmsnorm/` | Native RMS; WebGPU fwd+bwd; SIMD DotTile+host scale | 🚧 |
+| `layers/layernorm/` | Native LN; WebGPU fwd / bwd host; SIMD DotTile+host scale | 🚧 |
+| `layers/cnn1/` | Conv1d im2col→Dense; tiled conv shader ⬜ | 🚧 |
+| `layers/cnn2/` | Conv2d im2col→Dense; tiled conv shader ⬜ | 🚧 |
+| `layers/cnn3/` | Conv3d im2col→Dense; tiled conv shader ⬜ | 🚧 |
+| `layers/rnn/` | Vanilla tanh RNN; IH/HH via Dense; recurrence ALU host on GPU | 🚧 |
+| `layers/lstm/` | LSTM i/f/g/o via Dense; recurrence ALU host on GPU | 🚧 |
+| `layers/embedding/` | Token gather/scatter; SIMD/WebGPU still host ALU | 🚧 |
+| `layers/softmax/` | Softmax ALU; WebGPU std family; SIMD host; exotic kinds host/error | 🚧 |
+| `layers/sequential/` | Dense→Dense Sequential compose | ✅ |
+| `layers/residual/` | Residual y=F(x)+x (Dense F); heterogeneous residual ⬜ | 🚧 |
 | `layers/convt1/` | 1D transposed conv | ⬜ |
 | `layers/convt2/` | 2D transposed conv | ⬜ |
 | `layers/convt3/` | 3D transposed conv | ⬜ |
@@ -255,9 +279,9 @@ AffinePacked SIMD uses once-inflated F32Cache (same schedule as k/IQ); native pa
 |---------|:---:|:----:|:------:|
 | FormatNone × 34 dtypes — forward | ✅ | ✅ | ✅ |
 | FormatNone × 34 dtypes — backward | ✅ | ✅ | ✅ native GEMVT + DenseDW |
-| All 20 quants — forward | ✅ | ✅ block/bit fused | ✅ on-device (all formats) |
+| All 20 quants — forward | ✅ | 🚧 Q4/Q8/BitNet fused; k/IQ/Affine = F32Cache+DotTile | ✅ on-device (all formats) |
 | All 20 quants — backward | ✅ | ✅ packed MatVecT + Saxpy | ✅ GEMVT all formats + DenseDW |
-| True packed dtype/quant kernels (no f32 wire) | ✅ MatVec stream | ✅ | ✅ |
+| True packed dtype/quant kernels (no f32 wire) | ✅ MatVec stream | 🚧 (see quant table) | ✅ |
 | SC + MC tiling | ✅ | 🚧 | ✅ workgroup caps |
 | Timed FormatNone + quant matrices in `w2a` | ✅ | ✅ | ✅ |
 | Grad verify (CPU↔SIMD↔GPU + finite-diff) | ✅ | ✅ | ✅ |
@@ -277,7 +301,7 @@ AffinePacked SIMD uses once-inflated F32Cache (same schedule as k/IQ); native pa
 | Q/K/V/O FormatNone × 34 — fwd+bwd | ✅ Dense projs | ✅ Dense projs | ✅ Dense projs |
 | Q/K/V/O all 20 quants — fwd+bwd | ✅ | ✅ | ✅ |
 | Activation `Tensor[T]` × all 15 `core.Numeric` kinds | ✅ | ✅ | ✅ |
-| Attention / RoPE ALU | ✅ f64 host | ✅ f64 host | ✅ f64 host |
+| Attention / RoPE ALU | ✅ host | ✅ host (Enabled gate) | ✅ host (proj on-device) |
 | Timed FormatNone + quant matrices in `w2a` | ✅ | ✅ | ✅ |
 | Gap census 34×20×3 | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
@@ -291,7 +315,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 
 | Feature | CPU | SIMD | WebGPU |
 |---------|:---:|:----:|:------:|
-| SiLU(gate) ⊙ up → down | ✅ | ✅ | ✅ |
+| SiLU(gate) ⊙ up → down | ✅ host | ✅ host | ✅ `webgpu.SwiGLUFuse` (fwd); bwd combine host |
 | Gate/Up/Down FormatNone × 34 — fwd+bwd | ✅ Dense projs | ✅ Dense projs | ✅ Dense projs |
 | Gate/Up/Down all 20 quants — fwd+bwd | ✅ | ✅ | ✅ |
 | Activation `Tensor[T]` × all 15 `core.Numeric` kinds | ✅ | ✅ | ✅ |
@@ -299,13 +323,13 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | Gap census 34×20×3 | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
-| Fused on-device SiLU⊙ / SwiGLU shader | ⬜ | ⬜ | ⬜ |
+| Fused SiLU⊙ shader / SIMD SiLU | ⬜ SIMD | ⬜ | ✅ fwd fuse; ⬜ bwd fuse |
 
 ### RMSNorm detail
 
 | Feature | CPU | SIMD | WebGPU |
 |---------|:---:|:----:|:------:|
-| Per-token RMS + γ (eps=1e-6) | ✅ | ✅ DotTile Σx² | ✅ device required; host ALU |
+| Per-token RMS + γ (eps=1e-6) | ✅ | ✅ DotTile Σx²; scale host | ✅ `webgpu.RMSNorm` fwd+bwd |
 | γ FormatNone × 34 — fwd+bwd | ✅ | ✅ | ✅ |
 | γ all 20 quants — fwd+bwd | ✅ | ✅ | ✅ |
 | Activation `Tensor[T]` × all 15 `core.Numeric` kinds | ✅ | ✅ | ✅ |
@@ -313,13 +337,13 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | Gap census 34×20×3 | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
-| On-device RMSNorm shader | ⬜ | ⬜ | ⬜ |
+| Full SIMD scale (not just DotTile stats) | ⬜ | ⬜ | n/a |
 
 ### LayerNorm detail
 
 | Feature | CPU | SIMD | WebGPU |
 |---------|:---:|:----:|:------:|
-| Per-token mean+var + γ/β (eps=1e-5) | ✅ | ✅ DotTile Σx/Σx² | ✅ device required; host ALU |
+| Per-token mean+var + γ/β (eps=1e-5) | ✅ | ✅ DotTile Σx/Σx²; scale host | ✅ `webgpu.LayerNorm` fwd; bwd host |
 | γ+β FormatNone × 34 — fwd+bwd | ✅ | ✅ | ✅ |
 | γ+β all 20 quants — fwd+bwd | ✅ | ✅ | ✅ |
 | Activation `Tensor[T]` × all 15 `core.Numeric` kinds | ✅ | ✅ | ✅ |
@@ -327,7 +351,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | Gap census 34×20×3 | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
-| On-device LayerNorm shader | ⬜ | ⬜ | ⬜ |
+| On-device LayerNorm bwd + full SIMD scale | ⬜ | ⬜ | ⬜ bwd |
 
 ### CNN1 detail
 
@@ -417,7 +441,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 
 | Feature | CPU | SIMD | WebGPU |
 |---------|:---:|:----:|:------:|
-| Weightless Softmax […,C]; max-subtract + Jacobian×1/T | ✅ | ✅ host ALU | ✅ device required; host ALU |
+| Weightless Softmax […,C]; max-subtract + Jacobian×1/T | ✅ | ✅ host ALU (Enabled gate) | ✅ `webgpu.Softmax` std/temp/grid/hierarchical |
 | KindStandard (last-axis) + KindGrid + Temperature | ✅ | ✅ | ✅ |
 | No weight store — dtype/quant harness axes exercise ALU only | ✅ | ✅ | ✅ |
 | Activation `Tensor[T]` × all 15 `core.Numeric` kinds | ✅ | ✅ | ✅ |
@@ -425,8 +449,8 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | Gap census 34×20×3 (ALU cells) | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
-| Sparsemax / Entmax / Gumbel / Masked variants | ⬜ | ⬜ | ⬜ |
-| Fused on-device Softmax shader | ⬜ | ⬜ | ⬜ |
+| Sparsemax / Entmax / Gumbel / Masked on WebGPU | host helpers | host | ⬜ hard-error (no silent host) |
+| Softmax Plan 9 SIMD kernel | ⬜ | ⬜ | n/a |
 
 ### Sequential detail
 
