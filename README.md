@@ -174,8 +174,10 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | IQ4_XS | ✅ | ✅ group decode+DotTile | ✅ on-device IQ GEMV |
 | TernaryPacked | ✅ | ✅ BitNet code-dot SIMD | ✅ on-device ternary GEMV |
 | BinaryPacked | ✅ | ✅ bit-fused DotBinaryWord | ✅ on-device binary GEMV |
+| AffinePacked | ✅ | ✅ inflate-once F32Cache + DotTile | ✅ resident Affine GEMV |
 
 ✅ for a quant×backend cell = **fused** packed kernel (no full-matrix host unpack). 🚧 = functional via f32 SSBO stage.
+AffinePacked SIMD uses once-inflated F32Cache (same schedule as k/IQ); native packed `matVecAffine` is the fallback when inflate is refused (size cap).
 
 ---
 

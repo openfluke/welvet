@@ -34,3 +34,18 @@ func matVecIQSIMD(b *quant.Blob, x, y []float32) error {
 	gemvF32ParallelF32(b.F32Cache, x, y, out, in)
 	return nil
 }
+
+// matVecAffineSIMD — inflate-once F32Cache + parallel DotTile for AffinePacked.
+// If EnsureFloatCache refuses (size cap), uses native packed matVecAffine.
+func matVecAffineSIMD(b *quant.Blob, x, y []float32) error {
+	in, out := b.Cols, b.Rows
+	if len(x) < in || len(y) < out {
+		return fmt.Errorf("dense: Affine matvec shape")
+	}
+	quant.EnsureFloatCache(b)
+	if len(b.F32Cache) >= out*in {
+		gemvF32ParallelF32(b.F32Cache, x, y, out, in)
+		return nil
+	}
+	return quant.MatVec(b, x, y)
+}

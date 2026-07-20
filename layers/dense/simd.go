@@ -598,6 +598,8 @@ func MatVecPackedBlob(b *quant.Blob, x, y []float32) error {
 		}
 	case quant.FormatTernaryPacked, quant.FormatBinaryPacked:
 		return matVecBitNetF32(b, x, y)
+	case quant.FormatAffinePacked:
+		return matVecAffineSIMD(b, x, y)
 	default:
 		quant.EnsureFusedSIMDCache(b)
 		if b.Format.IsKQuant() {

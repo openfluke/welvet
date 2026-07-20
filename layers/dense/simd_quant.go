@@ -26,9 +26,31 @@ func forwardSIMDPacked[T core.Numeric](l *Layer, x, y []T, batch, in, out int) e
 	case quant.FormatIQ1_S, quant.FormatIQ2_XXS, quant.FormatIQ2_XS,
 		quant.FormatIQ3_XXS, quant.FormatIQ3_S, quant.FormatIQ4_NL, quant.FormatIQ4_XS:
 		return forwardSIMDBlockFused(l, x, y, batch, in, out)
+	case quant.FormatAffinePacked:
+		return forwardSIMDAffine(l, x, y, batch, in, out)
 	default:
 		return fmt.Errorf("dense: SIMD packed unsupported format %s", l.Weights.Format)
 	}
+}
+
+// forwardSIMDAffine — inflate-once F32Cache + parallel DotTile (same schedule as k/IQ).
+// Falls back to native packed matVecAffine when inflate is refused (huge weights).
+func forwardSIMDAffine[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
+	b := l.Weights.Packed
+	if b == nil || b.Format != quant.FormatAffinePacked {
+		return fmt.Errorf("dense: AffinePacked missing")
+	}
+	for bat := 0; bat < batch; bat++ {
+		xRow := core.SliceAsFloat32(x[bat*in : (bat+1)*in])
+		var err error
+		writeGemvF32(y[bat*out:(bat+1)*out], out, func(dst []float32) {
+			err = matVecAffineSIMD(b, xRow, dst)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func forwardSIMDQ8_0[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
