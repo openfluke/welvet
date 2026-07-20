@@ -18,6 +18,7 @@ import (
 	"github.com/openfluke/welvet/layers/convt3"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/layers/embedding"
+	"github.com/openfluke/welvet/layers/gdn"
 	"github.com/openfluke/welvet/layers/kmeans"
 	"github.com/openfluke/welvet/layers/layernorm"
 	"github.com/openfluke/welvet/layers/lstm"
@@ -158,6 +159,8 @@ func applyCell[T core.Numeric](op any, dW *core.Tensor[T], lr float64) error {
 		return metacognition.ApplyGradSGD(v, dW, lr)
 	case *mamba.Layer:
 		return mamba.ApplyGradSGD(v, dW, lr)
+	case *gdn.Layer:
+		return gdn.ApplyGradSGD(v, dW, lr)
 	case GradApplier[T]:
 		return v.ApplyGradSGD(dW, lr)
 	default:

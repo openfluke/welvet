@@ -26,17 +26,29 @@ type WeightChunkOverride struct {
 	Payload []byte `json:"payload"`
 }
 
-// InfiniteLayer is a procedural Dense layer as root seed + optional sparse diffs.
+// InfiniteLayer is a procedural layer as root seed + optional sparse diffs.
+//
+// Kind "dense" is a leaf (In/Out/Overrides describe one weight matrix).
+// Composite kinds ("mha", "swiglu", "cnn1", "cnn2", "cnn3") carry no direct
+// weight matrix of their own — Parts holds one leaf "dense" InfiniteLayer per
+// projection (e.g. mha: q/k/v/o; swiglu: gate/up/down; cnnN: proj).
 type InfiniteLayer struct {
-	Format    string                `json:"format"`
-	Kind      string                `json:"kind"`
-	DType     string                `json:"dtype"`
-	LayerSeed uint64                `json:"layer_seed"`
-	WeightFP  uint64                `json:"weight_fp"`
-	ChunkSize []int                 `json:"chunk_size,omitempty"`
-	Overrides []WeightChunkOverride `json:"overrides,omitempty"`
-	In        int                   `json:"in,omitempty"`
-	Out       int                   `json:"out,omitempty"`
+	Format    string                    `json:"format"`
+	Kind      string                    `json:"kind"`
+	DType     string                    `json:"dtype"`
+	LayerSeed uint64                    `json:"layer_seed"`
+	WeightFP  uint64                    `json:"weight_fp"`
+	ChunkSize []int                     `json:"chunk_size,omitempty"`
+	Overrides []WeightChunkOverride     `json:"overrides,omitempty"`
+	In        int                       `json:"in,omitempty"`
+	Out       int                       `json:"out,omitempty"`
+	Parts     map[string]*InfiniteLayer `json:"parts,omitempty"`
+}
+
+// IsComposite reports whether m carries Parts (mha/swiglu/cnnN) rather than a
+// direct weight matrix (dense).
+func (m *InfiniteLayer) IsComposite() bool {
+	return m != nil && len(m.Parts) > 0
 }
 
 // OverrideCount returns sparse chunk count.

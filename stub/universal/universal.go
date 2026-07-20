@@ -3,15 +3,21 @@ package universal
 import (
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/openfluke/welvet/architecture"
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/dense"
+	"github.com/openfluke/welvet/layers/mha"
+	"github.com/openfluke/welvet/layers/swiglu"
+	"github.com/openfluke/welvet/model/hf"
+	"github.com/openfluke/welvet/quant"
 )
 
 // TensorMeta holds geometric and statistical metadata for a tensor.
 type TensorMeta struct {
 	Idx           int
+	Name          string
 	Shape         []int
 	Data          []float32
 	MeanAbs       float32
@@ -31,18 +37,55 @@ type LayerArchetype struct {
 // UserHints allows manual mapping for ambiguous tensor indices.
 var UserHints = make(map[int]core.LayerType)
 
-// LoadUniversal loads a model from safetensors (not wired in welvet v0).
+// LoadUniversal loads a model from a safetensors file: probe geometry, then
+// mount it (Dense/MHA/SwiGLU archetypes get real, weight-loaded Ops; anything
+// else falls back to a Dense placeholder of matching in/out).
 func LoadUniversal(path string) (*architecture.Grid, error) {
-	_, _, _, _, err := LoadUniversalDetailed(path)
+	_, archs, _, geoms, err := LoadUniversalDetailed(path)
 	if err != nil {
 		return nil, err
 	}
-	return nil, fmt.Errorf("universal: safetensors not wired (path %q)", path)
+	g := MountGeometrically(archs, geoms)
+	if g == nil {
+		return nil, fmt.Errorf("universal: %q mounted an empty grid", path)
+	}
+	return g, nil
 }
 
-// LoadUniversalDetailed performs deep analysis — requires external tensor supply in v0.
+// LoadUniversalDetailed reads every 2-D/1-D tensor from a safetensors file,
+// probes deep geometry, and returns (tensorCount, archetypes, missedIndices, geoms).
+// Tensor order is sorted by name for determinism (safetensors headers are a JSON
+// object with no guaranteed key order).
 func LoadUniversalDetailed(path string) (int, []LayerArchetype, []int, []TensorMeta, error) {
-	return 0, nil, nil, nil, fmt.Errorf("universal: safetensors not wired (path %q)", path)
+	names, err := hf.TensorNames(path)
+	if err != nil {
+		return 0, nil, nil, nil, fmt.Errorf("universal: %q: %w", path, err)
+	}
+	sort.Strings(names)
+	tensors, err := hf.LoadSafetensorsWithMeta(path, nil)
+	if err != nil {
+		return 0, nil, nil, nil, fmt.Errorf("universal: %q: %w", path, err)
+	}
+	geoms := make([]TensorMeta, 0, len(names))
+	for _, name := range names {
+		info, ok := tensors[name]
+		if !ok {
+			continue
+		}
+		meanAbs, variance := WeightDistribution(info.Data)
+		geoms = append(geoms, TensorMeta{
+			Idx:           len(geoms),
+			Name:          name,
+			Shape:         info.Shape,
+			Data:          info.Data,
+			MeanAbs:       meanAbs,
+			Variance:      variance,
+			Rank:          len(info.Shape),
+			OriginalDType: core.DTypeFloat32,
+		})
+	}
+	archs, missed := ProbeDeepGeometry(geoms)
+	return len(geoms), archs, missed, geoms, nil
 }
 
 // WeightDistribution computes mean absolute value and variance.
@@ -181,7 +224,10 @@ func matchFFN(geoms []TensorMeta, pivot int, used map[int]bool) (LayerArchetype,
 	return LayerArchetype{Type: core.LayerSwiGLU, TypeName: "SwiGLU", Indices: map[string]int{"g": cluster[0], "u": cluster[1], "d": cluster[2]}}, true
 }
 
-// MountGeometrically creates a Grid of Dense placeholders from archetypes.
+// MountGeometrically creates a Grid from archetypes. Dense/MHA/SwiGLU archetypes
+// mount real weight-loaded Ops (from the source tensor Data); anything else (or
+// any mount failure) falls back to a zero-weight Dense placeholder of matching
+// in/out so the grid still has the right layer count and shape.
 func MountGeometrically(archs []LayerArchetype, geoms []TensorMeta) *architecture.Grid {
 	n := len(archs)
 	if n < 1 {
@@ -189,19 +235,10 @@ func MountGeometrically(archs []LayerArchetype, geoms []TensorMeta) *architectur
 	}
 	g := architecture.NewGrid(1, 1, 1, n)
 	for i, a := range archs {
-		in, out := 8, 8
-		if a.GeomMetrics != nil {
-			if v, ok := a.GeomMetrics["in"]; ok {
-				in = v
-			}
-			if v, ok := a.GeomMetrics["d"]; ok {
-				in = v
-				out = v
-			}
-			if v, ok := a.GeomMetrics["out"]; ok {
-				out = v
-			}
+		if mountArchetype(g, i, a, geoms) {
+			continue
 		}
+		in, out := denseFallbackDims(a)
 		dt := core.DTypeFloat32
 		if wIdx, ok := a.Indices["w"]; ok && wIdx < len(geoms) {
 			dt = geoms[wIdx].OriginalDType
@@ -212,4 +249,116 @@ func MountGeometrically(archs []LayerArchetype, geoms []TensorMeta) *architectur
 		}
 	}
 	return g
+}
+
+func denseFallbackDims(a LayerArchetype) (in, out int) {
+	in, out = 8, 8
+	if a.GeomMetrics != nil {
+		if v, ok := a.GeomMetrics["in"]; ok {
+			in = v
+		}
+		if v, ok := a.GeomMetrics["d"]; ok {
+			in, out = v, v
+		}
+		if v, ok := a.GeomMetrics["out"]; ok {
+			out = v
+		}
+	}
+	return in, out
+}
+
+// mountArchetype places a real Op for known types; returns false (no Op placed)
+// on any shape/data mismatch so the caller can fall back to a Dense placeholder.
+func mountArchetype(g *architecture.Grid, lidx int, a LayerArchetype, geoms []TensorMeta) bool {
+	switch a.Type {
+	case core.LayerDense:
+		wIdx, ok := a.Indices["w"]
+		if !ok || wIdx >= len(geoms) {
+			return false
+		}
+		gm := geoms[wIdx]
+		if gm.Rank != 2 || len(gm.Data) != gm.Shape[0]*gm.Shape[1] {
+			return false
+		}
+		l, err := dense.NewConfigured(gm.Shape[1], gm.Shape[0], core.ActivationLinear, gm.OriginalDType, quant.FormatNone, gm.Data)
+		if err != nil {
+			return false
+		}
+		return dense.Place(g, 0, 0, 0, lidx, l) == nil
+
+	case core.LayerMultiHeadAttention:
+		qIdx, qHas := a.Indices["q"]
+		kIdx, kHas := a.Indices["k"]
+		vIdx, vHas := a.Indices["v"]
+		oIdx, oHas := a.Indices["o"]
+		if !qHas || !kHas || !vHas || !oHas {
+			return false
+		}
+		qW, qOK := denseData(geoms, qIdx)
+		kW, kOK := denseData(geoms, kIdx)
+		vW, vOK := denseData(geoms, vIdx)
+		oW, oOK := denseData(geoms, oIdx)
+		if !qOK || !kOK || !vOK || !oOK {
+			return false
+		}
+		dim := a.GeomMetrics["d"]
+		if dim <= 0 {
+			return false
+		}
+		heads := 1
+		if dim%64 == 0 && dim > 64 {
+			heads = dim / 64 // heuristic: 64-wide heads are the common convention
+		}
+		cfg := mha.Config{DModel: dim, NumHeads: heads, HeadDim: dim / heads}
+		l, err := mha.NewConfigured(cfg, core.DTypeFloat32, quant.FormatNone, qW, kW, vW, oW)
+		if err != nil {
+			return false
+		}
+		return mha.Place(g, 0, 0, 0, lidx, l) == nil
+
+	case core.LayerSwiGLU:
+		gIdx, gHas := a.Indices["g"]
+		uIdx, uHas := a.Indices["u"]
+		dIdx, dHas := a.Indices["d"]
+		if !gHas || !uHas || !dHas {
+			return false
+		}
+		gW, gOK := denseData(geoms, gIdx)
+		uW, uOK := denseData(geoms, uIdx)
+		dW, dOK := denseData(geoms, dIdx)
+		gGeom, gGOK := geomAt(geoms, gIdx)
+		dGeom, dGOK := geomAt(geoms, dIdx)
+		if !gOK || !uOK || !dOK || !gGOK || !dGOK {
+			return false
+		}
+		inter := gGeom.Shape[0]
+		inDim := dGeom.Shape[0]
+		if inter <= 0 || inDim <= 0 {
+			return false
+		}
+		cfg := swiglu.Config{InputDim: inDim, IntermediateDim: inter}
+		l, err := swiglu.NewConfigured(cfg, core.DTypeFloat32, quant.FormatNone, gW, uW, dW)
+		if err != nil {
+			return false
+		}
+		return swiglu.Place(g, 0, 0, 0, lidx, l) == nil
+
+	default:
+		return false
+	}
+}
+
+func geomAt(geoms []TensorMeta, idx int) (TensorMeta, bool) {
+	if idx < 0 || idx >= len(geoms) {
+		return TensorMeta{}, false
+	}
+	return geoms[idx], true
+}
+
+func denseData(geoms []TensorMeta, idx int) ([]float32, bool) {
+	gm, ok := geomAt(geoms, idx)
+	if !ok || gm.Rank != 2 || len(gm.Data) != gm.Shape[0]*gm.Shape[1] {
+		return nil, false
+	}
+	return gm.Data, true
 }

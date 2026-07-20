@@ -114,14 +114,7 @@ type LayerSpec struct {
 type PersistenceNetworkSpec = NetworkSpec
 type PersistenceLayerSpec = LayerSpec
 
-// PackableFormats are formats with Pack() support (AffinePacked is import-only GAP).
+// PackableFormats are formats with Pack() support (includes AffinePacked).
 func PackableFormats() []quant.Format {
-	out := make([]quant.Format, 0, len(quant.AllFormats)-1)
-	for _, f := range quant.AllFormats {
-		if f == quant.FormatAffinePacked {
-			continue
-		}
-		out = append(out, f)
-	}
-	return out
+	return append([]quant.Format(nil), quant.AllFormats...)
 }

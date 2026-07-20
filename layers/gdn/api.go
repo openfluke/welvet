@@ -183,15 +183,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 	return pre, post, nil
 }
 
-// Backward is not implemented for GDN v0 (inference-first).
-func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
-	return nil, nil, fmt.Errorf("gdn: Backward not implemented (inference-first; no silent zero grads)")
-}
-
-// ApplyGradSGD is not implemented for GDN v0.
-func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) error {
-	return fmt.Errorf("gdn: ApplyGradSGD not implemented (inference-first)")
-}
+// Backward and ApplyGradSGD live in train.go (practical BPTT-truncated training path:
+// exact for Out/NormGamma/InZ/InQKV/InB/InA linear maps, state recurrence treated as
+// stop-gradient across tokens — see train.go doc comment).
 
 // PermutationOK — FormatNone Float32 CPU/SIMD for smoke; WebGPU when device present.
 func PermutationOK(dt core.DType, format quant.Format, backend core.Backend) bool {

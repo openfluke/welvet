@@ -49,6 +49,9 @@ func MatVecWebGPU(s *weights.Store, x, y []float32, batch, in, out int) error {
 
 func forwardWebGPUDispatch(l *Layer, xF, yF []float32, batch, in, out int) error {
 	switch {
+	case l.Weights.Format == quant.FormatAffinePacked && l.Weights.Packed != nil:
+		return matVecAffineResident(l.Weights.Packed, xF, yF, batch, in, out)
+
 	case l.Weights.Format == quant.FormatQ4_0 && l.Weights.Packed != nil:
 		scales, packed, ok := q4BlobToSIMD(l.Weights.Packed)
 		if !ok {
@@ -597,6 +600,37 @@ func matVecBinaryResident(b *quant.Blob, x, y []float32, batch, in, out int) err
 	}
 	if batch != 1 {
 		return fmt.Errorf("dense: binary VRAM full and batch!=1")
+	}
+	return MatVecPackedBlob(b, x, y)
+}
+
+// matVecAffineResident runs AffinePacked GEMV on device with sticky (cached) weights,
+// falling back to the host row-decode MatVec for tiny mats or when device VRAM is full.
+func matVecAffineResident(b *quant.Blob, x, y []float32, batch, in, out int) error {
+	key := webgpu.BlobKey(unsafe.Pointer(b))
+	if webgpu.HasAffineWeight(key) {
+		return webgpu.DenseGEMVAffineResident(key, nil, nil, nil, x, y, batch, in, out, b.BlockWeights)
+	}
+	// Tiny mats: host is faster than create/dispatch/readback.
+	if len(b.Raw) < 512<<10 {
+		if batch != 1 {
+			return fmt.Errorf("dense: affine tiny host path needs batch=1")
+		}
+		return MatVecPackedBlob(b, x, y)
+	}
+	scales, biases, words, group, ok := AffineBlobStaging(b)
+	if !ok {
+		return fmt.Errorf("dense: WebGPU Affine projection failed")
+	}
+	err := webgpu.DenseGEMVAffineResident(key, scales, biases, words, x, y, batch, in, out, group)
+	if err == nil {
+		return nil
+	}
+	if !webgpu.IsAffineVRAMFull(err) {
+		return err
+	}
+	if batch != 1 {
+		return fmt.Errorf("dense: affine VRAM full and batch!=1")
 	}
 	return MatVecPackedBlob(b, x, y)
 }

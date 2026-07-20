@@ -8,7 +8,15 @@ import (
 
 	"github.com/openfluke/welvet/architecture"
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/layers/cnn1"
+	"github.com/openfluke/welvet/layers/cnn2"
+	"github.com/openfluke/welvet/layers/cnn3"
 	"github.com/openfluke/welvet/layers/dense"
+	"github.com/openfluke/welvet/layers/mha"
+	"github.com/openfluke/welvet/layers/parallel"
+	"github.com/openfluke/welvet/layers/residual"
+	"github.com/openfluke/welvet/layers/sequential"
+	"github.com/openfluke/welvet/layers/swiglu"
 	"github.com/openfluke/welvet/quant"
 )
 
@@ -124,34 +132,131 @@ func InitGrid(g *architecture.Grid, initSeed uint64) error {
 		idx++
 		switch op := cell.Op.(type) {
 		case *dense.Layer:
-			in := op.Core.InputHeight
-			if in <= 0 {
-				in = op.Weights.Cols
-			}
-			if err := InitStoreHe(op.Weights, in, layerSeed); err != nil {
+			if err := initDenseHe(op, layerSeed); err != nil {
 				return err
+			}
+		case *mha.Layer:
+			for _, part := range []struct {
+				name string
+				l    *dense.Layer
+			}{{"q", op.Q}, {"k", op.K}, {"v", op.V}, {"o", op.O}} {
+				if err := initDenseHe(part.l, DeriveLayer(layerSeed, 0, "mha."+part.name)); err != nil {
+					return err
+				}
+			}
+		case *swiglu.Layer:
+			for _, part := range []struct {
+				name string
+				l    *dense.Layer
+			}{{"gate", op.Gate}, {"up", op.Up}, {"down", op.Down}} {
+				if err := initDenseHe(part.l, DeriveLayer(layerSeed, 0, "swiglu."+part.name)); err != nil {
+					return err
+				}
+			}
+		case *cnn1.Layer:
+			if err := initDenseHe(op.Proj, DeriveLayer(layerSeed, 0, "cnn1.proj")); err != nil {
+				return err
+			}
+		case *cnn2.Layer:
+			if err := initDenseHe(op.Proj, DeriveLayer(layerSeed, 0, "cnn2.proj")); err != nil {
+				return err
+			}
+		case *cnn3.Layer:
+			if err := initDenseHe(op.Proj, DeriveLayer(layerSeed, 0, "cnn3.proj")); err != nil {
+				return err
+			}
+		case *parallel.Layer:
+			for bi, br := range op.Branches {
+				if err := initDenseHe(br, DeriveLayer(layerSeed, bi, "parallel.branch")); err != nil {
+					return err
+				}
+			}
+			if op.Gate != nil {
+				if err := initDenseHe(op.Gate, DeriveLayer(layerSeed, 0, "parallel.gate")); err != nil {
+					return err
+				}
+			}
+		case *sequential.Layer:
+			for ci, child := range op.Children {
+				if err := initDenseHe(child, DeriveLayer(layerSeed, ci, "sequential.child")); err != nil {
+					return err
+				}
+			}
+		case *residual.Layer:
+			for ci, child := range op.Children {
+				if err := initDenseHe(child, DeriveLayer(layerSeed, ci, "residual.child")); err != nil {
+					return err
+				}
 			}
 		}
 	}
 	return nil
 }
 
-// GridFingerprint hashes all Dense FlattenF32 weights in hop order.
+// initDenseHe He-inits one Dense Store, deriving InputHeight from Core or Cols.
+func initDenseHe(op *dense.Layer, layerSeed uint64) error {
+	if op == nil || op.Weights == nil {
+		return nil
+	}
+	in := op.Core.InputHeight
+	if in <= 0 {
+		in = op.Weights.Cols
+	}
+	return InitStoreHe(op.Weights, in, layerSeed)
+}
+
+// GridFingerprint hashes all Dense (direct or nested in mha/swiglu/cnnN/parallel/
+// sequential/residual) FlattenF32 weights in hop order.
 func GridFingerprint(g *architecture.Grid) uint64 {
 	if g == nil {
 		return 0
 	}
 	h := fnv.New64a()
 	var buf [8]byte
+	write := func(op *dense.Layer) {
+		if op == nil {
+			return
+		}
+		fp := StoreFingerprint(op.Weights)
+		binary.LittleEndian.PutUint64(buf[:], fp)
+		_, _ = h.Write(buf[:])
+	}
 	for _, c := range g.HopOrder() {
 		cell := g.At(c.Z, c.Y, c.X, c.L)
 		if cell == nil {
 			continue
 		}
-		if op, ok := cell.Op.(*dense.Layer); ok {
-			fp := StoreFingerprint(op.Weights)
-			binary.LittleEndian.PutUint64(buf[:], fp)
-			_, _ = h.Write(buf[:])
+		switch op := cell.Op.(type) {
+		case *dense.Layer:
+			write(op)
+		case *mha.Layer:
+			write(op.Q)
+			write(op.K)
+			write(op.V)
+			write(op.O)
+		case *swiglu.Layer:
+			write(op.Gate)
+			write(op.Up)
+			write(op.Down)
+		case *cnn1.Layer:
+			write(op.Proj)
+		case *cnn2.Layer:
+			write(op.Proj)
+		case *cnn3.Layer:
+			write(op.Proj)
+		case *parallel.Layer:
+			for _, br := range op.Branches {
+				write(br)
+			}
+			write(op.Gate)
+		case *sequential.Layer:
+			for _, child := range op.Children {
+				write(child)
+			}
+		case *residual.Layer:
+			for _, child := range op.Children {
+				write(child)
+			}
 		}
 	}
 	return h.Sum64()

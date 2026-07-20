@@ -23,6 +23,8 @@ func Pack(format Format, weights []float32, rows, cols int) (*Blob, error) {
 		return packTernary(weights, rows, cols)
 	case FormatBinaryPacked:
 		return packBinary(weights, rows, cols)
+	case FormatAffinePacked:
+		return packAffine(weights, rows, cols)
 	default:
 		return nil, ErrUnsupported(format, "Pack")
 	}

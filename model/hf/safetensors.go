@@ -12,6 +12,29 @@ import (
 
 // LoadSafetensorsSelective reads one safetensors file and decodes only tensors accepted by keep.
 func LoadSafetensorsSelective(filepath string, keep func(string) bool) (map[string][]float32, error) {
+	withMeta, err := LoadSafetensorsWithMeta(filepath, keep)
+	if err != nil {
+		return nil, err
+	}
+	tensors := make(map[string][]float32, len(withMeta))
+	for name, info := range withMeta {
+		tensors[name] = info.Data
+	}
+	return tensors, nil
+}
+
+// TensorWithMeta is one decoded safetensors entry: shape (row-major, as declared in
+// the header) plus flat float32 data (any storage dtype is decoded up to f32).
+type TensorWithMeta struct {
+	Shape []int
+	Data  []float32
+}
+
+// LoadSafetensorsWithMeta reads one safetensors file and decodes tensors accepted
+// by keep (nil keep = decode all), returning declared Shape alongside float32 Data —
+// LoadSafetensorsSelective drops the shape; this is the shape-aware superset used by
+// stub/universal for deep-geometry probing.
+func LoadSafetensorsWithMeta(filepath string, keep func(string) bool) (map[string]TensorWithMeta, error) {
 	f, err := os.Open(filepath)
 	if err != nil {
 		return nil, fmt.Errorf("open safetensors: %w", err)
@@ -37,7 +60,7 @@ func LoadSafetensorsSelective(filepath string, keep func(string) bool) (map[stri
 	}
 
 	dataStart := int64(8 + headerSize)
-	tensors := make(map[string][]float32)
+	tensors := make(map[string]TensorWithMeta)
 
 	for name, value := range rawHeader {
 		if name == "__metadata__" {
@@ -76,7 +99,7 @@ func LoadSafetensorsSelective(filepath string, keep func(string) bool) (map[stri
 		if err := decodeTensorData(tensorBytes, encodedDtype, numElements, tensorData); err != nil {
 			return nil, fmt.Errorf("tensor %s: %w", name, err)
 		}
-		tensors[name] = tensorData
+		tensors[name] = TensorWithMeta{Shape: shape, Data: tensorData}
 	}
 	return tensors, nil
 }
