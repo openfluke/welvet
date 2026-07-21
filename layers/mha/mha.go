@@ -2,11 +2,12 @@ package mha
 
 import (
 	"fmt"
+	"math/rand"
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/dense"
-	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/layers/seqmix"
+	"github.com/openfluke/welvet/quant"
 )
 
 // Layer is multi-head attention. Projections Q/K/V/O are dense.Layer units
@@ -42,6 +43,13 @@ type Layer struct {
 	DecodeScratchQ      []float64
 	DecodeScratchAttn   []float64
 	DecodeScratchScores []float64 // reused softmax scores (causal decode)
+
+	// Training enables Dropout when Cfg.Dropout > 0. Inference leaves it false.
+	Training bool
+	// DropMask is filled during train forward (byte 1 = kept); reused in backward.
+	DropMask []byte
+	// RNG seeds attention dropout; nil → rand.New(rand.NewSource(1)) lazily.
+	RNG *rand.Rand
 }
 
 // MixerKind identifies this layer under the seqmix contract.

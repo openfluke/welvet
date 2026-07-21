@@ -52,23 +52,44 @@ func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T], useSIMD bool) 
 		ones[i] = 1
 	}
 
+	simdPath := useSIMD && simd.Enabled()
+	var gF, bF, xf, xhF, yF []float32
+	if simdPath {
+		gF = make([]float32, dim)
+		bF = make([]float32, dim)
+		for i := 0; i < dim; i++ {
+			gF[i] = float32(g[i])
+			bF[i] = float32(b[i])
+		}
+		xf = make([]float32, dim)
+		xhF = make([]float32, dim)
+		yF = make([]float32, dim)
+	}
+
 	for t := 0; t < nTok; t++ {
 		base := t * dim
 		row := input.Data[base : base+dim]
-		var sum, sumSq float64
-		if useSIMD && simd.Enabled() {
-			xf := make([]float32, dim)
+		if simdPath {
 			for i := 0; i < dim; i++ {
 				xf[i] = float32(core.AsFloat64(row[i]))
 			}
-			sum = simd.DotTile(xf, ones, 0, dim, 0)
-			sumSq = simd.DotTile(xf, xf, 0, dim, 0)
-		} else {
+			sum := simd.DotTile(xf, ones, 0, dim, 0)
+			sumSq := simd.DotTile(xf, xf, 0, dim, 0)
+			mean := sum / float64(dim)
+			var_ := sumSq/float64(dim) - mean*mean
+			inv := float32(1.0 / math.Sqrt(var_+eps))
+			simd.LayerNormScaleF32(xf, gF, bF, xhF, yF, float32(mean), inv, dim)
 			for i := 0; i < dim; i++ {
-				v := core.AsFloat64(row[i])
-				sum += v
-				sumSq += v * v
+				xHat[base+i] = core.FromFloat64[T](float64(xhF[i]))
+				y[base+i] = core.FromFloat64[T](float64(yF[i]))
 			}
+			continue
+		}
+		var sum, sumSq float64
+		for i := 0; i < dim; i++ {
+			v := core.AsFloat64(row[i])
+			sum += v
+			sumSq += v * v
 		}
 		mean := sum / float64(dim)
 		var_ := sumSq/float64(dim) - mean*mean
@@ -107,16 +128,22 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T],
 	for i := range ones {
 		ones[i] = 1
 	}
+	simdPath := useSIMD && simd.Enabled()
+	var xf, scratch, outf []float32
+	if simdPath {
+		xf = make([]float32, dim)
+		scratch = make([]float32, dim)
+		outf = make([]float32, dim)
+	}
 
 	for t := 0; t < nTok; t++ {
 		base := t * dim
 		row := input.Data[base : base+dim]
 		dy := gradOut.Data[base : base+dim]
-		xHat := pre.Data[base : base+dim]
+		xHatRow := pre.Data[base : base+dim]
 
 		var sum, sumSq float64
-		if useSIMD && simd.Enabled() {
-			xf := make([]float32, dim)
+		if simdPath {
 			for i := 0; i < dim; i++ {
 				xf[i] = float32(core.AsFloat64(row[i]))
 			}
@@ -136,7 +163,7 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T],
 		dxh := make([]float64, dim)
 		var sumDxh, sumDxhXh float64
 		for i := 0; i < dim; i++ {
-			xh := core.AsFloat64(xHat[i])
+			xh := core.AsFloat64(xHatRow[i])
 			d := core.AsFloat64(dy[i])
 			dGamma[i] += d * xh
 			dBeta[i] += d
@@ -145,10 +172,20 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T],
 			sumDxhXh += dxh[i] * xh
 		}
 		n := float64(dim)
-		for i := 0; i < dim; i++ {
-			xh := core.AsFloat64(xHat[i])
-			// dx = inv/n * (n·dx̂ − Σdx̂ − x̂·Σ(dx̂⊙x̂))
-			dx[base+i] = core.FromFloat64[T](inv / n * (n*dxh[i] - sumDxh - xh*sumDxhXh))
+		if simdPath {
+			for i := 0; i < dim; i++ {
+				xh := core.AsFloat64(xHatRow[i])
+				scratch[i] = float32(n*dxh[i] - sumDxh - xh*sumDxhXh)
+			}
+			simd.ScaleXHatF32(scratch, outf, float32(inv/n), dim)
+			for i := 0; i < dim; i++ {
+				dx[base+i] = core.FromFloat64[T](float64(outf[i]))
+			}
+		} else {
+			for i := 0; i < dim; i++ {
+				xh := core.AsFloat64(xHatRow[i])
+				dx[base+i] = core.FromFloat64[T](inv / n * (n*dxh[i] - sumDxh - xh*sumDxhXh))
+			}
 		}
 	}
 

@@ -6,16 +6,26 @@ import (
 	"math/rand"
 
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/simd"
 )
 
 // ForwardCPUTiled — stable Softmax on host (all Kind variants).
 func ForwardCPUTiled[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
-	return forwardHost(l, input)
+	return forwardHost(l, input, false)
 }
 
 // BackwardCPUTiled — Jacobian × 1/T; gradW nil.
 func BackwardCPUTiled[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
-	return backwardHost(l, gradOut, input, pre)
+	return backwardHost(l, gradOut, input, pre, false)
+}
+
+func simdSupportedKind(k Kind) bool {
+	switch k {
+	case KindStandard, KindTemperature, KindGrid, KindHierarchical:
+		return true
+	default:
+		return false
+	}
 }
 
 func logitsFromRow[T core.Numeric](data []T, start, cols int, invT float64) []float32 {
@@ -69,13 +79,19 @@ func probsForKind(cfg Config, logits []float32, globalStart int) []float32 {
 	}
 }
 
-func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T], useSIMD bool) (pre, post *core.Tensor[T], err error) {
 	lay, err := parseLayout(l.Cfg, input)
 	if err != nil {
 		return nil, nil, err
 	}
 	out := make([]T, lay.n)
 	invT := 1.0 / lay.temp
+	simdPath := useSIMD && simd.Enabled() && simdSupportedKind(l.Cfg.Kind)
+	var rawF, probsF []float32
+	if simdPath {
+		rawF = make([]float32, lay.cols)
+		probsF = make([]float32, lay.cols)
+	}
 	for r := 0; r < lay.rows; r++ {
 		start := r * lay.cols
 		end := start + lay.cols
@@ -83,8 +99,17 @@ func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 			end = lay.n
 		}
 		cols := end - start
-		logits := logitsFromRow(input.Data, start, cols, invT)
-		probs := probsForKind(l.Cfg, logits, start)
+		var probs []float32
+		if simdPath {
+			for i := 0; i < cols; i++ {
+				rawF[i] = float32(core.AsFloat64(input.Data[start+i]))
+			}
+			simd.SoftmaxF32(rawF, probsF, cols, float32(lay.temp))
+			probs = probsF[:cols]
+		} else {
+			logits := logitsFromRow(input.Data, start, cols, invT)
+			probs = probsForKind(l.Cfg, logits, start)
+		}
 		var sum float64
 		for _, p := range probs {
 			sum += float64(p)
@@ -103,7 +128,7 @@ func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 	return pre, post, nil
 }
 
-func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T], useSIMD bool) (gradIn, gradW *core.Tensor[T], err error) {
 	_ = input
 	lay, err := parseLayout(l.Cfg, pre)
 	if err != nil {
@@ -116,7 +141,14 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 		return nil, nil, fmt.Errorf("softmax: nil/short gradOut/pre")
 	}
 	invT := 1.0 / lay.temp
+	simdPath := useSIMD && simd.Enabled() && simdSupportedKind(l.Cfg.Kind)
 	dx := make([]T, lay.n)
+	var probs, grads, gxF []float32
+	if simdPath {
+		probs = make([]float32, lay.cols)
+		grads = make([]float32, lay.cols)
+		gxF = make([]float32, lay.cols)
+	}
 	for r := 0; r < lay.rows; r++ {
 		start := r * lay.cols
 		end := start + lay.cols
@@ -124,8 +156,10 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 			end = lay.n
 		}
 		cols := end - start
-		probs := make([]float32, cols)
-		grads := make([]float32, cols)
+		if !simdPath {
+			probs = make([]float32, cols)
+			grads = make([]float32, cols)
+		}
 		for i := 0; i < cols; i++ {
 			probs[i] = float32(core.AsFloat64(pre.Data[start+i]))
 			grads[i] = float32(core.AsFloat64(gradOut.Data[start+i]))
@@ -137,9 +171,16 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 				}
 			}
 		}
-		gradLogits := SoftmaxBackward(grads, probs)
-		for i := 0; i < cols; i++ {
-			dx[start+i] = core.FromFloat64[T](float64(gradLogits[i])*invT)
+		if simdPath {
+			simd.SoftmaxBwdF32(grads, probs, gxF, cols, float32(lay.temp))
+			for i := 0; i < cols; i++ {
+				dx[start+i] = core.FromFloat64[T](float64(gxF[i]))
+			}
+		} else {
+			gradLogits := SoftmaxBackward(grads, probs)
+			for i := 0; i < cols; i++ {
+				dx[start+i] = core.FromFloat64[T](float64(gradLogits[i])*invT)
+			}
 		}
 	}
 	gradIn = core.NewTensor[T](lay.shape...)

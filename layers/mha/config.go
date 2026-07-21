@@ -53,7 +53,8 @@ type Config struct {
 	// ScaleOverride > 0 replaces 1/sqrt(HeadDim)
 	ScaleOverride float64
 
-	// Dropout reserved (must be 0 until train-time dropout lands)
+	// Dropout is train-time attention-weight dropout probability in [0,1).
+	// Applied only when Layer.Training is true (inverted dropout).
 	Dropout float64
 }
 
@@ -101,11 +102,13 @@ func (c *Config) Validate() error {
 	if c.QKNorm && c.QKNormEps <= 0 {
 		c.QKNormEps = 1e-6
 	}
-	if c.Softmax == SoftmaxSigmoid {
-		return fmt.Errorf("mha: SoftmaxSigmoid not implemented yet (hard-error, no silent softmax)")
+	switch c.Softmax {
+	case SoftmaxStandard, SoftmaxSigmoid:
+	default:
+		return fmt.Errorf("mha: unknown Softmax %v", c.Softmax)
 	}
-	if c.Dropout != 0 {
-		return fmt.Errorf("mha: Dropout=%v not implemented yet (set 0)", c.Dropout)
+	if c.Dropout < 0 || c.Dropout >= 1 {
+		return fmt.Errorf("mha: Dropout=%v must be in [0,1)", c.Dropout)
 	}
 	switch c.Mask {
 	case MaskCausal, MaskBidirectional, MaskSlidingWindow, MaskPrefixLM, MaskCustom:

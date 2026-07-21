@@ -2,6 +2,7 @@ package mha
 
 import (
 	"fmt"
+	"math/rand"
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/dense"
@@ -110,6 +111,33 @@ func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 		l.DecodeScratchAttn = make([]float64, needScratch)
 	}
 
+	trainDrop := l.Training && cfg.Dropout > 0
+	maxKV := msl
+	if cfg.Mode == ModeCross {
+		maxKV = kvLen
+	} else {
+		maxKV = kvStart + lay.batch*lay.seqLen
+		if maxKV > msl {
+			maxKV = msl
+		}
+		if maxKV < 1 {
+			maxKV = 1
+		}
+	}
+	maskPerBatch := lay.seqLen * cfg.NumHeads * maxKV
+	if trainDrop {
+		needMask := lay.batch * maskPerBatch
+		if cap(l.DropMask) < needMask {
+			l.DropMask = make([]byte, needMask)
+		} else {
+			l.DropMask = l.DropMask[:needMask]
+			clear(l.DropMask)
+		}
+		if l.RNG == nil {
+			l.RNG = rand.New(rand.NewSource(1))
+		}
+	}
+
 	for b := 0; b < lay.batch; b++ {
 		seqBase := kvStart
 		if cfg.Mode == ModeSelf {
@@ -172,8 +200,16 @@ func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 		}
 
 		attnOut := l.DecodeScratchAttn[:lay.seqLen*qDim]
+		var dropMask []byte
+		var rng *rand.Rand
+		if trainDrop {
+			// Per-batch slice; layout [seq][head][kPos] with stride maxKV ≥ kvLen.
+			dropMask = l.DropMask[b*maskPerBatch : b*maskPerBatch+lay.seqLen*cfg.NumHeads*kvLen]
+			rng = l.RNG
+		}
 		attnForward(cfg, attnOut, Q, l.KVCacheK, l.KVCacheV,
-			lay.seqLen, seqBase, kvLen, msl, qDim, kvDim, allow, &l.DecodeScratchScores)
+			lay.seqLen, seqBase, kvLen, msl, qDim, kvDim, allow, &l.DecodeScratchScores,
+			trainDrop, dropMask, rng)
 		for s := 0; s < lay.seqLen; s++ {
 			tok := b*lay.seqLen + s
 			for i := 0; i < qDim; i++ {
@@ -276,6 +312,20 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 	gK := make([]float64, msl*kvDim)
 	gV := make([]float64, msl*kvDim)
 	qGamma, kGamma := l.QNormWeight, l.KNormWeight
+	trainDrop := l.Training && cfg.Dropout > 0
+	maxKV := msl
+	if cfg.Mode == ModeCross {
+		maxKV = kvLen
+	} else {
+		maxKV = kvStart + lay.batch*lay.seqLen
+		if maxKV > msl {
+			maxKV = msl
+		}
+		if maxKV < 1 {
+			maxKV = 1
+		}
+	}
+	maskPerBatch := lay.seqLen * cfg.NumHeads * maxKV
 
 	for b := 0; b < lay.batch; b++ {
 		seqBase := kvStart
@@ -347,8 +397,13 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 			}
 		}
 		gQ := make([]float64, lay.seqLen*qDim)
+		var dropMask []byte
+		if trainDrop && len(l.DropMask) >= (b+1)*maskPerBatch {
+			dropMask = l.DropMask[b*maskPerBatch : b*maskPerBatch+lay.seqLen*cfg.NumHeads*kvLen]
+		}
 		attnBackward(cfg, gradPre, Q, cacheK, cacheV, gQ, gK, gV,
-			lay.seqLen, seqBase, kvLen, msl, qDim, kvDim, allow)
+			lay.seqLen, seqBase, kvLen, msl, qDim, kvDim, allow,
+			trainDrop, dropMask)
 
 		for s := 0; s < lay.seqLen; s++ {
 			pos := seqBase + s

@@ -18,27 +18,55 @@ type softmaxParams struct {
 	EntmaxAlpha float32
 }
 
+// Softmax GPU kind type codes (loom/poly SoftmaxType parity).
+const (
+	SoftmaxTypeStandard     uint32 = 0
+	SoftmaxTypeGrid         uint32 = 1
+	SoftmaxTypeHierarchical uint32 = 2
+	SoftmaxTypeTemperature  uint32 = 3
+	SoftmaxTypeGumbel       uint32 = 4
+	SoftmaxTypeMasked       uint32 = 5
+	SoftmaxTypeSparse       uint32 = 6
+	SoftmaxTypeEntmax       uint32 = 9
+)
+
 // Softmax runs the standard/grid/hierarchical softmax math on a real WebGPU
 // device: one workgroup per group (row), reducing max then sum then normalizing.
 // x/y are flattened [nGroups*size]. No host fallback.
 func Softmax(x, y []float32, nGroups, size int, temp float32) error {
+	return SoftmaxEx(x, y, nil, nGroups, size, temp, SoftmaxTypeStandard, 0, 0)
+}
+
+// SoftmaxEx runs exotic or standard softmax on device. mask is optional per-element
+// keep weights (>=0.5 unmasked); nil means all positions active. kind uses
+// SoftmaxType* constants. No host fallback.
+func SoftmaxEx(x, y, mask []float32, nGroups, size int, temp float32, kind uint32, seed uint32, entmaxAlpha float32) error {
 	ensure()
 	if !haveGPU || sess == nil {
 		if initErr == nil {
 			initErr = fmt.Errorf("webgpu: no device")
 		}
-		return fmt.Errorf("webgpu Softmax: %w", initErr)
+		return fmt.Errorf("webgpu SoftmaxEx: %w", initErr)
 	}
-	if len(x) < nGroups*size || len(y) < nGroups*size {
-		return fmt.Errorf("webgpu Softmax: shape")
+	n := nGroups * size
+	if len(x) < n || len(y) < n {
+		return fmt.Errorf("webgpu SoftmaxEx: shape")
 	}
 	if temp == 0 {
 		temp = 1.0
 	}
+	kindType := kind
+	if kind == SoftmaxTypeEntmax {
+		if entmaxAlpha <= 1.0 {
+			kindType = SoftmaxTypeStandard
+		} else if entmaxAlpha >= 2.0 {
+			kindType = SoftmaxTypeSparse
+		}
+	}
 	if err := sess.ensureSoftmaxPipes(); err != nil {
 		return err
 	}
-	return sess.softmaxFwd(x, y, nGroups, size, temp)
+	return sess.softmaxFwdEx(x, y, mask, nGroups, size, temp, kindType, seed, entmaxAlpha)
 }
 
 // SoftmaxBackward computes gx = (y/temp) * (gy - dot(gy, y)) on device, one
@@ -79,11 +107,32 @@ func (s *session) ensureSoftmaxPipes() error {
 	return nil
 }
 
-func (s *session) softmaxFwd(x, y []float32, nGroups, size int, temp float32) error {
+func packSoftmaxMaskF32(mask []float32, n int) []uint32 {
+	nWords := (n + 31) / 32
+	if nWords == 0 {
+		nWords = 1
+	}
+	out := make([]uint32, nWords)
+	if len(mask) == 0 {
+		for i := range out {
+			out[i] = 0xFFFFFFFF
+		}
+		return out
+	}
+	for i := 0; i < n; i++ {
+		if i < len(mask) && mask[i] >= 0.5 {
+			out[i/32] |= 1 << (i % 32)
+		}
+	}
+	return out
+}
+
+func (s *session) softmaxFwdEx(x, y, mask []float32, nGroups, size int, temp float32, kind uint32, seed uint32, entmaxAlpha float32) error {
 	dev, q := s.device, s.queue
+	n := nGroups * size
 
 	inBuf, err := dev.CreateBufferInit(&wgpu.BufferInitDescriptor{
-		Label: "welvet-sm-in", Contents: wgpu.ToBytes(x[:nGroups*size]),
+		Label: "welvet-sm-in", Contents: wgpu.ToBytes(x[:n]),
 		Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst,
 	})
 	if err != nil {
@@ -91,7 +140,7 @@ func (s *session) softmaxFwd(x, y []float32, nGroups, size int, temp float32) er
 	}
 	defer inBuf.Destroy()
 
-	outBytes := uint64(nGroups * size * 4)
+	outBytes := uint64(n * 4)
 	if outBytes < 64 {
 		outBytes = 64
 	}
@@ -104,10 +153,9 @@ func (s *session) softmaxFwd(x, y []float32, nGroups, size int, temp float32) er
 	}
 	defer outBuf.Destroy()
 
-	// softmaxType=0 (standard) never touches the mask buffer body; a minimal
-	// dummy satisfies the binding.
+	maskWords := packSoftmaxMaskF32(mask, n)
 	maskBuf, err := dev.CreateBufferInit(&wgpu.BufferInitDescriptor{
-		Label: "welvet-sm-mask", Contents: wgpu.ToBytes([]uint32{0xFFFFFFFF}),
+		Label: "welvet-sm-mask", Contents: wgpu.ToBytes(maskWords),
 		Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst,
 	})
 	if err != nil {
@@ -115,7 +163,10 @@ func (s *session) softmaxFwd(x, y []float32, nGroups, size int, temp float32) er
 	}
 	defer maskBuf.Destroy()
 
-	p := softmaxParams{BatchSize: uint32(nGroups), Size: uint32(size), Temp: temp, Type: 0}
+	p := softmaxParams{
+		BatchSize: uint32(nGroups), Size: uint32(size), Temp: temp,
+		Type: kind, Seed: seed, EntmaxAlpha: entmaxAlpha,
+	}
 	pBuf, err := dev.CreateBufferInit(&wgpu.BufferInitDescriptor{
 		Label: "welvet-sm-p", Contents: wgpu.ToBytes([]softmaxParams{p}),
 		Usage: wgpu.BufferUsageUniform | wgpu.BufferUsageCopyDst,
@@ -154,7 +205,7 @@ func (s *session) softmaxFwd(x, y []float32, nGroups, size int, temp float32) er
 	}
 	q.Submit(cmd)
 
-	outY, err := readbackF32(dev, q, outBuf, nGroups*size)
+	outY, err := readbackF32(dev, q, outBuf, n)
 	if err != nil {
 		return err
 	}
@@ -242,9 +293,7 @@ func (s *session) softmaxBwd(gy, y, gx []float32, nGroups, size int, temp float3
 	return nil
 }
 
-// ShaderSoftmaxForward — ported from loom/poly/wgpu_softmax.go. Only softmaxType=0
-// (standard) is exercised by welvet callers; other type codes are dead paths kept
-// for shader-source parity with loom.
+// ShaderSoftmaxForward — loom/poly parity with sparsemax (6) and entmax (9).
 const ShaderSoftmaxForward = `
 struct Params {
     batchSize: u32,
@@ -274,6 +323,88 @@ fn rand_f32(seed: ptr<function, u32>) -> f32 {
     return f32(*seed) / 4294967296.0;
 }
 
+fn is_masked(global_idx: u32) -> bool {
+    let maskIdx = global_idx / 32u;
+    let maskBit = global_idx % 32u;
+    return (mask[maskIdx] & (1u << maskBit)) == 0u;
+}
+
+fn raw_scaled(base: u32, i: u32) -> f32 {
+    return input[base + i] / params.temp;
+}
+
+fn scaled_logit(base: u32, i: u32, b: u32, tid: u32, phase: u32) -> f32 {
+    var val = input[base + i] / params.temp;
+    if (params.softmaxType == 4u) {
+        var seed = params.seed + b * 1337u + tid + phase * 7919u;
+        var u = rand_f32(&seed);
+        if (u < 1e-10) { u = 1e-10; }
+        val = val - log(-log(u));
+    }
+    if (params.softmaxType == 5u) {
+        if (is_masked(base + i)) { val = -1e30; }
+    }
+    return val;
+}
+
+fn wg_reduce(op: u32, tid: u32) {
+    for (var s = 128u; s > 0u; s >>= 1u) {
+        if (tid < s) {
+            if (op == 0u) {
+                shared_reduce[tid] = max(shared_reduce[tid], shared_reduce[tid + s]);
+            } else if (op == 1u) {
+                shared_reduce[tid] += shared_reduce[tid + s];
+            } else {
+                shared_reduce[tid] = min(shared_reduce[tid], shared_reduce[tid + s]);
+            }
+        }
+        workgroupBarrier();
+    }
+}
+
+fn sparsemax_tau(base: u32, size: u32, tid: u32) -> f32 {
+    var local_min: f32 = 1e38;
+    var local_max: f32 = -1e38;
+    for (var i = tid; i < size; i += 256u) {
+        let v = raw_scaled(base, i);
+        local_min = min(local_min, v);
+        local_max = max(local_max, v);
+    }
+    shared_reduce[tid] = local_min;
+    workgroupBarrier();
+    wg_reduce(2u, tid);
+    let gmin = shared_reduce[0];
+    workgroupBarrier();
+
+    shared_reduce[tid] = local_max;
+    workgroupBarrier();
+    wg_reduce(0u, tid);
+    let gmax = shared_reduce[0];
+    workgroupBarrier();
+
+    var lo = gmin - 1.0;
+    var hi = gmax;
+    for (var iter = 0u; iter < 48u; iter++) {
+        let mid = (lo + hi) * 0.5;
+        var local_sum: f32 = 0.0;
+        for (var i = tid; i < size; i += 256u) {
+            local_sum += max(0.0, raw_scaled(base, i) - mid);
+        }
+        shared_reduce[tid] = local_sum;
+        workgroupBarrier();
+        wg_reduce(1u, tid);
+        let gs = shared_reduce[0];
+        workgroupBarrier();
+        if (gs > 1.0) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        workgroupBarrier();
+    }
+    return (lo + hi) * 0.5;
+}
+
 @compute @workgroup_size(256, 1, 1)
 fn main(
     @builtin(local_invocation_id) local_id: vec3<u32>,
@@ -283,81 +414,62 @@ fn main(
     let tid = local_id.x;
     let size = params.size;
     let base = b * size;
-    var rng_seed = params.seed + b * 1337u + tid;
+
+    if (params.softmaxType == 6u) {
+        let tau = sparsemax_tau(base, size, tid);
+        for (var i = tid; i < size; i += 256u) {
+            output[base + i] = max(0.0, raw_scaled(base, i) - tau);
+        }
+        return;
+    }
 
     var local_max: f32 = -1e38;
     for (var i = tid; i < size; i += 256u) {
-        var val = input[base + i] / params.temp;
-
-        if (params.softmaxType == 4u) {
-            var u = rand_f32(&rng_seed);
-            if (u < 1e-10) { u = 1e-10; }
-            val = val - log(-log(u));
-        }
-
-        if (params.softmaxType == 5u) {
-             let maskIdx = i / 32u;
-             let maskBit = i % 32u;
-             let is_masked = (mask[maskIdx] & (1u << maskBit)) == 0u;
-             if (is_masked) { val = -1e30; }
-        }
-
-        local_max = max(local_max, val);
+        local_max = max(local_max, scaled_logit(base, i, b, tid, 0u));
     }
     shared_reduce[tid] = local_max;
     workgroupBarrier();
-
-    for (var s = 128u; s > 0u; s >>= 1u) {
-        if (tid < s) {
-            shared_reduce[tid] = max(shared_reduce[tid], shared_reduce[tid + s]);
-        }
-        workgroupBarrier();
-    }
+    wg_reduce(0u, tid);
     let global_max = shared_reduce[0];
     workgroupBarrier();
 
     var local_sum: f32 = 0.0;
     for (var i = tid; i < size; i += 256u) {
-        var val = input[base + i] / params.temp;
-        if (params.softmaxType == 4u) {
-             var sum_seed = params.seed + b * 1337u + tid;
-             var u = rand_f32(&sum_seed);
-             if (u < 1e-10) { u = 1e-10; }
-             val = val - log(-log(u));
-        }
-        if (params.softmaxType == 5u) {
-             let maskIdx = i / 32u;
-             let maskBit = i % 32u;
-             if ((mask[maskIdx] & (1u << maskBit)) == 0u) { val = -1e30; }
-        }
-        local_sum += exp(val - global_max);
+        local_sum += exp(scaled_logit(base, i, b, tid, 1u) - global_max);
     }
     shared_reduce[tid] = local_sum;
     workgroupBarrier();
-
-    for (var s = 128u; s > 0u; s >>= 1u) {
-        if (tid < s) {
-            shared_reduce[tid] += shared_reduce[tid + s];
-        }
-        workgroupBarrier();
-    }
+    wg_reduce(1u, tid);
     let global_sum = shared_reduce[0];
     workgroupBarrier();
 
     for (var i = tid; i < size; i += 256u) {
-        var val = input[base + i] / params.temp;
-        if (params.softmaxType == 4u) {
-             var out_seed = params.seed + b * 1337u + tid;
-             var u = rand_f32(&out_seed);
-             if (u < 1e-10) { u = 1e-10; }
-             val = val - log(-log(u));
-        }
-        if (params.softmaxType == 5u) {
-             let maskIdx = i / 32u;
-             let maskBit = i % 32u;
-             if ((mask[maskIdx] & (1u << maskBit)) == 0u) { val = -1e30; }
-        }
+        let val = scaled_logit(base, i, b, tid, 2u);
         output[base + i] = exp(val - global_max) / global_sum;
+    }
+
+    if (params.softmaxType == 9u) {
+        workgroupBarrier();
+        let w = params.entmaxAlpha - 1.0;
+        let tau = sparsemax_tau(base, size, tid);
+        var local_blend_sum: f32 = 0.0;
+        for (var i = tid; i < size; i += 256u) {
+            let soft = output[base + i];
+            let sparse = max(0.0, raw_scaled(base, i) - tau);
+            let blended = (1.0 - w) * soft + w * sparse;
+            output[base + i] = blended;
+            local_blend_sum += blended;
+        }
+        shared_reduce[tid] = local_blend_sum;
+        workgroupBarrier();
+        wg_reduce(1u, tid);
+        let blend_sum = shared_reduce[0];
+        workgroupBarrier();
+        if (blend_sum > 0.0) {
+            for (var i = tid; i < size; i += 256u) {
+                output[base + i] = output[base + i] / blend_sum;
+            }
+        }
     }
 }
 `

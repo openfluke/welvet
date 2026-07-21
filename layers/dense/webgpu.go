@@ -228,6 +228,9 @@ func BackwardWebGPU[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T
 
 func backwardWebGPUDispatch(l *Layer, dPreF, gxF []float32, batch, in, out int) error {
 	switch {
+	case l.Weights.Format == quant.FormatAffinePacked && l.Weights.Packed != nil:
+		return matVecAffineResidentT(l.Weights.Packed, dPreF, gxF, batch, in, out)
+
 	case l.Weights.Format == quant.FormatQ4_0 && l.Weights.Packed != nil:
 		scales, packed, ok := q4BlobToSIMD(l.Weights.Packed)
 		if !ok {
@@ -621,6 +624,40 @@ func matVecAffineResident(b *quant.Blob, x, y []float32, batch, in, out int) err
 		return err
 	}
 	return matVecPackedBatch(b, x, y, batch, in, out)
+}
+
+// matVecAffineResidentT runs AffinePacked transpose GEMV on device with sticky weights,
+// falling back to host quant.MatVecT for tiny mats or when device VRAM is full.
+func matVecAffineResidentT(b *quant.Blob, gy, gx []float32, batch, in, out int) error {
+	key := webgpu.BlobKey(unsafe.Pointer(b))
+	if webgpu.HasAffineWeight(key) {
+		return webgpu.DenseGEMVTAffineResident(key, nil, nil, nil, gy, gx, batch, in, out, b.BlockWeights)
+	}
+	if len(b.Raw) < 512<<10 {
+		return matVecTPackedBatch(b, gy, gx, batch, in, out)
+	}
+	scales, biases, words, group, ok := AffineBlobStaging(b)
+	if !ok {
+		return fmt.Errorf("dense: WebGPU AffineT projection failed")
+	}
+	err := webgpu.DenseGEMVTAffineResident(key, scales, biases, words, gy, gx, batch, in, out, group)
+	if err == nil {
+		return nil
+	}
+	if !webgpu.IsAffineVRAMFull(err) {
+		return err
+	}
+	return matVecTPackedBatch(b, gy, gx, batch, in, out)
+}
+
+// matVecTPackedBatch runs quant.MatVecT once per batch row (host path).
+func matVecTPackedBatch(b *quant.Blob, gy, gx []float32, batch, in, out int) error {
+	for bat := 0; bat < batch; bat++ {
+		if err := quant.MatVecT(b, gy[bat*out:(bat+1)*out], gx[bat*in:(bat+1)*in]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // matVecPackedBatch runs MatVecPackedBlob once per batch row (host path).

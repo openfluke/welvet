@@ -7,7 +7,7 @@ import (
 	"github.com/openfluke/welvet/simd"
 )
 
-// ForwardSIMD — Σx / Σx² via Plan 9 DotTile; scale on host.
+// ForwardSIMD — Σx/Σx² via DotTile; affine via simd.LayerNormScaleF32.
 func ForwardSIMD[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
 	if !simd.Enabled() {
 		return nil, nil, fmt.Errorf("layernorm: BackendSIMD but Plan 9 SIMD not enabled")
@@ -15,7 +15,7 @@ func ForwardSIMD[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 	return forwardHost(l, input, true)
 }
 
-// BackwardSIMD — reverse of ForwardSIMD.
+// BackwardSIMD — reverse of ForwardSIMD (DotTile stats + simd scale for dx).
 func BackwardSIMD[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
 	if !simd.Enabled() {
 		return nil, nil, fmt.Errorf("layernorm: BackendSIMD but Plan 9 SIMD not enabled")

@@ -62,6 +62,7 @@ type session struct {
 	affCacheBytes uint64
 	affCacheFull  bool
 	pipeAffine    *wgpu.ComputePipeline
+	pipeAffineT   *wgpu.ComputePipeline
 
 	// Sticky dense FP32 weights (MOSS-TTS / generic dense fuse).
 	f32Cache      map[uintptr]*f32GPU
@@ -73,9 +74,41 @@ type session struct {
 	pipeRMSNormBwd    *wgpu.ComputePipeline
 	pipeRMSNormBwdRed *wgpu.ComputePipeline
 	pipeLayerNormFwd  *wgpu.ComputePipeline
-	pipeSoftmaxFwd    *wgpu.ComputePipeline
-	pipeSoftmaxBwd    *wgpu.ComputePipeline
-	pipeSwiGLUFuse    *wgpu.ComputePipeline
+	pipeSoftmaxFwd     *wgpu.ComputePipeline
+	pipeSoftmaxBwd     *wgpu.ComputePipeline
+	pipeSwiGLUFuse     *wgpu.ComputePipeline
+	pipeSwiGLUFuseBwd  *wgpu.ComputePipeline
+	pipeLayerNormBwd    *wgpu.ComputePipeline
+	pipeLayerNormBwdRed *wgpu.ComputePipeline
+	pipeEmbedding       *wgpu.ComputePipeline
+	pipeEmbeddingBwd    *wgpu.ComputePipeline
+
+	// MHA / RoPE (on-device attention path).
+	pipeRoPE     *wgpu.ComputePipeline
+	pipeKVUpdate *wgpu.ComputePipeline
+	pipeMHABwd   *wgpu.ComputePipeline
+	mhaPipes     map[uint64]*wgpu.ComputePipeline
+
+	// CNN tiled conv (FormatNone f32; shaders keyed by tileSize<<32|kernelVol or tileSize).
+	cnn1FwdPipes   map[uint64]*wgpu.ComputePipeline
+	cnn1BwdDXPipes map[uint64]*wgpu.ComputePipeline
+	cnn1BwdDWPipes map[uint64]*wgpu.ComputePipeline
+	cnn2FwdPipes   map[uint64]*wgpu.ComputePipeline
+	cnn2BwdDXPipes map[uint64]*wgpu.ComputePipeline
+	cnn2BwdDWPipes map[uint64]*wgpu.ComputePipeline
+	cnn3FwdPipes   map[uint64]*wgpu.ComputePipeline
+	cnn3BwdDXPipes map[uint64]*wgpu.ComputePipeline
+	cnn3BwdDWPipes map[uint64]*wgpu.ComputePipeline
+	wgStorageMax   uint32
+	maxInvPerWG    uint32
+
+	// RNN / LSTM fused recurrence (FormatNone f32).
+	pipeRNNStep    *wgpu.ComputePipeline
+	pipeLSTMStep   *wgpu.ComputePipeline
+	rnnBwdDXPipes  map[int]*wgpu.ComputePipeline
+	rnnBwdDWPipes  map[int]*wgpu.ComputePipeline
+	lstmBwdDXPipes map[int]*wgpu.ComputePipeline
+	lstmBwdDWPipes map[int]*wgpu.ComputePipeline
 }
 
 // Available reports whether a real WebGPU device was acquired.

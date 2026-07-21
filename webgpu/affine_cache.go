@@ -202,6 +202,142 @@ func DenseGEMVAffineResident(key uintptr, scales, biases []float32, words []uint
 	return sess.gemvAffineResident(e, x, y, batch, in, out)
 }
 
+// DenseGEMVTAffineResident runs Affine4 transpose GEMV (dX) with sticky weights.
+func DenseGEMVTAffineResident(key uintptr, scales, biases []float32, words []uint32, gy, gx []float32, batch, in, out, group int) error {
+	ensure()
+	if !haveGPU || sess == nil {
+		if initErr == nil {
+			initErr = fmt.Errorf("webgpu: no device")
+		}
+		return fmt.Errorf("webgpu DenseGEMVTAffineResident: %w", initErr)
+	}
+	if key == 0 || in <= 0 || in%8 != 0 || len(gy) < batch*out || len(gx) < batch*in {
+		return fmt.Errorf("webgpu DenseGEMVTAffineResident: shape")
+	}
+	if group <= 0 {
+		group = 64
+	}
+	mu.Lock()
+	sess.ensureAffCache()
+	if e, ok := sess.affCache[key]; ok && e != nil {
+		mu.Unlock()
+		return sess.gemvtAffineResident(e, gy, gx, batch, in, out)
+	}
+	mu.Unlock()
+
+	needWords := (out * in) / 8
+	needSB := out * (in / group)
+	if len(words) < needWords || len(scales) < needSB || len(biases) < needSB {
+		return fmt.Errorf("webgpu DenseGEMVTAffineResident: short")
+	}
+	mu.Lock()
+	e, err := sess.uploadAffineLocked(key, scales[:needSB], biases[:needSB], words[:needWords], out, in, group)
+	mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return sess.gemvtAffineResident(e, gy, gx, batch, in, out)
+}
+
+func (s *session) ensureAffineTPipe() error {
+	if s.pipeAffineT != nil {
+		return nil
+	}
+	p, err := makePipeline(s.device, ShaderDenseAffine4T, "welvet-dense-affine4t")
+	if err != nil {
+		return err
+	}
+	s.pipeAffineT = p
+	return nil
+}
+
+func (s *session) gemvtAffineResident(e *affGPU, gy, gx []float32, batch, in, out int) error {
+	if e == nil {
+		return fmt.Errorf("webgpu: nil affine weights")
+	}
+	if err := s.ensureAffineTPipe(); err != nil {
+		return err
+	}
+	return s.dispatchAffineT(s.device, s.queue, s.pipeAffineT, e, gy, gx, batch, in, out)
+}
+
+func (s *session) dispatchAffineT(dev *wgpu.Device, q *wgpu.Queue, pipe *wgpu.ComputePipeline,
+	e *affGPU, gy, gx []float32, batch, in, out int) error {
+
+	const wg = 64
+	gyBuf, err := dev.CreateBufferInit(&wgpu.BufferInitDescriptor{
+		Label: "welvet-afft-gy", Contents: wgpu.ToBytes(gy[:batch*out]),
+		Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst,
+	})
+	if err != nil {
+		return err
+	}
+	defer gyBuf.Destroy()
+
+	gxBytes := uint64(batch * in * 4)
+	if gxBytes < 64 {
+		gxBytes = 64
+	}
+	gxBuf, err := dev.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "welvet-afft-gx", Size: gxBytes,
+		Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopySrc | wgpu.BufferUsageCopyDst,
+	})
+	if err != nil {
+		return err
+	}
+	defer gxBuf.Destroy()
+
+	p := gpuParamsAffine{
+		Batch: uint32(batch), InputSize: uint32(in), OutputSize: uint32(out), GroupSize: uint32(e.group),
+	}
+	pBuf, err := dev.CreateBufferInit(&wgpu.BufferInitDescriptor{
+		Label: "welvet-afft-p", Contents: wgpu.ToBytes([]gpuParamsAffine{p}),
+		Usage: wgpu.BufferUsageUniform | wgpu.BufferUsageCopyDst,
+	})
+	if err != nil {
+		return err
+	}
+	defer pBuf.Destroy()
+
+	bg, err := dev.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Layout: pipe.GetBindGroupLayout(0),
+		Entries: []wgpu.BindGroupEntry{
+			{Binding: 0, Buffer: pBuf, Offset: 0, Size: pBuf.GetSize()},
+			{Binding: 1, Buffer: gyBuf, Offset: 0, Size: gyBuf.GetSize()},
+			{Binding: 2, Buffer: e.scales, Offset: 0, Size: e.scales.GetSize()},
+			{Binding: 3, Buffer: e.biases, Offset: 0, Size: e.biases.GetSize()},
+			{Binding: 4, Buffer: e.words, Offset: 0, Size: e.words.GetSize()},
+			{Binding: 5, Buffer: gxBuf, Offset: 0, Size: gxBuf.GetSize()},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	defer bg.Release()
+
+	enc, err := dev.CreateCommandEncoder(nil)
+	if err != nil {
+		return err
+	}
+	pass := enc.BeginComputePass(nil)
+	pass.SetPipeline(pipe)
+	pass.SetBindGroup(0, bg, nil)
+	pass.DispatchWorkgroups(tiling.GPUWorkgroupsX(in, wg), uint32(batch), 1)
+	pass.End()
+	cmd, err := enc.Finish(nil)
+	if err != nil {
+		return err
+	}
+	q.Submit(cmd)
+
+	outX, err := readbackF32(dev, q, gxBuf, batch*in)
+	if err != nil {
+		return err
+	}
+	copy(gx, outX)
+	return nil
+}
+
 func (s *session) ensureAffinePipe() error {
 	if s.pipeAffine != nil {
 		return nil
@@ -350,5 +486,43 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         acc += s * codeDot + beta * sumX;
     }
     Y[b * params.outputSize + o] = acc;
+}
+`
+
+// ShaderDenseAffine4T — transpose GEMV: gx = W^T @ gy (Affine4 g64).
+const ShaderDenseAffine4T = `
+struct Params { batch: u32, inputSize: u32, outputSize: u32, groupSize: u32, };
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> GY: array<f32>;
+@group(0) @binding(2) var<storage, read> scales: array<f32>;
+@group(0) @binding(3) var<storage, read> biases: array<f32>;
+@group(0) @binding(4) var<storage, read> weights: array<u32>;
+@group(0) @binding(5) var<storage, read_write> GX: array<f32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    let b = gid.y;
+    if (i >= params.inputSize || b >= params.batch) { return; }
+    let group = params.groupSize;
+    let groups = params.inputSize / group;
+    let g = i / group;
+    let colInGroup = i % group;
+    let wordsPerRow = params.inputSize / 8u;
+    let wordsInGroup = group / 8u;
+    let wi = colInGroup / 8u;
+    let n = colInGroup % 8u;
+    let gyBase = b * params.outputSize;
+    var acc: f32 = 0.0;
+    for (var o: u32 = 0u; o < params.outputSize; o++) {
+        let sb = o * groups + g;
+        let s = scales[sb];
+        let beta = biases[sb];
+        let baseWord = o * wordsPerRow + g * wordsInGroup + wi;
+        let packed = weights[baseWord];
+        let code = f32((packed >> (n * 4u)) & 0xFu);
+        acc += GY[gyBase + o] * (s * code + beta);
+    }
+    GX[b * params.inputSize + i] = acc;
 }
 `

@@ -5,19 +5,20 @@ import (
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/dense"
+	"github.com/openfluke/welvet/simd"
 )
 
 // ForwardCPUTiled — Gate/Up/Down via dense; SiLU ⊙ on host.
 func ForwardCPUTiled[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
-	return forwardHost(l, input)
+	return forwardHost(l, input, false)
 }
 
 // BackwardCPUTiled — reverse SwiGLU; gradW = concat(dGate, dUp, dDown).
 func BackwardCPUTiled[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
-	return backwardHost(l, gradOut, input, pre)
+	return backwardHost(l, gradOut, input, pre, false)
 }
 
-func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T], useSIMD bool) (pre, post *core.Tensor[T], err error) {
 	lay, err := parseLayout(l.Cfg.InputDim, input)
 	if err != nil {
 		return nil, nil, err
@@ -36,9 +37,18 @@ func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 
 	bs := lay.batch * lay.seq
 	h := core.NewTensor[T](bs, inter)
-	for i := 0; i < bs*inter; i++ {
-		g := core.Activate(gatePre.Data[i], core.ActivationSilu)
-		h.Data[i] = core.FromFloat64[T](core.AsFloat64(g) * core.AsFloat64(upPost.Data[i]))
+	n := bs * inter
+	if useSIMD && simd.Enabled() {
+		gateF := core.SliceAsFloat32(gatePre.Data)
+		upF := core.SliceAsFloat32(upPost.Data)
+		hF := make([]float32, n)
+		simd.SiluMulF32(gateF, upF, hF, n)
+		core.SliceFromFloat32(hF, h.Data)
+	} else {
+		for i := 0; i < n; i++ {
+			g := core.Activate(gatePre.Data[i], core.ActivationSilu)
+			h.Data[i] = core.FromFloat64[T](core.AsFloat64(g) * core.AsFloat64(upPost.Data[i]))
+		}
 	}
 
 	downPre, downPost, err := dense.Forward(l.Down, h)
@@ -51,7 +61,7 @@ func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 	return pre, post, nil
 }
 
-func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T], useSIMD bool) (gradIn, gradW *core.Tensor[T], err error) {
 	lay, err := parseLayout(l.Cfg.InputDim, input)
 	if err != nil {
 		return nil, nil, err
@@ -87,12 +97,24 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 
 	dGate := core.NewTensor[T](bs, inter)
 	dUp := core.NewTensor[T](bs, inter)
-	for i := 0; i < bs*inter; i++ {
-		silu := core.Activate(gatePre.Data[i], core.ActivationSilu)
-		dsilu := core.ActivateDeriv(gatePre.Data[i], core.ActivationSilu)
-		dh := core.AsFloat64(gradH.Data[i])
-		dUp.Data[i] = core.FromFloat64[T](dh * core.AsFloat64(silu))
-		dGate.Data[i] = core.FromFloat64[T](dh * core.AsFloat64(upPost.Data[i]) * core.AsFloat64(dsilu))
+	n := bs * inter
+	if useSIMD && simd.Enabled() {
+		gateF := core.SliceAsFloat32(gatePre.Data)
+		upF := core.SliceAsFloat32(upPost.Data)
+		gradHF := core.SliceAsFloat32(gradH.Data)
+		dGateF := make([]float32, n)
+		dUpF := make([]float32, n)
+		simd.SiluMulBwdF32(gateF, upF, gradHF, dGateF, dUpF, n)
+		core.SliceFromFloat32(dGateF, dGate.Data)
+		core.SliceFromFloat32(dUpF, dUp.Data)
+	} else {
+		for i := 0; i < n; i++ {
+			silu := core.Activate(gatePre.Data[i], core.ActivationSilu)
+			dsilu := core.ActivateDeriv(gatePre.Data[i], core.ActivationSilu)
+			dh := core.AsFloat64(gradH.Data[i])
+			dUp.Data[i] = core.FromFloat64[T](dh * core.AsFloat64(silu))
+			dGate.Data[i] = core.FromFloat64[T](dh * core.AsFloat64(upPost.Data[i]) * core.AsFloat64(dsilu))
+		}
 	}
 
 	gradInG, gradWG, err := dense.Backward(l.Gate, dGate, flat, gatePre)

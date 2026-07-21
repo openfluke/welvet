@@ -82,7 +82,7 @@ type SoftmaxKind int
 
 const (
 	SoftmaxStandard SoftmaxKind = iota // max-subtract softmax (default)
-	SoftmaxSigmoid                     // reserved (some diffusion / linear hybrids) — hard-error until wired
+	SoftmaxSigmoid                     // independent σ(score); diffusion / linear hybrids
 )
 
 func (s SoftmaxKind) String() string {

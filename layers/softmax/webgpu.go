@@ -7,29 +7,68 @@ import (
 	"github.com/openfluke/welvet/webgpu"
 )
 
-// gpuSupported reports whether Kind maps onto the standard softmax math the
-// device kernel implements (max-reduce, exp-sum-reduce, normalize). Gumbel,
-// Masked, Sparse and Entmax need per-kind logic the shader does not carry —
-// they are host-only on WebGPU (honest error, no silent host fallback).
+// gpuSupported reports whether Kind has an on-device forward/backward kernel.
 func gpuSupported(k Kind) bool {
 	switch k {
-	case KindStandard, KindTemperature, KindGrid, KindHierarchical:
+	case KindStandard, KindTemperature, KindGrid, KindHierarchical,
+		KindGumbel, KindMasked, KindSparse, KindEntmax:
 		return true
 	default:
 		return false
 	}
 }
 
-// ForwardWebGPU — real device only (no host fake); standard/grid/hierarchical
-// Softmax runs on-device (webgpu.Softmax, one workgroup per row/group).
-// Gumbel/Masked/Sparse/Entmax are not implemented on-device and error instead
-// of silently falling back to host.
+func kindToGPUType(k Kind) uint32 {
+	switch k {
+	case KindStandard:
+		return webgpu.SoftmaxTypeStandard
+	case KindGrid:
+		return webgpu.SoftmaxTypeGrid
+	case KindHierarchical:
+		return webgpu.SoftmaxTypeHierarchical
+	case KindTemperature:
+		return webgpu.SoftmaxTypeTemperature
+	case KindGumbel:
+		return webgpu.SoftmaxTypeGumbel
+	case KindMasked:
+		return webgpu.SoftmaxTypeMasked
+	case KindSparse:
+		return webgpu.SoftmaxTypeSparse
+	case KindEntmax:
+		return webgpu.SoftmaxTypeEntmax
+	default:
+		return webgpu.SoftmaxTypeStandard
+	}
+}
+
+func maskF32FromBool(mask []bool, n int) []float32 {
+	if len(mask) == 0 {
+		return nil
+	}
+	out := make([]float32, n)
+	for i := 0; i < n; i++ {
+		if i < len(mask) && mask[i] {
+			out[i] = 1
+		}
+	}
+	return out
+}
+
+func entmaxAlphaF32(cfg Config) float32 {
+	alpha := float32(cfg.EntmaxAlpha)
+	if alpha == 0 {
+		alpha = 1.5
+	}
+	return alpha
+}
+
+// ForwardWebGPU — real device only (no host fake).
 func ForwardWebGPU[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
 	if !webgpu.Available() {
 		return nil, nil, fmt.Errorf("softmax: BackendWebGPU but no device (no host fake)")
 	}
 	if !gpuSupported(l.Cfg.Kind) {
-		return nil, nil, fmt.Errorf("softmax: WebGPU only standard/grid/hierarchical; kind %s host-only", l.Cfg.Kind)
+		return nil, nil, fmt.Errorf("softmax: WebGPU unsupported kind %s", l.Cfg.Kind)
 	}
 	lay, err := parseLayout(l.Cfg, input)
 	if err != nil {
@@ -37,7 +76,9 @@ func ForwardWebGPU[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *
 	}
 	xF := core.SliceAsFloat32(input.Data)
 	yF := make([]float32, lay.n)
-	if err := webgpu.Softmax(xF, yF, lay.rows, lay.cols, float32(lay.temp)); err != nil {
+	maskF := maskF32FromBool(l.Cfg.Mask, lay.n)
+	kind := kindToGPUType(l.Cfg.Kind)
+	if err := webgpu.SoftmaxEx(xF, yF, maskF, lay.rows, lay.cols, float32(lay.temp), kind, 1, entmaxAlphaF32(l.Cfg)); err != nil {
 		return nil, nil, err
 	}
 	y := make([]T, lay.n)
@@ -56,7 +97,7 @@ func BackwardWebGPU[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T
 		return nil, nil, fmt.Errorf("softmax: BackendWebGPU but no device (no host fake)")
 	}
 	if !gpuSupported(l.Cfg.Kind) {
-		return nil, nil, fmt.Errorf("softmax: WebGPU only standard/grid/hierarchical; kind %s host-only", l.Cfg.Kind)
+		return nil, nil, fmt.Errorf("softmax: WebGPU unsupported kind %s", l.Cfg.Kind)
 	}
 	lay, err := parseLayout(l.Cfg, pre)
 	if err != nil {
@@ -69,6 +110,13 @@ func BackwardWebGPU[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T
 		return nil, nil, fmt.Errorf("softmax: nil/short gradOut/pre")
 	}
 	gyF := core.SliceAsFloat32(gradOut.Data)
+	if l.Cfg.Kind == KindMasked {
+		for i := 0; i < lay.n; i++ {
+			if i < len(l.Cfg.Mask) && !l.Cfg.Mask[i] {
+				gyF[i] = 0
+			}
+		}
+	}
 	yF := core.SliceAsFloat32(pre.Data)
 	gxF := make([]float32, lay.n)
 	if err := webgpu.SoftmaxBackward(gyF, yF, gxF, lay.rows, lay.cols, float32(lay.temp)); err != nil {
