@@ -21,3 +21,4 @@ apps/flux2
 apps/mosstts
 apps/mosstts/_ref/
 openfluke.github.io
+.cache/

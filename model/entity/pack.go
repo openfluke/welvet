@@ -39,6 +39,9 @@ func PackFromHF(snapshotDir, outPath string, opts PackOptions) error {
 	if kind == hf.ArchUnknown {
 		return fmt.Errorf("unsupported HF architecture (model_type=%q)", hf.ConfigStringDefault(config, "model_type", ""))
 	}
+	if kind == hf.ArchWav2Vec2CTC {
+		return PackFromWav2Vec2(snapshotDir, outPath, opts)
+	}
 	if kind == hf.ArchQwen35Hybrid {
 		return PackFromQwen35MLX(snapshotDir, outPath, opts)
 	}

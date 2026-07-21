@@ -21,8 +21,26 @@ type WeightBlob struct {
 	Format string  `json:"format"` // "none", "Q4_0", "Q4_K", …
 	Rows   int     `json:"rows,omitempty"`
 	Cols   int     `json:"cols,omitempty"`
+	Shape  []int   `json:"shape,omitempty"` // ND tensors (wav2vec2 / whisper)
 	Scale  float32 `json:"scale,omitempty"`
 	Native bool    `json:"native"`
+}
+
+// Wav2Vec2Spec is the ASR add-on in the ENTITY header (facebook/wav2vec2-* CTC).
+type Wav2Vec2Spec struct {
+	Architecture string `json:"architecture"`
+	HiddenSize   int    `json:"hidden_size"`
+	VocabSize    int    `json:"vocab_size"`
+	NumLayers    int    `json:"num_hidden_layers"`
+	NumHeads     int    `json:"num_attention_heads"`
+	Intermediate int    `json:"intermediate_size"`
+	PadTokenID   int    `json:"pad_token_id"`
+	WeightDType  string `json:"weight_dtype,omitempty"`
+	PackFormat   string `json:"pack_format,omitempty"`
+	Snapshot     string `json:"snapshot,omitempty"`
+	Repo         string `json:"repo,omitempty"`
+	VocabBlob    string `json:"vocab_blob,omitempty"`
+	ConfigBlob   string `json:"config_blob,omitempty"`
 }
 
 // TransformerDims records decoder hyperparameters.
@@ -70,6 +88,7 @@ type headerDoc struct {
 	Status        string           `json:"status"`
 	Network       json.RawMessage  `json:"network,omitempty"`
 	Transformer   *TransformerSpec `json:"transformer,omitempty"`
+	Wav2Vec2      *Wav2Vec2Spec    `json:"wav2vec2,omitempty"`
 	Blobs         []WeightBlob     `json:"blobs"`
 }
 
@@ -78,6 +97,7 @@ type Header struct {
 	FormatVersion uint16
 	Flags         uint16
 	Transformer   *TransformerSpec
+	Wav2Vec2      *Wav2Vec2Spec
 	Blobs         []WeightBlob
 	DataOffset    int
 	Status        string
@@ -151,6 +171,7 @@ func (ef *File) readHeader() error {
 		FormatVersion: version,
 		Flags:         flags,
 		Transformer:   doc.Transformer,
+		Wav2Vec2:      doc.Wav2Vec2,
 		Blobs:         doc.Blobs,
 		DataOffset:    fixedHeaderSize() + int(headerLen),
 		Status:        doc.Status,

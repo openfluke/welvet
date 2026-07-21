@@ -24,6 +24,25 @@ func WriteTransformerFile(outPath string, spec *TransformerSpec, blobs []WeightB
 	if spec.Engine != "" {
 		doc.Engine = spec.Engine
 	}
+	return writeEntityFile(outPath, doc, payload)
+}
+
+// WriteWav2Vec2File writes a wav2vec2 CTC ASR .entity checkpoint.
+func WriteWav2Vec2File(outPath string, spec *Wav2Vec2Spec, blobs []WeightBlob, payload []byte) error {
+	if spec == nil {
+		return fmt.Errorf("entity.WriteWav2Vec2File: nil spec")
+	}
+	doc := headerDoc{
+		FormatVersion: FormatVersion,
+		Engine:        "welvet",
+		Status:        "packed",
+		Wav2Vec2:      spec,
+		Blobs:         blobs,
+	}
+	return writeEntityFile(outPath, doc, payload)
+}
+
+func writeEntityFile(outPath string, doc headerDoc, payload []byte) error {
 	headerJSON, err := json.Marshal(doc)
 	if err != nil {
 		return err

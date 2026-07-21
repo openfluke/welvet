@@ -94,6 +94,7 @@ const (
 	ArchUnknown ArchitectureKind = iota
 	ArchLlamaStyleDecoder
 	ArchQwen35Hybrid // Qwen3.5 / Bonsai: Gated DeltaNet + full attention
+	ArchWav2Vec2CTC  // facebook/wav2vec2-* ForCTC ASR
 )
 
 func (k ArchitectureKind) String() string {
@@ -102,6 +103,8 @@ func (k ArchitectureKind) String() string {
 		return "llama_style_decoder"
 	case ArchQwen35Hybrid:
 		return "qwen35_hybrid"
+	case ArchWav2Vec2CTC:
+		return "wav2vec2_ctc"
 	default:
 		return "unknown"
 	}
@@ -112,6 +115,9 @@ func (k ArchitectureKind) String() string {
 func DetectArchitecture(config map[string]any) ArchitectureKind {
 	if IsQwen35Hybrid(config) {
 		return ArchQwen35Hybrid
+	}
+	if IsWav2Vec2CTC(config) {
+		return ArchWav2Vec2CTC
 	}
 	cfg := EffectiveConfig(config)
 	modelType := strings.ToLower(ConfigStringDefault(cfg, "model_type", ""))
@@ -142,6 +148,22 @@ func DetectArchitecture(config map[string]any) ArchitectureKind {
 		}
 	}
 	return ArchUnknown
+}
+
+// IsWav2Vec2CTC reports Wav2Vec2ForCTC / model_type=wav2vec2 ASR checkpoints.
+func IsWav2Vec2CTC(config map[string]any) bool {
+	cfg := EffectiveConfig(config)
+	modelType := strings.ToLower(ConfigStringDefault(cfg, "model_type", ""))
+	if modelType == "wav2vec2" {
+		return true
+	}
+	for _, arch := range architectureStrings(config) {
+		a := strings.ToLower(arch)
+		if strings.Contains(a, "wav2vec2") {
+			return true
+		}
+	}
+	return false
 }
 
 func architectureStrings(config map[string]any) []string {
