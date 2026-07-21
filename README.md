@@ -4,8 +4,8 @@
 
 | | |
 |--|--|
-| **Version** | **v0.76** |
-| **Toward v1.0** | **76 / 100** pts (see [Version scorecard](#version-scorecard)) |
+| **Version** | **v0.78** |
+| **Toward v1.0** | **77.5 / 100** pts (see [Version scorecard](#version-scorecard)) |
 
 Not v1 yet — peak-fused kernels, extended layers, apps, and stubs still leave points on the table.
 
@@ -30,7 +30,7 @@ Most transformer / CNN FLOPs are **weights × activations**. Welvet keeps **one*
 **This is intentional**, not a missing abstraction: one MatVec surface means one place for quant bugs, dtype wires, and backend parity. Separate native kernels pay off when the calc is **not** GEMV (fused attention, tiled CNN, Softmax/SiLU SIMD, true fused k-quant asm).
 
 **Not “fully native” yet (honest):**
-- k/IQ/**AffinePacked** SIMD often = **inflate-once F32Cache + DotTile** (not true fused k-quant `.s`)
+- Peak dedicated k/IQ Plan 9 `.s` still open (scorecard §12); Dense SIMD k/IQ/Affine is fused Go/int8 cache + Dot* (no F32 inflate)
 - MHA attn, SwiGLU SiLU⊙ (SIMD), Softmax/Embedding under SIMD, CNN im2col = **host ALU**
 - WebGPU device ALU is typically **f32** at the boundary (storage dtype narrows on upload)
 - Suite honesty: `w2a/suites.StampBackendNote` / `AffinePackable` — no silent host counted as “WebGPU/SIMD done”
@@ -50,7 +50,7 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v0.76 (pre-v1).** v1.0 ships only when the scorecard hits **100/100** (every board row ✅).
+**Status: v0.78 (pre-v1).** v1.0 ships only when the scorecard hits **100/100** (every board row ✅).
 
 | Legend | Meaning | Pts credit |
 |--------|---------|------------|
@@ -62,13 +62,13 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 
 ## Version scorecard
 
-**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0** (today: `round(76)` → **v0.76**).  
+**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0** (today: `round(77.5)` → **v0.78**).  
 Recompute whenever a board row flips status. Weights sum to **100**.
 
 | # | Section | Wt | How scored today | Earned |
 |--:|---------|---:|------------------|-------:|
 | 1 | **Foundation** — layout, rules, `core`, `weights`, `quant`, `simd`, `webgpu` base, `tiling` | 15 | all ✅ | **15.0** |
-| 2 | **Dense MatVec microkernel** — FormatNone×34 + quants × backends, train/grad; k/IQ/Affine SIMD still inflate | 15 | ✅ majority; k/IQ/Affine SIMD 🚧 (~3 wt) | **13.5** |
+| 2 | **Dense MatVec microkernel** — FormatNone×34 + quants × backends, train/grad; fused Dense SIMD for all quants | 15 | all ✅ | **15.0** |
 | 3 | **Transformer stack** — MHA, SwiGLU, RMSNorm, LayerNorm, Softmax, Embedding, Sequential, Residual, seqmix | 14 | all ✅ (suite-complete; some ALU still host — counted in §12) | **14.0** |
 | 4 | **CNN / RNN / LSTM** — full timed 34×20×3 matrices; tiled-conv / recurrence shaders in §12 | 6 | all ✅ | **6.0** |
 | 5 | **Extended layers** — GDN, ConvT1–3, Mamba, KMeans, Parallel, Metacognition | 7 | all 🚧 (smoke+census, not full matrix) | **3.5** |
@@ -78,10 +78,10 @@ Recompute whenever a board row flips status. Weights sum to **100**.
 | 9 | **Apps** — `octo` model shell | 3 | 🚧 | **1.5** |
 | 10 | **Stubs (non-accel)** — seed, serialization, hardware, memory, fountain, donate | 3 | all 🚧 | **1.5** |
 | 11 | **Accel** — NPU / Metal / QNN plugins | 2 | ⬜ | **0.0** |
-| 12 | **Peak fused / no host ALU** — fused k/IQ `.s`, on-device attn/RoPE, LN bwd GPU, tiled CNN, Softmax/SiLU SIMD, GDN `Exec`, exotic Softmax GPU, … | 14 | ⬜ (partial shaders exist but row stays ⬜ until *every* cell is peak) | **0.0** |
-| | **Total → v1.0** | **100** | | **76.0** |
+| 12 | **Peak fused / no host ALU** — peak k/IQ `.s`, on-device attn/RoPE, LN bwd GPU, tiled CNN, Softmax/SiLU SIMD, GDN `Exec`, exotic Softmax GPU, … | 14 | ⬜ (partial shaders exist but row stays ⬜ until *every* cell is peak) | **0.0** |
+| | **Total → v1.0** | **100** | | **77.5** |
 
-**v0.76 readout:** foundation + Dense + transformer/CNN timed stacks + runtime/systems + **Model/IO** carry most of the score. Biggest remaining chunks: **§12 peak fused (14)**, **§5 extended layers (~3.5 left)**, then apps/stubs/accel.
+**v0.78 readout:** foundation + Dense (all fused SIMD quants) + transformer/CNN timed stacks + runtime/systems + **Model/IO** carry most of the score. Biggest remaining chunks: **§12 peak fused (14)**, **§5 extended layers (~3.5 left)**, then apps/stubs/accel.
 
 Detail tables below still list per-feature ✅/🚧/⬜; they feed honesty, but **only this scorecard sets the version number**.
 
@@ -102,7 +102,7 @@ Status rollup — version points live in the [scorecard](#version-scorecard) onl
 | webgpu | Dense GEMV family + RMSNorm/Softmax/LayerNorm-fwd/SwiGLU-fuse shaders; attn/tiled-CNN ⬜ | ✅ |
 | **Dense** FormatNone × 34 × CPU/SIMD/WebGPU fwd+bwd | ✅ |
 | **Dense** all 20 quants — WebGPU fwd+bwd | ✅ |
-| **Dense** k/IQ/Affine SIMD (inflate+DotTile, not fused `.s`) | 🚧 |
+| **Dense** k/IQ/Affine SIMD (group Dot* + scales; no F32 inflate) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
 | `runtime/forward/` / `backward` / `training` — Dense…Residual + ConvT1–3 + Parallel + KMeans + Mamba + Metacognition + GDN | ✅ |
 | ConvT / Parallel / KMeans / Mamba / Metacognition / GDN — lighter w2a suites (smoke+census, not full 34×20 timed matrix) | 🚧 |
@@ -217,26 +217,25 @@ CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 | Q4_1 | ✅ | ✅ fused DotQ4_1 | ✅ on-device Q4_1 |
 | Q5_0 | ✅ | ✅ fused DotQ5 | ✅ on-device Q5 |
 | Q5_1 | ✅ | ✅ fused DotQ5_1 | ✅ on-device Q5 |
-| Q2_K | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device k GEMV |
-| Q3_K | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device k GEMV |
-| Q4_K | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device k GEMV |
-| Q5_K | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device k GEMV |
-| Q6_K | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device k GEMV |
-| IQ1_S | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
-| IQ2_XXS | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
-| IQ2_XS | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
-| IQ3_XXS | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
-| IQ3_S | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
-| IQ4_NL | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
-| IQ4_XS | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ on-device IQ GEMV |
+| Q2_K | ✅ | ✅ fused group DotKRow + scales/mins | ✅ on-device k GEMV |
+| Q3_K | ✅ | ✅ fused group DotKRow + scales/mins | ✅ on-device k GEMV |
+| Q4_K | ✅ | ✅ fused group DotKRow + scales/mins | ✅ on-device k GEMV |
+| Q5_K | ✅ | ✅ fused group DotKRow + scales/mins | ✅ on-device k GEMV |
+| Q6_K | ✅ | ✅ fused group DotKRow + scales | ✅ on-device k GEMV |
+| IQ1_S | ✅ | ✅ fused DotIQRow + scales | ✅ on-device IQ GEMV |
+| IQ2_XXS | ✅ | ✅ fused DotIQRow + scales | ✅ on-device IQ GEMV |
+| IQ2_XS | ✅ | ✅ fused DotIQRow + scales | ✅ on-device IQ GEMV |
+| IQ3_XXS | ✅ | ✅ fused DotIQRow + scales | ✅ on-device IQ GEMV |
+| IQ3_S | ✅ | ✅ fused DotIQRow + scales | ✅ on-device IQ GEMV |
+| IQ4_NL | ✅ | ✅ fused DotIQRow + NL grid | ✅ on-device IQ GEMV |
+| IQ4_XS | ✅ | ✅ fused DotIQRow + scales | ✅ on-device IQ GEMV |
 | TernaryPacked | ✅ | ✅ BitNet code-dot SIMD | ✅ on-device ternary GEMV |
 | BinaryPacked | ✅ | ✅ bit-fused DotBinaryWord | ✅ on-device binary GEMV |
-| AffinePacked | ✅ | 🚧 inflate-once F32Cache+DotTile | ✅ resident Affine GEMV |
+| AffinePacked | ✅ | ✅ fused Affine packed code-dot | ✅ resident Affine GEMV |
 
 Legend for this table:
-- ✅ = fused / native packed path for that backend (no per-call full-matrix unpack)
-- 🚧 = works via **once-inflated F32Cache + DotTile** (or f32 SSBO stage on GPU) — correct, not peak fused asm
-- AffinePacked SIMD falls back to native `matVecAffine` when inflate is refused (size cap)
+- ✅ = fused / native packed path for that backend (no per-call full-matrix unpack; k/IQ/Affine SIMD = once-project Int8QS + scales, not F32 inflate)
+- Peak dedicated k/IQ Plan 9 `.s` remains scorecard §12
 
 ---
 
@@ -266,7 +265,7 @@ Row **Wt** is the share of that package inside its scorecard section (not additi
 | `tiling/` | Tile size / SC / MC / GPU workgroup caps | 1 | ✅ |
 | `layers/dense/` | Shared MatVec microkernel; FormatNone×34 + quants × 3 backends; grad verify | 15 | ✅† |
 
-† Dense package is ✅ for API/suites; **3 of the 15 Dense pts** stay 🚧 until k/IQ/Affine SIMD is true fused `.s` (scorecard §2 → 13.5 earned).
+† Dense package is ✅ for API/suites and fused SIMD for all 20 quants (scorecard §2 → 15.0). Peak dedicated k/IQ `.s` stays in §12.
 
 ### Runtime / architecture — scorecard §6 (8 pts)
 
@@ -314,9 +313,9 @@ Row **Wt** is the share of that package inside its scorecard section (not additi
 |---------|:---:|:----:|:------:|
 | FormatNone × 34 dtypes — forward | ✅ | ✅ | ✅ |
 | FormatNone × 34 dtypes — backward | ✅ | ✅ | ✅ native GEMVT + DenseDW |
-| All 20 quants — forward | ✅ | ✅ Q4/Q8/BitNet fused; k/IQ/Affine = F32Cache+DotTile | ✅ on-device (all formats) |
+| All 20 quants — forward | ✅ | ✅ all fused (Q*/k/IQ/Affine/BitNet; no F32 inflate for k/IQ/Affine) | ✅ on-device (all formats) |
 | All 20 quants — backward | ✅ | ✅ packed MatVecT + Saxpy | ✅ GEMVT all formats + DenseDW |
-| True peak-fused k/IQ/Affine SIMD (no F32Cache) | — | ⬜ | — |
+| Peak dedicated k/IQ Plan 9 `.s` | — | ⬜ (§12) | — |
 | SC + MC tiling | ✅ CPU SC+MC | ✅ row-parallel MC (`gemv_parallel`); CPU SC tile schedule 🚧 | ✅ workgroup caps |
 | Timed FormatNone + quant matrices in `w2a` | ✅ | ✅ | ✅ |
 | Grad verify (CPU↔SIMD↔GPU + finite-diff) | ✅ | ✅ | ✅ |

@@ -223,7 +223,124 @@ func gemvQ5_1RowsF32(scales, mins []float32, qs []int8, in, out []float32, rowLo
 	}
 }
 
-// gemvF32ParallelF32 — row-shard DotTile over a dense FP32 weight matrix (k/IQ cache).
+func gemvKParallelF32(scales, mins []float32, qs []int8, in, out []float32, outRows, inCols int, hasDmin bool, mid int) {
+	if outRows < 64 || runtime.NumCPU() < 2 {
+		gemvKRowsF32(scales, mins, qs, in, out, 0, outRows, inCols, hasDmin, mid)
+		return
+	}
+	workers := runtime.GOMAXPROCS(0)
+	if workers < 1 {
+		workers = runtime.NumCPU()
+	}
+	if workers > outRows {
+		workers = outRows
+	}
+	chunk := (outRows + workers - 1) / workers
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		o0 := w * chunk
+		o1 := o0 + chunk
+		if o1 > outRows {
+			o1 = outRows
+		}
+		if o0 >= o1 {
+			break
+		}
+		wg.Add(1)
+		go func(lo, hi int) {
+			defer wg.Done()
+			gemvKRowsF32(scales, mins, qs, in, out, lo, hi, inCols, hasDmin, mid)
+		}(o0, o1)
+	}
+	wg.Wait()
+}
+
+func gemvKRowsF32(scales, mins []float32, qs []int8, in, out []float32, rowLo, rowHi, inCols int, hasDmin bool, mid int) {
+	for o := rowLo; o < rowHi; o++ {
+		out[o] = float32(simd.DotKRow(in, scales, mins, qs, o*inCols, inCols, hasDmin, mid, 0))
+	}
+}
+
+func gemvIQParallelF32(scales []float32, qs []int8, in, out []float32, outRows, inCols, scaleGroup int, mid float32, kind int) {
+	if outRows < 64 || runtime.NumCPU() < 2 {
+		gemvIQRowsF32(scales, qs, in, out, 0, outRows, inCols, scaleGroup, mid, kind)
+		return
+	}
+	workers := runtime.GOMAXPROCS(0)
+	if workers < 1 {
+		workers = runtime.NumCPU()
+	}
+	if workers > outRows {
+		workers = outRows
+	}
+	chunk := (outRows + workers - 1) / workers
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		o0 := w * chunk
+		o1 := o0 + chunk
+		if o1 > outRows {
+			o1 = outRows
+		}
+		if o0 >= o1 {
+			break
+		}
+		wg.Add(1)
+		go func(lo, hi int) {
+			defer wg.Done()
+			gemvIQRowsF32(scales, qs, in, out, lo, hi, inCols, scaleGroup, mid, kind)
+		}(o0, o1)
+	}
+	wg.Wait()
+}
+
+func gemvIQRowsF32(scales []float32, qs []int8, in, out []float32, rowLo, rowHi, inCols, scaleGroup int, mid float32, kind int) {
+	for o := rowLo; o < rowHi; o++ {
+		out[o] = float32(simd.DotIQRow(in, scales, qs, o*inCols, inCols, scaleGroup, mid, kind, 0))
+	}
+}
+
+func gemvAffineParallelF32(scales, mins []float32, qs []int8, in, out []float32, outRows, inCols, group int) {
+	if outRows < 64 || runtime.NumCPU() < 2 {
+		gemvAffineRowsF32(scales, mins, qs, in, out, 0, outRows, inCols, group)
+		return
+	}
+	workers := runtime.GOMAXPROCS(0)
+	if workers < 1 {
+		workers = runtime.NumCPU()
+	}
+	if workers > outRows {
+		workers = outRows
+	}
+	chunk := (outRows + workers - 1) / workers
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		o0 := w * chunk
+		o1 := o0 + chunk
+		if o1 > outRows {
+			o1 = outRows
+		}
+		if o0 >= o1 {
+			break
+		}
+		wg.Add(1)
+		go func(lo, hi int) {
+			defer wg.Done()
+			gemvAffineRowsF32(scales, mins, qs, in, out, lo, hi, inCols, group)
+		}(o0, o1)
+	}
+	wg.Wait()
+}
+
+func gemvAffineRowsF32(scales, mins []float32, qs []int8, in, out []float32, rowLo, rowHi, inCols, group int) {
+	gpr := inCols / group
+	sumX := make([]float32, gpr)
+	simd.AffineSumX(in, sumX, inCols, group)
+	for o := rowLo; o < rowHi; o++ {
+		out[o] = float32(simd.DotAffineRow(in, scales, mins, sumX, qs, o*inCols, inCols, group, o*gpr, 0))
+	}
+}
+
+// gemvF32ParallelF32 — row-shard DotTile over a dense FP32 weight matrix (BitNet cache).
 func gemvF32ParallelF32(w, in, out []float32, outRows, inCols int) {
 	if outRows < 64 || runtime.NumCPU() < 2 {
 		gemvF32RowsF32(w, in, out, 0, outRows, inCols)

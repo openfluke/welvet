@@ -33,13 +33,13 @@ func forwardSIMDPacked[T core.Numeric](l *Layer, x, y []T, batch, in, out int) e
 	}
 }
 
-// forwardSIMDAffine — inflate-once F32Cache + parallel DotTile (same schedule as k/IQ).
-// Falls back to native packed matVecAffine when inflate is refused (huge weights).
+// forwardSIMDAffine — fused DotAffineRow over EnsureAffineSIMDCache (no F32 inflate).
 func forwardSIMDAffine[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
 	b := l.Weights.Packed
 	if b == nil || b.Format != quant.FormatAffinePacked {
 		return fmt.Errorf("dense: AffinePacked missing")
 	}
+	quant.EnsureAffineSIMDCache(b)
 	for bat := 0; bat < batch; bat++ {
 		xRow := core.SliceAsFloat32(x[bat*in : (bat+1)*in])
 		var err error

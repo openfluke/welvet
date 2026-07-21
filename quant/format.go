@@ -123,10 +123,10 @@ type Blob struct {
 	BlockWeights int
 	// Q4Packed is optional u32 SIMD view (4 words / Q4_0 block); see EnsureQ4SIMDCache.
 	Q4Packed []uint32
-	// Int8QS is optional projected int8 codes for Q8_0 / Q5_* fused SIMD (one per weight).
+	// Int8QS is optional projected int8 codes for Q8_0 / Q5_* / k / IQ / Affine fused SIMD.
 	Int8QS []int8
-	// F32Cache is optional once-inflated FP32 weights for k/IQ simd_fuse
-	// (true fused k/IQ asm not wired yet; cache avoids per-GEMV Unpack).
+	// F32Cache is optional once-inflated FP32 weights for Ternary/Binary simd_fuse
+	// (k/IQ/Affine use Int8QS + Scales/Mins — no full-matrix inflate).
 	F32Cache []float32
 }
 

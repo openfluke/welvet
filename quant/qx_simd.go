@@ -162,17 +162,22 @@ func EnsureFusedSIMDCache(b *Blob) {
 		EnsureQ5_0SIMDCache(b)
 	case FormatQ5_1:
 		EnsureQ5_1SIMDCache(b)
-	case FormatQ2_K, FormatQ3_K, FormatQ4_K, FormatQ5_K, FormatQ6_K,
-		FormatIQ1_S, FormatIQ2_XXS, FormatIQ2_XS, FormatIQ3_XXS, FormatIQ3_S,
-		FormatIQ4_NL, FormatIQ4_XS,
-		FormatTernaryPacked, FormatBinaryPacked:
+	case FormatQ2_K, FormatQ3_K, FormatQ4_K, FormatQ5_K, FormatQ6_K:
+		EnsureKSIMDCache(b)
+	case FormatIQ1_S, FormatIQ2_XXS, FormatIQ2_XS, FormatIQ3_XXS, FormatIQ3_S,
+		FormatIQ4_NL, FormatIQ4_XS:
+		EnsureIQSIMDCache(b)
+	case FormatAffinePacked:
+		EnsureAffineSIMDCache(b)
+	case FormatTernaryPacked, FormatBinaryPacked:
 		EnsureFloatCache(b)
 	}
 }
 
-// EnsureFloatCache unpacks k/IQ weights to FP32 once for parallel DotTile GEMV.
+// EnsureFloatCache unpacks Ternary/Binary weights to FP32 once for parallel DotTile GEMV.
 // Keeps packed Raw on disk/RAM; F32Cache is the simd_fuse compute view.
 // Skips BinaryG128 (Bonsai) — full inflate of 27B would OOM; use native matvec.
+// k/IQ/Affine use Ensure*SIMDCache (Int8QS) instead — do not call this for those formats.
 func EnsureFloatCache(b *Blob) {
 	if b == nil {
 		return

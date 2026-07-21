@@ -6,46 +6,65 @@ import (
 	"github.com/openfluke/welvet/quant"
 )
 
-// matVecKSIMD — once-inflated FP32 cache + parallel DotTile (Lucy-class GEMV schedule).
-// Packed Raw stays; F32Cache is the simd_fuse compute view until true k-quant .s lands.
+// matVecKSIMD — fused group-16 DotKRow over EnsureKSIMDCache (no F32 inflate).
 func matVecKSIMD(b *quant.Blob, x, y []float32) error {
-	quant.EnsureFloatCache(b)
+	quant.EnsureKSIMDCache(b)
 	in, out := b.Cols, b.Rows
-	if len(b.F32Cache) < out*in {
-		return fmt.Errorf("dense: k-quant F32Cache missing for %s", b.Format)
-	}
 	if len(x) < in || len(y) < out {
 		return fmt.Errorf("dense: k-quant matvec shape")
 	}
-	gemvF32ParallelF32(b.F32Cache, x, y, out, in)
+	needGroups := (out*in + 15) / 16
+	if len(b.Int8QS) < out*in || len(b.Scales) < needGroups {
+		return fmt.Errorf("dense: k-quant SIMD cache missing for %s", b.Format)
+	}
+	hasDmin, mid, ok := quant.KSIMDParams(b)
+	if !ok {
+		return fmt.Errorf("dense: k-quant SIMD params missing for %s", b.Format)
+	}
+	if hasDmin && len(b.Mins) < needGroups {
+		return fmt.Errorf("dense: k-quant SIMD mins missing for %s", b.Format)
+	}
+	gemvKParallelF32(b.Scales, b.Mins, b.Int8QS, x, y, out, in, hasDmin, mid)
 	return nil
 }
 
-// matVecIQSIMD — same inflate-once + parallel DotTile path as k-quant.
+// matVecIQSIMD — fused DotIQRow over EnsureIQSIMDCache (no F32 inflate).
 func matVecIQSIMD(b *quant.Blob, x, y []float32) error {
-	quant.EnsureFloatCache(b)
+	quant.EnsureIQSIMDCache(b)
 	in, out := b.Cols, b.Rows
-	if len(b.F32Cache) < out*in {
-		return fmt.Errorf("dense: IQ F32Cache missing for %s", b.Format)
-	}
 	if len(x) < in || len(y) < out {
 		return fmt.Errorf("dense: IQ matvec shape")
 	}
-	gemvF32ParallelF32(b.F32Cache, x, y, out, in)
+	scaleGroup, mid, kind, ok := quant.IQSIMDParams(b)
+	if !ok {
+		return fmt.Errorf("dense: IQ SIMD params missing for %s", b.Format)
+	}
+	nScale := (in*out + scaleGroup - 1) / scaleGroup
+	if len(b.Int8QS) < out*in || len(b.Scales) < nScale {
+		return fmt.Errorf("dense: IQ SIMD cache missing for %s", b.Format)
+	}
+	gemvIQParallelF32(b.Scales, b.Int8QS, x, y, out, in, scaleGroup, mid, kind)
 	return nil
 }
 
-// matVecAffineSIMD — inflate-once F32Cache + parallel DotTile for AffinePacked.
-// If EnsureFloatCache refuses (size cap), uses native packed matVecAffine.
+// matVecAffineSIMD — fused DotAffineRow over EnsureAffineSIMDCache (no F32 inflate, no fallback).
 func matVecAffineSIMD(b *quant.Blob, x, y []float32) error {
+	quant.EnsureAffineSIMDCache(b)
 	in, out := b.Cols, b.Rows
 	if len(x) < in || len(y) < out {
 		return fmt.Errorf("dense: Affine matvec shape")
 	}
-	quant.EnsureFloatCache(b)
-	if len(b.F32Cache) >= out*in {
-		gemvF32ParallelF32(b.F32Cache, x, y, out, in)
-		return nil
+	group := b.BlockWeights
+	if group <= 0 {
+		group = quant.AffineG64Group
 	}
-	return quant.MatVec(b, x, y)
+	if in%group != 0 {
+		return fmt.Errorf("dense: Affine cols %d not multiple of group %d", in, group)
+	}
+	gpr := in / group
+	if len(b.Int8QS) < out*in || len(b.Scales) < out*gpr || len(b.Mins) < out*gpr {
+		return fmt.Errorf("dense: Affine SIMD cache missing")
+	}
+	gemvAffineParallelF32(b.Scales, b.Mins, b.Int8QS, x, y, out, in, group)
+	return nil
 }

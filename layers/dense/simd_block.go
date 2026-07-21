@@ -7,7 +7,7 @@ import (
 	"github.com/openfluke/welvet/quant"
 )
 
-// forwardSIMDBlockFused — classic Q4_1/Q5 via fused Dot* (asm); k/IQ via group DotTile.
+// forwardSIMDBlockFused — classic Q4_1/Q5 + k/IQ via fused Dot* (Int8QS + scales; no F32 inflate).
 func forwardSIMDBlockFused[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
 	b := l.Weights.Packed
 	if b == nil {
