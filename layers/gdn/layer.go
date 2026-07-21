@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/weights"
@@ -26,13 +27,14 @@ func (c Config) convDim() int  { return c.keyDim()*2 + c.valueDim() }
 
 // Layer is one Gated DeltaNet mixer with binary-packed projections.
 type Layer struct {
-	Cfg Config
+	Cfg  Config
+	Exec core.ExecConfig
 
 	InQKV, InZ, InB, InA, Out *quant.Blob
 	ConvWeight                []float32 // [conv_dim * kernel] row-major ch,k
 	ALog, DtBias              []float32 // [num_v_heads]
 	NormGamma                 []float32 // [value_head_dim], already (1+w)
-	UseGPU                    bool      // WebGPU BinaryG128 GEMV for projections
+	UseGPU                    bool      // derived from Exec.Backend == WebGPU
 
 	ConvState []float32
 	State     []float32
@@ -43,6 +45,14 @@ type Layer struct {
 	mixed, qRep, kRep     []float32
 	beta, g, core         []float32
 	kvMem, delta          []float32
+}
+
+// syncExec applies grid/backend policy: WebGPU projections only when BackendWebGPU.
+func (l *Layer) syncExec() {
+	if l == nil {
+		return
+	}
+	l.UseGPU = l.Exec.Backend == core.BackendWebGPU
 }
 
 // Reset clears conv + recurrent state.

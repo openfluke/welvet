@@ -534,9 +534,24 @@ func siluDeriv(x float32) float32 {
 	return s + x*s*(1-s)
 }
 
-// Backward runs truncated-BPTT (per-token exact where noted; recurrent state is
-// stop-gradient across tokens — see doc.go) over [B,T,H] gradOut/input.
+// Backward dispatches on Exec.Backend (truncated-BPTT host path; see doc.go).
 func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+	if l == nil {
+		return nil, nil, fmt.Errorf("gdn: Backward nil")
+	}
+	l.syncExec()
+	switch l.Exec.Backend {
+	case core.BackendSIMD:
+		return BackwardSIMD(l, gradOut, input, pre)
+	case core.BackendWebGPU:
+		return BackwardWebGPU(l, gradOut, input, pre)
+	default:
+		return backwardHost(l, gradOut, input, pre)
+	}
+}
+
+// backwardHost runs truncated-BPTT over [B,T,H] (recurrent state stop-gradient across tokens).
+func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
 	if l == nil || input == nil || gradOut == nil {
 		return nil, nil, fmt.Errorf("gdn: Backward nil")
 	}

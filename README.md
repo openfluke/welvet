@@ -4,10 +4,10 @@
 
 | | |
 |--|--|
-| **Version** | **v0.78** |
-| **Toward v1.0** | **77.5 / 100** pts (see [Version scorecard](#version-scorecard)) |
+| **Version** | **v0.81** |
+| **Toward v1.0** | **81 / 100** pts (see [Version scorecard](#version-scorecard)) |
 
-Not v1 yet — peak-fused kernels, extended layers, apps, and stubs still leave points on the table.
+Not v1 yet — peak-fused kernels, apps, and stubs still leave points on the table.
 
 | Repo | Role |
 |------|------|
@@ -50,11 +50,11 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v0.78 (pre-v1).** v1.0 ships only when the scorecard hits **100/100** (every board row ✅).
+**Status: v0.81 (pre-v1).** v1.0 ships only when the scorecard hits **100/100** (every board row ✅).
 
 | Legend | Meaning | Pts credit |
 |--------|---------|------------|
-| ✅ | **Implemented** — layer/runtime/stub API works; w2a suite passes (full timed matrix for transformer stack; smoke+census for ConvT/Parallel/Mamba/etc.) | **100%** of row weight |
+| ✅ | **Implemented** — layer/runtime/stub API works; w2a suite passes (full timed matrix for Dense / transformer / CNN-RNN / §5 extended) | **100%** of row weight |
 | 🚧 | **Partial** — works but lighter coverage, inflate-not-fused SIMD, or host ALU on GPU/SIMD path | **50%** of row weight |
 | ⬜ | **Not started** — stub `doc.go` only, hard-error everywhere, or peak fused kernel explicitly missing | **0%** |
 
@@ -62,7 +62,7 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 
 ## Version scorecard
 
-**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0** (today: `round(77.5)` → **v0.78**).  
+**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0** (today: `round(81)` → **v0.81**).  
 Recompute whenever a board row flips status. Weights sum to **100**.
 
 | # | Section | Wt | How scored today | Earned |
@@ -71,17 +71,17 @@ Recompute whenever a board row flips status. Weights sum to **100**.
 | 2 | **Dense MatVec microkernel** — FormatNone×34 + quants × backends, train/grad; fused Dense SIMD for all quants | 15 | all ✅ | **15.0** |
 | 3 | **Transformer stack** — MHA, SwiGLU, RMSNorm, LayerNorm, Softmax, Embedding, Sequential, Residual, seqmix | 14 | all ✅ (suite-complete; some ALU still host — counted in §12) | **14.0** |
 | 4 | **CNN / RNN / LSTM** — full timed 34×20×3 matrices; tiled-conv / recurrence shaders in §12 | 6 | all ✅ | **6.0** |
-| 5 | **Extended layers** — GDN, ConvT1–3, Mamba, KMeans, Parallel, Metacognition | 7 | all 🚧 (smoke+census, not full matrix) | **3.5** |
+| 5 | **Extended layers** — GDN, ConvT1–3, Mamba, KMeans, Parallel, Metacognition | 7 | all ✅ (full timed matrix + train grids; GDN truncated BPTT) | **7.0** |
 | 6 | **Runtime + architecture** — volumetric grid, forward, backward, training, step | 8 | all ✅ | **8.0** |
 | 7 | **Systems** — dna, evolution, tween, tanhi, telemetry | 5 | all ✅ | **5.0** |
 | 8 | **Model / IO** — tokenizer, entity, transformer, sampling, hf | 8 | all ✅ | **8.0** |
 | 9 | **Apps** — `octo` model shell | 3 | 🚧 | **1.5** |
 | 10 | **Stubs (non-accel)** — seed, serialization, hardware, memory, fountain, donate | 3 | all 🚧 | **1.5** |
 | 11 | **Accel** — NPU / Metal / QNN plugins | 2 | ⬜ | **0.0** |
-| 12 | **Peak fused / no host ALU** — peak k/IQ `.s`, on-device attn/RoPE, LN bwd GPU, tiled CNN, Softmax/SiLU SIMD, GDN `Exec`, exotic Softmax GPU, … | 14 | ⬜ (partial shaders exist but row stays ⬜ until *every* cell is peak) | **0.0** |
-| | **Total → v1.0** | **100** | | **77.5** |
+| 12 | **Peak fused / no host ALU** — peak k/IQ `.s`, on-device attn/RoPE, LN bwd GPU, tiled CNN, Softmax/SiLU SIMD, exotic Softmax GPU, … | 14 | ⬜ (partial shaders exist but row stays ⬜ until *every* cell is peak) | **0.0** |
+| | **Total → v1.0** | **100** | | **81.0** |
 
-**v0.78 readout:** foundation + Dense (all fused SIMD quants) + transformer/CNN timed stacks + runtime/systems + **Model/IO** carry most of the score. Biggest remaining chunks: **§12 peak fused (14)**, **§5 extended layers (~3.5 left)**, then apps/stubs/accel.
+**v0.81 readout:** foundation + Dense + transformer/CNN + **extended layers (full timed matrices)** + runtime/systems + **Model/IO** carry most of the score. Biggest remaining chunks: **§12 peak fused (14)**, then apps/stubs/accel.
 
 Detail tables below still list per-feature ✅/🚧/⬜; they feed honesty, but **only this scorecard sets the version number**.
 
@@ -105,7 +105,7 @@ Status rollup — version points live in the [scorecard](#version-scorecard) onl
 | **Dense** k/IQ/Affine SIMD (group Dot* + scales; no F32 inflate) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
 | `runtime/forward/` / `backward` / `training` — Dense…Residual + ConvT1–3 + Parallel + KMeans + Mamba + Metacognition + GDN | ✅ |
-| ConvT / Parallel / KMeans / Mamba / Metacognition / GDN — lighter w2a suites (smoke+census, not full 34×20 timed matrix) | 🚧 |
+| ConvT / Parallel / KMeans / Mamba / Metacognition / GDN — full timed matrix + train grids (GDN truncated BPTT) | ✅ |
 | Model IO / transformer / entity / tokenizer / hf | ✅ |
 | `apps/octo/` interactive model shell (download / convert / chat) | 🚧 |
 | `stub/` seed · serialization · hardware · memory · fountain · donate | 🚧 |
@@ -128,6 +128,14 @@ cd w2a && go test ./tests/embedding -v
 cd w2a && go test ./tests/softmax -v
 cd w2a && go test ./tests/sequential -v
 cd w2a && go test ./tests/residual -v
+cd w2a && go test ./tests/gdn -v
+cd w2a && go test ./tests/mamba -v
+cd w2a && go test ./tests/convt1 -v
+cd w2a && go test ./tests/convt2 -v
+cd w2a && go test ./tests/convt3 -v
+cd w2a && go test ./tests/kmeans -v
+cd w2a && go test ./tests/parallel -v
+cd w2a && go test ./tests/metacognition -v
 ```
 
 ---
@@ -277,7 +285,7 @@ Row **Wt** is the share of that package inside its scorecard section (not additi
 | `runtime/training/` | MSE + SGD; ApplyGradSGD for same layer set | 1 | ✅ |
 | `runtime/step/` | Discrete-time volumetric step mesh — Forward/Backward/ApplyTween; all Ops × dtype × quant × CPU/SIMD | 1 | ✅ |
 
-### Layers (transformer stack = full w2a timed matrix; others = smoke+census)
+### Layers (full w2a timed matrix + train grids; peak fused ALU in §12)
 
 **§3 Transformer stack (14 pts)** · **§4 CNN/RNN/LSTM (6 pts)** · **§5 Extended (7 pts)**
 
@@ -298,14 +306,14 @@ Row **Wt** is the share of that package inside its scorecard section (not additi
 | `layers/cnn3/` | Conv3d im2col→Dense; full timed matrix; tiled conv shader ⬜ | 1 | §4 | ✅ |
 | `layers/rnn/` | Vanilla tanh RNN; IH/HH via Dense; full timed matrix + train grids | 1.5 | §4 | ✅ |
 | `layers/lstm/` | LSTM i/f/g/o via Dense; full timed matrix + train grids | 1.5 | §4 | ✅ |
-| `layers/gdn/` | Gated DeltaNet; runtime+SGD; w2a suite; truncated BPTT; grid `Exec` ⬜ | 1.5 | §5 | 🚧 |
-| `layers/mamba/` | SSM selective scan; runtime wired; smoke+census w2a | 1 | §5 | 🚧 |
-| `layers/convt1/` | Transposed conv1d; runtime wired; smoke+census w2a | 0.7 | §5 | 🚧 |
-| `layers/convt2/` | Transposed conv2d; runtime wired; smoke+census w2a | 0.7 | §5 | 🚧 |
-| `layers/convt3/` | Transposed conv3d; runtime wired; smoke+census w2a | 0.6 | §5 | 🚧 |
-| `layers/kmeans/` | Soft k-means; runtime wired; smoke+census w2a | 0.5 | §5 | 🚧 |
-| `layers/parallel/` | MoE concat/add/avg/filter; runtime wired; smoke+census w2a | 1 | §5 | 🚧 |
-| `layers/metacognition/` | Observed Dense + rules; runtime wired; smoke+census w2a | 1 | §5 | 🚧 |
+| `layers/gdn/` | Gated DeltaNet; `Exec` CPU/SIMD/WebGPU; truncated BPTT; full timed matrix + train grids | 1.5 | §5 | ✅ |
+| `layers/mamba/` | SSM selective scan; Dense projs; full timed matrix + train grids | 1 | §5 | ✅ |
+| `layers/convt1/` | Transposed conv1d; host scatter+Proj; full timed matrix + train grids | 0.7 | §5 | ✅ |
+| `layers/convt2/` | Transposed conv2d; host scatter+Proj; full timed matrix + train grids | 0.7 | §5 | ✅ |
+| `layers/convt3/` | Transposed conv3d; host scatter+Proj; full timed matrix + train grids | 0.6 | §5 | ✅ |
+| `layers/kmeans/` | Soft k-means; Centers via Dense; full timed matrix + train grids | 0.5 | §5 | ✅ |
+| `layers/parallel/` | MoE concat/add/avg/filter; Dense branches; full timed matrix + train grids | 1 | §5 | ✅ |
+| `layers/metacognition/` | Observed Dense + rules; full timed matrix + train grids | 1 | §5 | ✅ |
 
 ### Dense detail
 
@@ -608,6 +616,14 @@ go test ./tests/embedding -v # token gather/scatter; same coverage axes as Dense
 go test ./tests/softmax -v   # weightless Softmax; ALU harness (no weight store)
 go test ./tests/sequential -v # Dense→Dense Sequential compose; same coverage axes as Dense
 go test ./tests/residual -v  # Residual y=F(x)+x; same coverage axes as Dense
+go test ./tests/gdn -v       # Gated DeltaNet; Exec + truncated BPTT; full timed matrix
+go test ./tests/mamba -v     # SSM selective scan; full timed matrix
+go test ./tests/convt1 -v    # ConvTranspose1d; full timed matrix
+go test ./tests/convt2 -v    # ConvTranspose2d; full timed matrix
+go test ./tests/convt3 -v    # ConvTranspose3d; full timed matrix
+go test ./tests/kmeans -v    # Soft k-means; full timed matrix
+go test ./tests/parallel -v  # MoE Parallel; full timed matrix
+go test ./tests/metacognition -v # Observed Dense + rules; full timed matrix
 ```
 
 Docs: `w2a/docs/`.

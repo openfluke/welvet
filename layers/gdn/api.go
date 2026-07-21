@@ -118,7 +118,13 @@ func NewConfigured(cfg Config, inQKV, inZ, inB, inA, outW, convW, aLog, dtBias, 
 		ALog:       append([]float32(nil), aLog...),
 		DtBias:     append([]float32(nil), dtBias...),
 		NormGamma:  append([]float32(nil), gamma...),
+		Exec: core.ExecConfig{
+			Backend:   core.BackendCPUTiled,
+			MultiCore: true,
+			TileSize:  32,
+		},
 	}
+	l.syncExec()
 	l.Reset()
 	return l, nil
 }
@@ -141,21 +147,36 @@ func (l *Layer) Pack(format quant.Format) error {
 	return nil
 }
 
-// Place binds GDN onto the grid.
+// Place binds GDN onto the grid and copies grid Exec onto the layer.
 func Place(g *architecture.Grid, z, y, x, lidx int, layer *Layer) error {
 	if g == nil || layer == nil {
 		return fmt.Errorf("gdn: Place nil")
 	}
+	layer.Exec = g.Exec
+	layer.syncExec()
 	meta := layer.CoreMeta()
 	meta.Z, meta.Y, meta.X, meta.L = z, y, x, lidx
 	return g.BindOp(z, y, x, lidx, meta, layer)
 }
 
-// Forward runs [batch, seq, hidden] by looping ForwardDecode (resets state once).
+// Forward dispatches on Exec.Backend (host decode loop; SIMD/WebGPU gated).
 func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
 	if l == nil || input == nil {
 		return nil, nil, fmt.Errorf("gdn: nil")
 	}
+	l.syncExec()
+	switch l.Exec.Backend {
+	case core.BackendSIMD:
+		return ForwardSIMD(l, input)
+	case core.BackendWebGPU:
+		return ForwardWebGPU(l, input)
+	default:
+		return forwardHost(l, input)
+	}
+}
+
+// forwardHost runs [batch, seq, hidden] by looping ForwardDecode (resets state once).
+func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
 	if len(input.Shape) != 3 || input.Shape[2] != l.Cfg.HiddenSize {
 		return nil, nil, fmt.Errorf("gdn: need [B,T,%d], got %v", l.Cfg.HiddenSize, input.Shape)
 	}
@@ -183,11 +204,7 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 	return pre, post, nil
 }
 
-// Backward and ApplyGradSGD live in train.go (practical BPTT-truncated training path:
-// exact for Out/NormGamma/InZ/InQKV/InB/InA linear maps, state recurrence treated as
-// stop-gradient across tokens — see train.go doc comment).
-
-// PermutationOK — FormatNone Float32 CPU/SIMD for smoke; WebGPU when device present.
+// PermutationOK — Float32 + FormatNone/BinaryPacked × CPU/SIMD/WebGPU.
 func PermutationOK(dt core.DType, format quant.Format, backend core.Backend) bool {
 	if dt != core.DTypeFloat32 {
 		return false
@@ -196,4 +213,22 @@ func PermutationOK(dt core.DType, format quant.Format, backend core.Backend) boo
 		return false
 	}
 	return backend == core.BackendCPUTiled || backend == core.BackendSIMD || backend == core.BackendWebGPU
+}
+
+// AllPermutations lists GDN's honest coverage matrix (Float32 × None/Binary × 3 backends).
+func AllPermutations() (out []struct {
+	DType   core.DType
+	Format  quant.Format
+	Backend core.Backend
+}) {
+	for _, f := range []quant.Format{quant.FormatNone, quant.FormatBinaryPacked} {
+		for _, be := range []core.Backend{core.BackendCPUTiled, core.BackendSIMD, core.BackendWebGPU} {
+			out = append(out, struct {
+				DType   core.DType
+				Format  quant.Format
+				Backend core.Backend
+			}{core.DTypeFloat32, f, be})
+		}
+	}
+	return out
 }
