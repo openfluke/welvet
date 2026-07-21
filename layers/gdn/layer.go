@@ -235,13 +235,26 @@ func matVec(b *quant.Blob, x, y []float32, useGPU bool) error {
 		return fmt.Errorf("gdn: nil blob")
 	}
 	if useGPU {
-		ws, err := weights.FromBlob(b)
+		ws, err := storeForGPU(b)
 		if err != nil {
 			return err
 		}
 		return dense.MatVecWebGPU(ws, x, y, 1, b.Cols, b.Rows)
 	}
 	return quant.MatVec(b, x, y)
+}
+
+// storeForGPU builds a weights.Store for WebGPU GEMV.
+// FormatNone blobs are float32 wire (FromBlob rejects FormatNone by design).
+func storeForGPU(b *quant.Blob) (*weights.Store, error) {
+	if b.Format == quant.FormatNone {
+		f32, err := quant.Unpack(b)
+		if err != nil {
+			return nil, err
+		}
+		return weights.New(b.Rows, b.Cols, f32, core.DTypeFloat32, quant.FormatNone)
+	}
+	return weights.FromBlob(b)
 }
 
 func silu(x float32) float32 {

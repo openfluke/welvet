@@ -134,7 +134,7 @@ func New(cfg Config) (*Layer, error) {
 	return NewConfigured(cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
-// Pack re-packs projection blobs to format (FormatNone / BinaryG128 supported via Store path later).
+// Pack re-packs projection blobs to FormatNone or BinaryPacked (unpack → Pack).
 func (l *Layer) Pack(format quant.Format) error {
 	if l == nil {
 		return fmt.Errorf("gdn: nil")
@@ -142,9 +142,38 @@ func (l *Layer) Pack(format quant.Format) error {
 	if format != quant.FormatNone && format != quant.FormatBinaryPacked {
 		return fmt.Errorf("gdn: Pack only FormatNone or BinaryPacked in v0, got %v", format)
 	}
-	// Blobs already packed at construction; BinaryG128 re-pack from Flatten would need decode.
-	_ = format
-	return nil
+	repack := func(bp **quant.Blob) error {
+		b := *bp
+		if b == nil {
+			return fmt.Errorf("gdn: nil blob")
+		}
+		if b.Format == format {
+			return nil
+		}
+		f32, err := quant.Unpack(b)
+		if err != nil {
+			return err
+		}
+		nb, err := quant.Pack(format, f32, b.Rows, b.Cols)
+		if err != nil {
+			return err
+		}
+		*bp = nb
+		return nil
+	}
+	if err := repack(&l.InQKV); err != nil {
+		return err
+	}
+	if err := repack(&l.InZ); err != nil {
+		return err
+	}
+	if err := repack(&l.InB); err != nil {
+		return err
+	}
+	if err := repack(&l.InA); err != nil {
+		return err
+	}
+	return repack(&l.Out)
 }
 
 // Place binds GDN onto the grid and copies grid Exec onto the layer.

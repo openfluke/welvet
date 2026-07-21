@@ -600,7 +600,7 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 	return gradIn, gradW, nil
 }
 
-// applyBlobSGD unpacks *bp, applies w -= lr*dW elementwise, and re-Packs FormatNone.
+// applyBlobSGD unpacks *bp, applies w -= lr*dW elementwise, and re-Packs in the blob's format.
 func applyBlobSGD(bp **quant.Blob, dW []float32, lr float64) error {
 	b := *bp
 	if b == nil {
@@ -617,7 +617,7 @@ func applyBlobSGD(bp **quant.Blob, dW []float32, lr float64) error {
 	for i := 0; i < n; i++ {
 		f32[i] -= float32(lr) * dW[i]
 	}
-	nb, err := quant.Pack(quant.FormatNone, f32[:n], b.Rows, b.Cols)
+	nb, err := quant.Pack(b.Format, f32[:n], b.Rows, b.Cols)
 	if err != nil {
 		return fmt.Errorf("gdn: pack: %w", err)
 	}
@@ -625,7 +625,7 @@ func applyBlobSGD(bp **quant.Blob, dW []float32, lr float64) error {
 	return nil
 }
 
-// ApplyGradSGD unpacks each projection blob to f32, applies SGD, and re-Packs FormatNone.
+// ApplyGradSGD unpacks each projection blob to f32, applies SGD, and re-Packs in-place format.
 // ConvWeight/ALog/DtBias/NormGamma (plain []float32) update directly.
 func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) error {
 	if l == nil || dW == nil {
