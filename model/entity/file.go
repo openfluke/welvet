@@ -4,12 +4,12 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"strings"
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/quant"
+	"github.com/openfluke/welvet/weights"
 )
 
 // WeightBlob indexes one payload in the blob section (F32 or packed quant).
@@ -306,50 +306,39 @@ func decodeNumericBlob(path, dtype string, raw []byte, scale float32) ([]float32
 	case "BFLOAT16", "BF16":
 		dt = core.DTypeBFloat16
 	}
+	n := nativeElemCount(dt, len(raw))
+	if n <= 0 {
+		return nil, fmt.Errorf("entity blob %q: cannot derive element count for dtype %q (len=%d)", path, dtype, len(raw))
+	}
+	out, err := weights.DecodeNative(dt, raw, scale, n)
+	if err != nil {
+		return nil, fmt.Errorf("entity blob %q: %w", path, err)
+	}
+	return out, nil
+}
+
+func nativeElemCount(dt core.DType, nbytes int) int {
 	switch dt {
-	case core.DTypeFloat32:
-		if len(raw)%4 != 0 {
-			return nil, fmt.Errorf("entity blob %q: length %d not multiple of 4", path, len(raw))
-		}
-		n := len(raw) / 4
-		out := make([]float32, n)
-		for i := 0; i < n; i++ {
-			out[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4 : i*4+4]))
-		}
-		return out, nil
 	case core.DTypeFloat64:
-		if len(raw)%8 != 0 {
-			return nil, fmt.Errorf("entity blob %q: length %d not multiple of 8", path, len(raw))
+		if nbytes%8 != 0 {
+			return 0
 		}
-		n := len(raw) / 8
-		out := make([]float32, n)
-		for i := 0; i < n; i++ {
-			bits := binary.LittleEndian.Uint64(raw[i*8 : i*8+8])
-			out[i] = float32(math.Float64frombits(bits))
+		return nbytes / 8
+	case core.DTypeFloat16, core.DTypeBFloat16:
+		if nbytes%2 != 0 {
+			return 0
 		}
-		return out, nil
-	case core.DTypeFloat16:
-		if len(raw)%2 != 0 {
-			return nil, fmt.Errorf("entity blob %q: length %d not multiple of 2", path, len(raw))
+		return nbytes / 2
+	case core.DTypeFloat32:
+		if nbytes%4 != 0 {
+			return 0
 		}
-		n := len(raw) / 2
-		out := make([]float32, n)
-		for i := 0; i < n; i++ {
-			out[i] = core.Float16ToFloat32(binary.LittleEndian.Uint16(raw[i*2 : i*2+2]))
-		}
-		return out, nil
-	case core.DTypeBFloat16:
-		if len(raw)%2 != 0 {
-			return nil, fmt.Errorf("entity blob %q: length %d not multiple of 2", path, len(raw))
-		}
-		n := len(raw) / 2
-		out := make([]float32, n)
-		for i := 0; i < n; i++ {
-			out[i] = core.BFloat16ToFloat32(binary.LittleEndian.Uint16(raw[i*2 : i*2+2]))
-		}
-		return out, nil
+		return nbytes / 4
 	default:
-		_ = scale
-		return nil, fmt.Errorf("entity blob %q: unsupported FormatNone dtype %q (use LoadBlobBytes)", path, dtype)
+		// Low-bit native packs are length-derived by the unpacker when possible.
+		if nbytes%4 == 0 {
+			return nbytes / 4
+		}
+		return nbytes
 	}
 }

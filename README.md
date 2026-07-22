@@ -152,6 +152,37 @@ cd w2a && go test ./tests/metacognition -v
 
 ---
 
+## Numerical type vs k-quant (read this)
+
+Weight storage is **two independent axes**. They are not the same thing, and **neither implies an FP32 master tensor**.
+
+| Axis | Field | What it is | Examples |
+|------|--------|------------|----------|
+| **Numerical type** | `core.DType` | How each element is encoded when **not** using a packed quant scheme | `float32`, `float16`, `int4`, `binary`, `nf4`, … (34 total) |
+| **Quant / k-quant** | `quant.Format` | Block / group packing layout (ggml-style Q*, K-quants, IQ, Ternary/BinaryPacked, …) | `Q4_0`, `Q5_K`, `IQ2_XXS`, `BinaryPacked`, … |
+
+**`FormatNone` (“none” in logs)** means: *no packed quant layout* — weights are stored as the chosen **DType** native bytes.  
+It does **not** mean “FP32 master” or “untyped.”
+
+| Label you see | Actual storage |
+|---------------|----------------|
+| `none/float32` | FormatNone + float32 payload |
+| `none/float16` | FormatNone + float16 bytes (not an f32 master) |
+| `none/int4` | FormatNone + int4 native pack |
+| `none/binary` | FormatNone + `DTypeBinary` (native 1-bit dtype) |
+| `Q4_0` / `Q5_K` / … | Packed quant blob (`Format != none`); DType is incidental for pack paths |
+| `BinaryPacked` | Packed 1-bit **quant** layout — different from `none/binary` |
+
+**Rules of thumb**
+
+1. Pick **either** a native dtype under FormatNone **or** a packed quant format — that pair *is* storage truth.
+2. Convert hubs through a temporary f32 scratch, then **re-encodes and drops it**. Nothing keeps a parallel master.
+3. w2a / Octo lines like `none/float16 → Q4_0` mean: decode current storage → scratch → encode destination (lossy when leaving high precision).
+
+Tables below list the 34 dtypes and 20 formats.
+
+---
+
 ## Axes (what “done” means per feature)
 
 For each layer / op, every cell must work:
@@ -159,17 +190,17 @@ For each layer / op, every cell must work:
 | Axis | Count | Values |
 |------|------:|--------|
 | Backend | 3 | CPU tiled (SC+MC) · Plan 9 SIMD · WebGPU |
-| DType | 34 | `0…33` — table below |
-| Quant | 20 | `None` + classic + k-quant + IQ + Ternary/Binary |
+| DType | 34 | `0…33` — numerical types table below |
+| Quant | 20 | `None` (= FormatNone + DType) + classic + k-quant + IQ + Ternary/BinaryPacked |
 | Pass | 2 | forward **and** backward (where trainable) |
 
 **No cell may silently substitute another cell.**
 
 ---
 
-## DTypes (`core.DType`) — 34
+## DTypes (`core.DType`) — 34 numerical types
 
-Storage / weight element types. Dense **FormatNone** coverage today:
+Element / native storage types. Used with **`FormatNone`**. Dense coverage today:
 
 | # | DType | CPU tiled | SIMD | WebGPU | Notes |
 |--:|-------|:---------:|:----:|:------:|-------|
@@ -216,11 +247,13 @@ Storage / weight element types. Dense **FormatNone** coverage today:
 
 ## Quant formats (`quant.Format`) — 20
 
+Packed layouts (Q* / K / IQ / …). Row **None** = FormatNone: use a **DType** from the table above — not “FP32 master.”
+
 CPU Pack/Unpack/MatVec/MatVecT vs Dense SIMD / WebGPU:
 
 | Format | CPU pack+MatVec | Dense SIMD | Dense WebGPU |
 |--------|:---------------:|:----------:|:------------:|
-| None | ✅ (via `weights`) | ✅ FormatNone packed/stream | ✅ all 34 fwd+GEMVT |
+| None | ✅ (via `weights` + DType) | ✅ FormatNone native/stream | ✅ all 34 fwd+GEMVT |
 | Q8_0 | ✅ | ✅ fused DotI8×scale | ✅ on-device Q8 GEMV (in%32) |
 | Q4_0 | ✅ | ✅ fused DotQ4_0 fwd | ✅ on-device Q4 GEMV (in%32) |
 | Q4_1 | ✅ | ✅ fused DotQ4_1 | ✅ on-device Q4_1 |

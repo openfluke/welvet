@@ -18,8 +18,9 @@ func (s *Store) FlattenF32() ([]float32, error) {
 	return out, nil
 }
 
-// SetFromF32 replaces the master weight source with src and re-encodes the
-// current DType / QuantFormat. Length must equal Rows*Cols.
+// SetFromF32 replaces the stored payload with src re-encoded as the current
+// DType / QuantFormat. Length must equal Rows*Cols. No parallel f32 copy is kept
+// unless the destination is FormatNone+Float32.
 func (s *Store) SetFromF32(src []float32) error {
 	if s == nil {
 		return fmt.Errorf("weights: nil")
@@ -28,17 +29,12 @@ func (s *Store) SetFromF32(src []float32) error {
 	if len(src) < n {
 		return fmt.Errorf("weights: SetFromF32 len %d < %d", len(src), n)
 	}
-	s.masterF32 = append([]float32(nil), src[:n]...)
-	s.gpuF32 = nil
-	s.wireF64 = nil
 	fmtSave := s.Format
-	if err := s.SetDType(s.DType); err != nil {
-		return err
+	dtSave := s.DType
+	if fmtSave == quant.FormatNone {
+		return encodeFormatNone(s, dtSave, src[:n])
 	}
-	if fmtSave != quant.FormatNone {
-		return s.Pack(fmtSave)
-	}
-	return nil
+	return encodePacked(s, fmtSave, src[:n])
 }
 
 // Clone returns a deep copy of the store (CPU-resident; no GPU wire caches).

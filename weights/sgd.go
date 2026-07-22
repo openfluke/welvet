@@ -6,7 +6,8 @@ import (
 	"github.com/openfluke/welvet/quant"
 )
 
-// materializeMaster ensures masterF32 holds the current full-precision weight source.
+// materializeMaster decodes the current payload into the FormatNone+F32 buffer
+// so SGD can mutate weights before re-encoding storage truth.
 func (s *Store) materializeMaster() error {
 	if s == nil {
 		return fmt.Errorf("weights: nil")

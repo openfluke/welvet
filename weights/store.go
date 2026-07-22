@@ -7,17 +7,19 @@ import (
 	"github.com/openfluke/welvet/quant"
 )
 
-// Store holds native weight payloads. Runtime truth is DType + Format (no QAT morph).
-//
-// masterF32 is only an internal pack/init bridge for ggml-style block formats that
-// are defined on f32 source weights — it is NOT the activation tensor type.
+// Store holds native weight payloads. Storage truth is DType + Format only
+// (Native bytes, Packed blob, or the FormatNone+F32 buffer). There is no
+// parallel “master” weight tensor retained across quant/dtype hops — use
+// Convert / Converted to re-encode.
 type Store struct {
 	DType  core.DType
 	Format quant.Format
 	Rows   int
 	Cols   int
 
-	masterF32 []float32 // pack source / FormatNone+Float32 storage
+	// f32buf is FormatNone+Float32 storage (and a short-lived decode scratch
+	// only while SetDType/Pack run). Cleared when Format is packed or Native.
+	masterF32 []float32
 	Native    []byte
 	Scale     float32
 	Packed    *quant.Blob
@@ -63,61 +65,38 @@ func New[T core.Numeric](rows, cols int, data []T, dt core.DType, format quant.F
 	return s, nil
 }
 
-// SetDType packs master into FormatNone native storage for dt.
+// SetDType re-encodes the current payload as FormatNone storage in dt.
+// Decodes whatever is stored today (Packed / Native / F32), then keeps only
+// the new FormatNone payload.
 func (s *Store) SetDType(dt core.DType) error {
 	if s == nil {
 		return fmt.Errorf("weights: nil store")
 	}
-	if len(s.masterF32) < s.Rows*s.Cols {
-		return fmt.Errorf("weights: missing master source")
-	}
-	s.DType = dt
-	s.Format = quant.FormatNone
-	s.Packed = nil
-	s.gpuF32 = nil
-	s.wireF64 = nil
-	if dt == core.DTypeFloat32 {
-		s.Native = nil
-		s.Scale = 1
-		return nil
-	}
-	raw, scale, err := packNative(dt, s.masterF32[:s.Rows*s.Cols])
+	scratch, err := s.FlattenF32()
 	if err != nil {
 		return err
 	}
-	s.Native = raw
-	s.Scale = scale
-	return nil
+	return encodeFormatNone(s, dt, scratch)
 }
 
-// Pack converts current weights into a QuantFormat blob.
+// Pack re-encodes the current payload as a QuantFormat blob (or FormatNone).
+// After a packed Pack, only Packed remains — no parallel f32 buffer.
 func (s *Store) Pack(format quant.Format) error {
 	if s == nil {
 		return quant.ErrUnsupported(format, "Pack")
 	}
-	src, err := s.float32View()
-	if err != nil {
-		return err
-	}
 	if format == quant.FormatNone {
-		s.Format = quant.FormatNone
-		s.Packed = nil
-		s.gpuF32 = nil
-		s.wireF64 = nil
-		return nil
+		scratch, err := s.FlattenF32()
+		if err != nil {
+			return err
+		}
+		return encodeFormatNone(s, s.DType, scratch)
 	}
-	b, err := quant.Pack(format, src, s.Rows, s.Cols)
+	scratch, err := s.FlattenF32()
 	if err != nil {
 		return err
 	}
-	s.Format = format
-	s.Packed = b
-	s.gpuF32 = nil
-	s.wireF64 = nil
-	if format == quant.FormatQ4_0 {
-		quant.EnsureQ4SIMDCache(b)
-	}
-	return nil
+	return encodePacked(s, format, scratch)
 }
 
 // MatrixF32 returns row-major float32 weights (pack / fused quant source).
