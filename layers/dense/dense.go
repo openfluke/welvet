@@ -68,6 +68,34 @@ func NewConfigured[T core.Numeric](in, out int, act core.ActivationType, dt core
 	}, nil
 }
 
+// SetDType sets the weight store dtype (storage truth).
+func (l *Layer) SetDType(dt core.DType) error {
+	if l == nil || l.Weights == nil {
+		return fmt.Errorf("dense: SetDType nil")
+	}
+	if err := l.Weights.SetDType(dt); err != nil {
+		return err
+	}
+	l.Core.DType = dt
+	return nil
+}
+
+// Pack packs the weight store to format.
+func (l *Layer) Pack(format quant.Format) error {
+	if l == nil || l.Weights == nil {
+		return fmt.Errorf("dense: Pack nil")
+	}
+	return l.Weights.Pack(format)
+}
+
+// GradWSize is Rows×Cols of the weight store.
+func (l *Layer) GradWSize() int {
+	if l == nil || l.Weights == nil {
+		return 0
+	}
+	return l.Weights.Rows * l.Weights.Cols
+}
+
 // Forward dispatches by Exec.Backend for activation dtype T (not hardcoded).
 func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
 	if l == nil || l.Weights == nil || input == nil {

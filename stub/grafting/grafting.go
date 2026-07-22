@@ -16,7 +16,7 @@ func GraftGrids(grids []*architecture.Grid, combine parallel.CombineMode) (*para
 	if len(grids) == 0 {
 		return nil, fmt.Errorf("grafting: no grids")
 	}
-	var branches []*dense.Layer
+	var branches []any
 	dim, outFeat := 0, 0
 	for _, g := range grids {
 		if g == nil {
@@ -34,37 +34,35 @@ func GraftGrids(grids []*architecture.Grid, combine parallel.CombineMode) (*para
 				}
 				branches = append(branches, b)
 				if dim == 0 {
-					dim = b.Core.InputHeight
-					outFeat = b.Core.OutputHeight
+					if d, ok := b.(*dense.Layer); ok {
+						dim = d.Core.InputHeight
+						outFeat = d.Core.OutputHeight
+					}
 				}
 			}
-		case *dense.Layer:
+		default:
 			branches = append(branches, op)
 			if dim == 0 {
-				dim = op.Core.InputHeight
-				outFeat = op.Core.OutputHeight
+				if d, ok := op.(*dense.Layer); ok {
+					dim = d.Core.InputHeight
+					outFeat = d.Core.OutputHeight
+				} else if cell.Layer.InputHeight > 0 {
+					dim = cell.Layer.InputHeight
+					outFeat = cell.Layer.OutputHeight
+				}
 			}
-		default:
-			return nil, fmt.Errorf("grafting: unsupported Op %T at (0,0,0,0) — v0 Dense only", cell.Op)
 		}
 	}
 	if len(branches) == 0 {
-		return nil, fmt.Errorf("grafting: no valid Dense branches")
+		return nil, fmt.Errorf("grafting: no valid branches")
 	}
-	if dim <= 0 || outFeat <= 0 {
+	if dim <= 0 {
 		return nil, fmt.Errorf("grafting: invalid branch geometry")
 	}
 	cfg := parallel.Config{
 		Dim: dim, OutFeat: outFeat, Branches: len(branches), Combine: combine,
 	}
-	l, err := parallel.NewConfigured[float32](cfg, core.DTypeFloat32, quant.FormatNone, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	for i, b := range branches {
-		l.Branches[i] = b
-	}
-	return l, nil
+	return parallel.NewFromBranches(cfg, branches, nil)
 }
 
 // ResidualGraft wraps the first cell Dense in a Residual block (y = F(x) + x).
@@ -106,8 +104,8 @@ func GraftGridsHeterogeneous(grids []*architecture.Grid, combine parallel.Combin
 // (dense/mha/swiglu/cnnN/mamba/gdn/parallel/…). It copies the source cell's
 // already-populated core.Layer descriptor + Op pointer via Grid.BindOp, so it
 // needs no per-layer-package import or type switch, unlike GraftGrids (which
-// is Dense/Parallel-only because it builds one *parallel.Layer with typed
-// []*dense.Layer branches).
+// places Ops into L slots; GraftGrids builds one *parallel.Layer with []any
+// branches).
 //
 // This is a sequential (not additive) stack — combine happens by chaining
 // forward through L, not by summing branch outputs. Use ResidualGraft for a

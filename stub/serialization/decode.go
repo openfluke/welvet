@@ -456,6 +456,39 @@ func placeParallel(g *architecture.Grid, ls LayerSpec, sm map[string]StoreBlob) 
 		Dim: ls.InputHeight, OutFeat: ls.OutFeat, Branches: ls.Branches,
 		Combine: parallel.CombineMode(ls.CombineMode), SeqLen: ls.SeqLength,
 	}
+	if len(ls.BranchOps) > 0 {
+		if cfg.Branches == 0 {
+			cfg.Branches = len(ls.BranchOps)
+		}
+		branches := make([]any, len(ls.BranchOps))
+		for i, bls := range ls.BranchOps {
+			op, err := opFromSpec(bls)
+			if err != nil {
+				return fmt.Errorf("parallel branch %d: %w", i, err)
+			}
+			branches[i] = op
+		}
+		var gate *dense.Layer
+		if cfg.Combine == parallel.CombineFilter {
+			s, err := mustStore(sm, "gate")
+			if err != nil {
+				return err
+			}
+			gLayer, err := denseFromStore(ls.InputHeight, cfg.Branches, core.ActivationLinear, s)
+			if err != nil {
+				return err
+			}
+			gate = gLayer
+		}
+		l, err := parallel.NewFromBranches(cfg, branches, gate)
+		if err != nil {
+			return err
+		}
+		if ls.OutputHeight > 0 {
+			l.Core.OutputHeight = ls.OutputHeight
+		}
+		return parallel.Place(g, ls.Z, ls.Y, ls.X, ls.L, l)
+	}
 	l, err := parallel.New(cfg)
 	if err != nil {
 		return err
@@ -465,7 +498,11 @@ func placeParallel(g *architecture.Grid, ls LayerSpec, sm map[string]StoreBlob) 
 		if err != nil {
 			return err
 		}
-		replaceDenseWeights(l.Branches[i], s)
+		d, ok := l.Branches[i].(*dense.Layer)
+		if !ok {
+			return fmt.Errorf("parallel: expected Dense branch %d", i)
+		}
+		replaceDenseWeights(d, s)
 	}
 	if cfg.Combine == parallel.CombineFilter {
 		s, err := mustStore(sm, "gate")
@@ -474,10 +511,26 @@ func placeParallel(g *architecture.Grid, ls LayerSpec, sm map[string]StoreBlob) 
 		}
 		replaceDenseWeights(l.Gate, s)
 	}
-	if len(l.Branches) > 0 && l.Branches[0].Weights != nil {
-		l.Core.DType = l.Branches[0].Weights.DType
+	if len(l.Branches) > 0 {
+		if d, ok := l.Branches[0].(*dense.Layer); ok && d.Weights != nil {
+			l.Core.DType = d.Weights.DType
+		}
 	}
 	return parallel.Place(g, ls.Z, ls.Y, ls.X, ls.L, l)
+}
+
+// opFromSpec builds a standalone Op from a nested LayerSpec via a scratch grid.
+func opFromSpec(ls LayerSpec) (any, error) {
+	g := architecture.NewGrid(1, 1, 1, 1)
+	ls.Z, ls.Y, ls.X, ls.L = 0, 0, 0, 0
+	if err := placeFromSpec(g, ls); err != nil {
+		return nil, err
+	}
+	cell := g.At(0, 0, 0, 0)
+	if cell == nil || cell.Op == nil {
+		return nil, fmt.Errorf("serialization: opFromSpec empty cell for type %s", ls.Type)
+	}
+	return cell.Op, nil
 }
 
 func placeSequential(g *architecture.Grid, ls LayerSpec, sm map[string]StoreBlob) error {

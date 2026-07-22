@@ -166,15 +166,8 @@ func InitGrid(g *architecture.Grid, initSeed uint64) error {
 				return err
 			}
 		case *parallel.Layer:
-			for bi, br := range op.Branches {
-				if err := initDenseHe(br, DeriveLayer(layerSeed, bi, "parallel.branch")); err != nil {
-					return err
-				}
-			}
-			if op.Gate != nil {
-				if err := initDenseHe(op.Gate, DeriveLayer(layerSeed, 0, "parallel.gate")); err != nil {
-					return err
-				}
+			if err := initParallelHe(op, layerSeed); err != nil {
+				return err
 			}
 		case *sequential.Layer:
 			for ci, child := range op.Children {
@@ -203,6 +196,111 @@ func initDenseHe(op *dense.Layer, layerSeed uint64) error {
 		in = op.Weights.Cols
 	}
 	return InitStoreHe(op.Weights, in, layerSeed)
+}
+
+func initParallelHe(op *parallel.Layer, layerSeed uint64) error {
+	if op == nil {
+		return nil
+	}
+	for bi, br := range op.Branches {
+		bs := DeriveLayer(layerSeed, bi, "parallel.branch")
+		switch b := br.(type) {
+		case *dense.Layer:
+			if err := initDenseHe(b, bs); err != nil {
+				return err
+			}
+		case *parallel.Layer:
+			if err := initParallelHe(b, bs); err != nil {
+				return err
+			}
+		case *mha.Layer:
+			for _, part := range []struct {
+				name string
+				l    *dense.Layer
+			}{{"q", b.Q}, {"k", b.K}, {"v", b.V}, {"o", b.O}} {
+				if err := initDenseHe(part.l, DeriveLayer(bs, 0, "mha."+part.name)); err != nil {
+					return err
+				}
+			}
+		case *swiglu.Layer:
+			for _, part := range []struct {
+				name string
+				l    *dense.Layer
+			}{{"gate", b.Gate}, {"up", b.Up}, {"down", b.Down}} {
+				if err := initDenseHe(part.l, DeriveLayer(bs, 0, "swiglu."+part.name)); err != nil {
+					return err
+				}
+			}
+		case *sequential.Layer:
+			for ci, child := range b.Children {
+				if err := initDenseHe(child, DeriveLayer(bs, ci, "sequential.child")); err != nil {
+					return err
+				}
+			}
+		case *residual.Layer:
+			for ci, child := range b.Children {
+				if err := initDenseHe(child, DeriveLayer(bs, ci, "residual.child")); err != nil {
+					return err
+				}
+			}
+		case *cnn1.Layer:
+			if err := initDenseHe(b.Proj, DeriveLayer(bs, 0, "cnn1.proj")); err != nil {
+				return err
+			}
+		case *cnn2.Layer:
+			if err := initDenseHe(b.Proj, DeriveLayer(bs, 0, "cnn2.proj")); err != nil {
+				return err
+			}
+		case *cnn3.Layer:
+			if err := initDenseHe(b.Proj, DeriveLayer(bs, 0, "cnn3.proj")); err != nil {
+				return err
+			}
+		}
+	}
+	if op.Gate != nil {
+		if err := initDenseHe(op.Gate, DeriveLayer(layerSeed, 0, "parallel.gate")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func fingerprintParallel(op *parallel.Layer, write func(*dense.Layer)) {
+	if op == nil {
+		return
+	}
+	for _, br := range op.Branches {
+		switch b := br.(type) {
+		case *dense.Layer:
+			write(b)
+		case *parallel.Layer:
+			fingerprintParallel(b, write)
+		case *mha.Layer:
+			write(b.Q)
+			write(b.K)
+			write(b.V)
+			write(b.O)
+		case *swiglu.Layer:
+			write(b.Gate)
+			write(b.Up)
+			write(b.Down)
+		case *sequential.Layer:
+			for _, child := range b.Children {
+				write(child)
+			}
+		case *residual.Layer:
+			for _, child := range b.Children {
+				write(child)
+			}
+		case *cnn1.Layer:
+			write(b.Proj)
+		case *cnn2.Layer:
+			write(b.Proj)
+		case *cnn3.Layer:
+			write(b.Proj)
+		}
+	}
+	write(op.Gate)
 }
 
 // GridFingerprint hashes all Dense (direct or nested in mha/swiglu/cnnN/parallel/
@@ -245,10 +343,7 @@ func GridFingerprint(g *architecture.Grid) uint64 {
 		case *cnn3.Layer:
 			write(op.Proj)
 		case *parallel.Layer:
-			for _, br := range op.Branches {
-				write(br)
-			}
-			write(op.Gate)
+			fingerprintParallel(op, write)
 		case *sequential.Layer:
 			for _, child := range op.Children {
 				write(child)

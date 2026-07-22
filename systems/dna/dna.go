@@ -219,7 +219,7 @@ func CollectStores(op any) []*weights.Store {
 	case *parallel.Layer:
 		var out []*weights.Store
 		for _, ch := range v.Branches {
-			out = append(out, storesFromDense(ch)...)
+			out = append(out, CollectStores(ch)...)
 		}
 		out = append(out, storesFromDense(v.Gate)...)
 		return out

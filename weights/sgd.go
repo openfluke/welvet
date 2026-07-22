@@ -2,8 +2,6 @@ package weights
 
 import (
 	"fmt"
-
-	"github.com/openfluke/welvet/quant"
 )
 
 // materializeMaster decodes the current payload into the FormatNone+F32 buffer
@@ -44,14 +42,9 @@ func (s *Store) ApplySGD(dW []float64, lr float64) error {
 	}
 	s.gpuF32 = nil
 	s.wireF64 = nil
-	fmtSave := s.Format
-	if err := s.SetDType(s.DType); err != nil {
-		return err
-	}
-	if fmtSave != quant.FormatNone {
-		return s.Pack(fmtSave)
-	}
-	return nil
+	// Re-encode from the updated master. Do NOT call SetDType here: float32View for
+	// non-F32 FormatNone reads Native (stale) and would wipe the SGD step.
+	return s.SetFromF32(s.masterF32[:n])
 }
 
 // ApplyBiasSGD updates Bias ← Bias − lr·dB (float64).

@@ -536,42 +536,77 @@ func cloneParallel(src *parallel.Layer) (*parallel.Layer, error) {
 	if src == nil {
 		return nil, nil
 	}
-	childN := src.Cfg.OutFeat * src.Cfg.Dim
-	packed := make([]float32, 0, len(src.Branches)*childN)
+	allDense := true
 	for _, ch := range src.Branches {
-		w, err := flattenOrNil(ch.Weights)
+		if _, ok := ch.(*dense.Layer); !ok {
+			allDense = false
+			break
+		}
+	}
+	if allDense && src.Cfg.OutFeat > 0 {
+		childN := src.Cfg.OutFeat * src.Cfg.Dim
+		packed := make([]float32, 0, len(src.Branches)*childN)
+		for _, ch := range src.Branches {
+			d := ch.(*dense.Layer)
+			w, err := flattenOrNil(d.Weights)
+			if err != nil {
+				return nil, err
+			}
+			if len(w) < childN {
+				tmp := make([]float32, childN)
+				copy(tmp, w)
+				w = tmp
+			}
+			packed = append(packed, w[:childN]...)
+		}
+		var gateInit []float32
+		if src.Gate != nil {
+			g, err := flattenOrNil(src.Gate.Weights)
+			if err != nil {
+				return nil, err
+			}
+			gateInit = g
+		}
+		dt, format := src.Core.DType, quant.FormatNone
+		if len(src.Branches) > 0 {
+			if d, ok := src.Branches[0].(*dense.Layer); ok && d.Weights != nil {
+				dt, format = storeMeta(d.Weights, src.Core.DType)
+			}
+		}
+		dst, err := parallel.NewConfigured(src.Cfg, dt, format, packed, gateInit)
 		if err != nil {
 			return nil, err
 		}
-		if len(w) < childN {
-			tmp := make([]float32, childN)
-			copy(tmp, w)
-			w = tmp
+		dst.Exec = src.Exec
+		dst.Core = src.Core
+		for i := range src.Branches {
+			copyDenseBias(src.Branches[i].(*dense.Layer), dst.Branches[i].(*dense.Layer))
 		}
-		packed = append(packed, w[:childN]...)
+		copyDenseBias(src.Gate, dst.Gate)
+		return dst, nil
 	}
-	var gateInit []float32
+	branches := make([]any, len(src.Branches))
+	for i, ch := range src.Branches {
+		cp, err := cloneOp(ch)
+		if err != nil {
+			return nil, fmt.Errorf("evolution: clone parallel branch %d: %w", i, err)
+		}
+		branches[i] = cp
+	}
+	var gate *dense.Layer
 	if src.Gate != nil {
-		g, err := flattenOrNil(src.Gate.Weights)
+		g, err := cloneDense(src.Gate)
 		if err != nil {
 			return nil, err
 		}
-		gateInit = g
+		gate = g
 	}
-	dt, format := src.Core.DType, quant.FormatNone
-	if len(src.Branches) > 0 && src.Branches[0].Weights != nil {
-		dt, format = storeMeta(src.Branches[0].Weights, src.Core.DType)
-	}
-	dst, err := parallel.NewConfigured(src.Cfg, dt, format, packed, gateInit)
+	dst, err := parallel.NewFromBranches(src.Cfg, branches, gate)
 	if err != nil {
 		return nil, err
 	}
 	dst.Exec = src.Exec
 	dst.Core = src.Core
-	for i := range src.Branches {
-		copyDenseBias(src.Branches[i], dst.Branches[i])
-	}
-	copyDenseBias(src.Gate, dst.Gate)
 	return dst, nil
 }
 

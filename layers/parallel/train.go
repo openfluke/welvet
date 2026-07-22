@@ -7,7 +7,7 @@ import (
 	"github.com/openfluke/welvet/layers/dense"
 )
 
-// ApplyGradSGD splits concat dW across branches (+ gate).
+// ApplyGradSGD splits concat dW across branches (+ gate) using each Op's GradWSize.
 func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) error {
 	if l == nil {
 		return fmt.Errorf("parallel: ApplyGradSGD nil")
@@ -17,26 +17,31 @@ func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) erro
 	}
 	off := 0
 	for i, ch := range l.Branches {
-		n := ch.Weights.Rows * ch.Weights.Cols
-		if off+n > dW.Len() {
-			return fmt.Errorf("parallel: dW short at branch %d", i)
+		n := branchGradWSize(ch)
+		if n == 0 {
+			continue
 		}
-		slice := core.NewTensor[T](ch.Weights.Rows, ch.Weights.Cols)
+		if off+n > dW.Len() {
+			return fmt.Errorf("parallel: dW short at branch %d (need %d, have %d)", i, off+n, dW.Len())
+		}
+		slice := core.NewTensor[T](n)
 		copy(slice.Data, dW.Data[off:off+n])
-		if err := dense.ApplyGradSGD(ch, slice, lr); err != nil {
-			return err
+		if err := branchApplyGradSGD(ch, slice, lr); err != nil {
+			return fmt.Errorf("parallel branch %d SGD: %w", i, err)
 		}
 		off += n
 	}
 	if l.Gate != nil {
-		n := l.Gate.Weights.Rows * l.Gate.Weights.Cols
-		if off+n > dW.Len() {
-			return fmt.Errorf("parallel: dW short at gate")
-		}
-		slice := core.NewTensor[T](l.Gate.Weights.Rows, l.Gate.Weights.Cols)
-		copy(slice.Data, dW.Data[off:off+n])
-		if err := dense.ApplyGradSGD(l.Gate, slice, lr); err != nil {
-			return err
+		n := l.Gate.GradWSize()
+		if n > 0 {
+			if off+n > dW.Len() {
+				return fmt.Errorf("parallel: dW short at gate")
+			}
+			slice := core.NewTensor[T](n)
+			copy(slice.Data, dW.Data[off:off+n])
+			if err := dense.ApplyGradSGD(l.Gate, slice, lr); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

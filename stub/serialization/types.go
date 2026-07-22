@@ -104,6 +104,10 @@ type LayerSpec struct {
 	Stores []StoreBlob       `json:"stores,omitempty"`
 	Extras map[string]string `json:"extras,omitempty"` // base64 LE f32 sidecars
 
+	// BranchOps nests polymorphic Parallel branch Ops (type + stores/extras).
+	// When empty, Parallel is Dense-only and uses flat branch.N stores (compat).
+	BranchOps []LayerSpec `json:"branch_ops,omitempty"`
+
 	// Legacy Dense v0 single-blob fields (still accepted on load).
 	Weights string  `json:"weights,omitempty"`
 	Native  bool    `json:"native,omitempty"`

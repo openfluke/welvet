@@ -370,17 +370,132 @@ func encodeKMeans(ls LayerSpec, op *kmeans.Layer) (LayerSpec, error) {
 
 func encodeParallel(ls LayerSpec, op *parallel.Layer) (LayerSpec, error) {
 	ls.InputHeight = op.Cfg.Dim
-	ls.OutputHeight = op.Cfg.OutDim()
+	out := op.Cfg.OutDim()
+	if out == 0 {
+		out = op.Core.OutputHeight
+	}
+	ls.OutputHeight = out
 	ls.Branches = op.Cfg.Branches
 	ls.OutFeat = op.Cfg.OutFeat
 	ls.CombineMode = string(op.Cfg.Combine)
 	ls.SeqLength = op.Cfg.SeqLen
-	for i, b := range op.Branches {
-		if err := addDenseStore(&ls, fmt.Sprintf("branch.%d", i), b); err != nil {
-			return ls, err
+	allDense := true
+	for _, b := range op.Branches {
+		if _, ok := b.(*dense.Layer); !ok {
+			allDense = false
+			break
 		}
 	}
+	if allDense {
+		for i, b := range op.Branches {
+			if err := addDenseStore(&ls, fmt.Sprintf("branch.%d", i), b.(*dense.Layer)); err != nil {
+				return ls, err
+			}
+		}
+		return ls, addDenseStore(&ls, "gate", op.Gate)
+	}
+	ls.BranchOps = make([]LayerSpec, len(op.Branches))
+	for i, b := range op.Branches {
+		bls, err := encodeBranchOp(b)
+		if err != nil {
+			return ls, fmt.Errorf("parallel branch %d: %w", i, err)
+		}
+		ls.BranchOps[i] = bls
+	}
 	return ls, addDenseStore(&ls, "gate", op.Gate)
+}
+
+func encodeBranchOp(op any) (LayerSpec, error) {
+	if op == nil {
+		return LayerSpec{}, fmt.Errorf("serialization: nil branch Op")
+	}
+	ls := LayerSpec{}
+	switch v := op.(type) {
+	case *dense.Layer:
+		ls.Type = "Dense"
+		ls.Activation = v.Core.Activation.String()
+		ls.DType = v.Core.DType.String()
+		return encodeDense(ls, v)
+	case *mha.Layer:
+		ls.Type = "MultiHeadAttention"
+		ls.DType = v.Core.DType.String()
+		return encodeMHA(ls, v)
+	case *swiglu.Layer:
+		ls.Type = "SwiGLU"
+		ls.DType = v.Core.DType.String()
+		return encodeSwiGLU(ls, v)
+	case *rmsnorm.Layer:
+		ls.Type = "RMSNorm"
+		ls.DType = v.Core.DType.String()
+		return encodeRMSNorm(ls, v)
+	case *layernorm.Layer:
+		ls.Type = "LayerNorm"
+		ls.DType = v.Core.DType.String()
+		return encodeLayerNorm(ls, v)
+	case *softmax.Layer:
+		ls.Type = "Softmax"
+		return encodeSoftmax(ls, v)
+	case *cnn1.Layer:
+		ls.Type = "CNN1"
+		ls.Activation = v.Core.Activation.String()
+		return encodeCNN1(ls, v)
+	case *cnn2.Layer:
+		ls.Type = "CNN2"
+		ls.Activation = v.Core.Activation.String()
+		return encodeCNN2(ls, v)
+	case *cnn3.Layer:
+		ls.Type = "CNN3"
+		ls.Activation = v.Core.Activation.String()
+		return encodeCNN3(ls, v)
+	case *convt1.Layer:
+		ls.Type = "ConvTransposed1D"
+		ls.Activation = v.Core.Activation.String()
+		return encodeConvT1(ls, v)
+	case *convt2.Layer:
+		ls.Type = "ConvTransposed2D"
+		ls.Activation = v.Core.Activation.String()
+		return encodeConvT2(ls, v)
+	case *convt3.Layer:
+		ls.Type = "ConvTransposed3D"
+		ls.Activation = v.Core.Activation.String()
+		return encodeConvT3(ls, v)
+	case *rnn.Layer:
+		ls.Type = "RNN"
+		return encodeRNN(ls, v)
+	case *lstm.Layer:
+		ls.Type = "LSTM"
+		return encodeLSTM(ls, v)
+	case *embedding.Layer:
+		ls.Type = "Embedding"
+		return encodeEmbedding(ls, v)
+	case *kmeans.Layer:
+		ls.Type = "KMeans"
+		ls.Activation = v.Core.Activation.String()
+		return encodeKMeans(ls, v)
+	case *parallel.Layer:
+		ls.Type = "Parallel"
+		ls.DType = v.Core.DType.String()
+		return encodeParallel(ls, v)
+	case *sequential.Layer:
+		ls.Type = "Sequential"
+		ls.DType = v.Core.DType.String()
+		return encodeSequential(ls, v)
+	case *residual.Layer:
+		ls.Type = "Residual"
+		ls.DType = v.Core.DType.String()
+		return encodeResidual(ls, v)
+	case *metacognition.Layer:
+		ls.Type = "Metacognition"
+		return encodeMeta(ls, v)
+	case *mamba.Layer:
+		ls.Type = "Mamba"
+		return encodeMamba(ls, v)
+	case *gdn.Layer:
+		ls.Type = "GDN"
+		return encodeGDN(ls, v)
+	default:
+		return ls, fmt.Errorf("serialization: unsupported branch Op %T", op)
+	}
 }
 
 func encodeSequential(ls LayerSpec, op *sequential.Layer) (LayerSpec, error) {
