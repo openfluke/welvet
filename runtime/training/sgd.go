@@ -1,7 +1,9 @@
 // Package training owns optimizers and volumetric train steps.
 //
 // Layer-agnostic: SGD walks the forward tape and dispatches ApplyGradSGD per
-// cell Op (*dense.Layer, *mha.Layer, …). No QAT.
+// cell Op (*dense.Layer, *mha.Layer, …). Weight updates go through
+// weights.ApplySGD (native in-dtype for FormatNone; packed formats use a
+// short-lived scratch then re-encode — no retained FP32 master).
 package training
 
 import (
