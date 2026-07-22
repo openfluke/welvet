@@ -8,6 +8,32 @@ const (
 	melBins = 128
 )
 
+var (
+	melFilters [][]float64
+	melHann    []float64
+	melCos     [][]float64 // [k][n] for k=0..200, n=0..399
+	melSin     [][]float64
+)
+
+func init() {
+	melFilters = melFilter()
+	melHann = make([]float64, melFFT)
+	for n := 0; n < melFFT; n++ {
+		melHann[n] = 0.5 - 0.5*math.Cos(2*math.Pi*float64(n)/melFFT)
+	}
+	melCos = make([][]float64, 201)
+	melSin = make([][]float64, 201)
+	for k := 0; k <= 200; k++ {
+		melCos[k] = make([]float64, melFFT)
+		melSin[k] = make([]float64, melFFT)
+		for n := 0; n < melFFT; n++ {
+			a := -2 * math.Pi * float64(k*n) / melFFT
+			melCos[k][n] = math.Cos(a)
+			melSin[k][n] = math.Sin(a)
+		}
+	}
+}
+
 func hzMel(h float64) float64 {
 	if h < 1000 {
 		return 3 * h / 200
@@ -66,24 +92,29 @@ func melSpectrogram(pcm []float32) []float32 {
 		frames = 1
 	}
 	out := make([]float32, melBins*frames)
-	filters := melFilter()
 	pow := make([]float64, 201)
+	win := make([]float64, melFFT)
 	max := float32(math.Inf(-1))
 	for t := 0; t < frames; t++ {
+		base := t * melHop
+		for n := 0; n < melFFT; n++ {
+			win[n] = float64(x[base+n]) * melHann[n]
+		}
 		for k := 0; k <= 200; k++ {
 			var re, im float64
+			ck, sk := melCos[k], melSin[k]
 			for n := 0; n < melFFT; n++ {
-				v := float64(x[t*melHop+n]) * (.5 - .5*math.Cos(2*math.Pi*float64(n)/melFFT))
-				a := -2 * math.Pi * float64(k*n) / melFFT
-				re += v * math.Cos(a)
-				im += v * math.Sin(a)
+				v := win[n]
+				re += v * ck[n]
+				im += v * sk[n]
 			}
 			pow[k] = re*re + im*im
 		}
 		for m := 0; m < melBins; m++ {
 			var v float64
+			fm := melFilters[m]
 			for k := 0; k <= 200; k++ {
-				v += filters[m][k] * pow[k]
+				v += fm[k] * pow[k]
 			}
 			z := float32(math.Log10(math.Max(v, 1e-10)))
 			out[m*frames+t] = z

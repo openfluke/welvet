@@ -3,6 +3,10 @@ package qwenasr
 import (
 	"fmt"
 	"math"
+	"runtime"
+	"sync"
+
+	"github.com/openfluke/welvet/simd"
 )
 
 type decLayer struct {
@@ -10,13 +14,20 @@ type decLayer struct {
 	q, k, v, o, g, u, d *Linear
 	kc, vc              []float32
 }
+
 type decoder struct {
-	c      DecoderConfig
-	emb    *embedTable
-	head   *Linear
-	norm   []float32
-	layers []decLayer
-	rope   *ropeCache
+	c       DecoderConfig
+	emb     *embedTable
+	head    *Linear
+	norm    []float32
+	layers  []decLayer
+	rope    *ropeCache
+	useSIMD bool
+	kvLen   int
+
+	// reusable scratch (sized for the current forward call)
+	h, xn, qAll, kAll, vAll, attn, mlpOut []float32
+	gate, up                              []float32
 }
 
 func newDecoder(s *tensorStore, c DecoderConfig) (*decoder, error) {
@@ -55,82 +66,195 @@ func newDecoder(s *tensorStore, c DecoderConfig) (*decoder, error) {
 	}
 	return d, nil
 }
+
 func (d *decoder) SetSIMD(on bool) {
-	d.head.UseSIMD = on
+	d.useSIMD = on && simd.Enabled()
+	d.head.UseSIMD = d.useSIMD
 	for i := range d.layers {
 		l := &d.layers[i]
 		for _, x := range []*Linear{l.q, l.k, l.v, l.o, l.g, l.u, l.d} {
-			setLinearFuse(x, on)
+			setLinearFuse(x, d.useSIMD)
 		}
 	}
 }
+
 func (d *decoder) reset() {
+	d.kvLen = 0
 	for i := range d.layers {
-		d.layers[i].kc = nil
-		d.layers[i].vc = nil
+		d.layers[i].kc = d.layers[i].kc[:0]
+		d.layers[i].vc = d.layers[i].vc[:0]
 	}
 }
-func (d *decoder) step(h []float32, pos int) []float32 {
-	H, hd := d.c.Hidden, d.c.HeadDim
-	qDim := d.c.Heads * hd
-	kvDim := d.c.KVHeads * hd
+
+func (d *decoder) ensureScratch(nNew int) {
+	H := d.c.Hidden
+	qDim := d.c.Heads * d.c.HeadDim
+	kvDim := d.c.KVHeads * d.c.HeadDim
+	need := func(buf *[]float32, n int) {
+		if cap(*buf) < n {
+			*buf = make([]float32, n)
+		} else {
+			*buf = (*buf)[:n]
+		}
+	}
+	need(&d.h, nNew*H)
+	need(&d.xn, nNew*H)
+	need(&d.qAll, nNew*qDim)
+	need(&d.kAll, nNew*kvDim)
+	need(&d.vAll, nNew*kvDim)
+	need(&d.attn, nNew*qDim)
+	need(&d.mlpOut, nNew*H)
+	need(&d.gate, nNew*d.c.Intermediate)
+	need(&d.up, nNew*d.c.Intermediate)
+}
+
+// forward runs nNew token embeddings through the stack (batched prefill or
+// single-token decode), appends KV, and returns the last-position hidden
+// (pre-final-norm — call logits() for the LM head).
+func (d *decoder) forward(embeds []float32, nNew int) []float32 {
+	if nNew <= 0 {
+		return nil
+	}
+	cfg := d.c
+	H := cfg.Hidden
+	hd := cfg.HeadDim
+	nh := cfg.Heads
+	nkv := cfg.KVHeads
+	qDim := nh * hd
+	kvDim := nkv * hd
+	rep := nh / nkv
+	eps := cfg.RMSEps
+	scale := float32(1 / math.Sqrt(float64(hd)))
+	base := d.kvLen
+	useSIMD := d.useSIMD
+
+	d.ensureScratch(nNew)
+	h := d.h
+	copy(h, embeds[:nNew*H])
+	xn, qAll, kAll, vAll, attn, mlpOut := d.xn, d.qAll, d.kAll, d.vAll, d.attn, d.mlpOut
+	gate, up := d.gate, d.up
+
 	for li := range d.layers {
 		l := &d.layers[li]
-		x := append([]float32(nil), h...)
-		rmsNorm(x, l.in, H, d.c.RMSEps)
-		q := make([]float32, qDim)
-		k := make([]float32, kvDim)
-		v := make([]float32, kvDim)
-		l.q.forward(x, q)
-		l.k.forward(x, k)
-		l.v.forward(x, v)
-		for head := 0; head < d.c.Heads; head++ {
-			rmsNorm(q[head*hd:(head+1)*hd], l.qn, hd, d.c.RMSEps)
-			d.rope.apply(q[head*hd:(head+1)*hd], pos)
+		for i := 0; i < nNew; i++ {
+			copy(xn[i*H:(i+1)*H], h[i*H:(i+1)*H])
+			rmsNorm(xn[i*H:(i+1)*H], l.in, H, eps)
 		}
-		for head := 0; head < d.c.KVHeads; head++ {
-			rmsNorm(k[head*hd:(head+1)*hd], l.kn, hd, d.c.RMSEps)
-			d.rope.apply(k[head*hd:(head+1)*hd], pos)
-		}
-		l.kc = append(l.kc, k...)
-		l.vc = append(l.vc, v...)
-		n := len(l.kc) / kvDim
-		a := make([]float32, qDim)
-		ratio := d.c.Heads / d.c.KVHeads
-		scale := float32(1 / math.Sqrt(float64(hd)))
-		for head := 0; head < d.c.Heads; head++ {
-			kh := head / ratio
-			sc := make([]float32, n)
-			for j := 0; j < n; j++ {
-				sc[j] = dot(q[head*hd:(head+1)*hd], l.kc[j*kvDim+kh*hd:], hd) * scale
+		l.q.forwardSeq(xn, qAll, nNew)
+		l.k.forwardSeq(xn, kAll, nNew)
+		l.v.forwardSeq(xn, vAll, nNew)
+		for i := 0; i < nNew; i++ {
+			pos := base + i
+			q := qAll[i*qDim : (i+1)*qDim]
+			k := kAll[i*kvDim : (i+1)*kvDim]
+			for hh := 0; hh < nh; hh++ {
+				rmsNorm(q[hh*hd:(hh+1)*hd], l.qn, hd, eps)
+				d.rope.apply(q[hh*hd:(hh+1)*hd], pos)
 			}
-			softmax(sc)
-			for j := 0; j < n; j++ {
-				for z := 0; z < hd; z++ {
-					a[head*hd+z] += sc[j] * l.vc[j*kvDim+kh*hd+z]
+			for hh := 0; hh < nkv; hh++ {
+				rmsNorm(k[hh*hd:(hh+1)*hd], l.kn, hd, eps)
+				d.rope.apply(k[hh*hd:(hh+1)*hd], pos)
+			}
+		}
+		l.kc = append(l.kc, kAll[:nNew*kvDim]...)
+		l.vc = append(l.vc, vAll[:nNew*kvDim]...)
+		kc, vc := l.kc, l.vc
+
+		for i := range attn {
+			attn[i] = 0
+		}
+
+		attnOne := func(i int) {
+			qpos := base + i
+			n := qpos + 1
+			sc := make([]float32, n)
+			for hh := 0; hh < nh; hh++ {
+				kvh := hh / rep
+				qh := qAll[i*qDim+hh*hd : i*qDim+hh*hd+hd]
+				for tpos := 0; tpos < n; tpos++ {
+					kh := kc[tpos*kvDim+kvh*hd : tpos*kvDim+kvh*hd+hd]
+					if useSIMD {
+						sc[tpos] = simd.DotF32(qh, kh) * scale
+					} else {
+						sc[tpos] = dot(qh, kh, hd) * scale
+					}
+				}
+				softmax(sc)
+				out := attn[i*qDim+hh*hd : i*qDim+hh*hd+hd]
+				for tpos := 0; tpos < n; tpos++ {
+					vh := vc[tpos*kvDim+kvh*hd : tpos*kvDim+kvh*hd+hd]
+					if useSIMD {
+						simd.SaxpyF32(out, sc[tpos], vh, hd)
+					} else {
+						w := sc[tpos]
+						for z := 0; z < hd; z++ {
+							out[z] += w * vh[z]
+						}
+					}
 				}
 			}
 		}
-		z := make([]float32, H)
-		l.o.forward(a, z)
-		for i := range h {
-			h[i] += z[i]
+
+		if nNew >= 8 && useSIMD {
+			workers := runtime.GOMAXPROCS(0)
+			if workers > nNew {
+				workers = nNew
+			}
+			var wg sync.WaitGroup
+			chunk := (nNew + workers - 1) / workers
+			for w := 0; w < workers; w++ {
+				lo := w * chunk
+				hi := lo + chunk
+				if hi > nNew {
+					hi = nNew
+				}
+				if lo >= hi {
+					break
+				}
+				wg.Add(1)
+				go func(a, b int) {
+					defer wg.Done()
+					for i := a; i < b; i++ {
+						attnOne(i)
+					}
+				}(lo, hi)
+			}
+			wg.Wait()
+		} else {
+			for i := 0; i < nNew; i++ {
+				attnOne(i)
+			}
 		}
-		x = append([]float32(nil), h...)
-		rmsNorm(x, l.post, H, d.c.RMSEps)
-		g, u := make([]float32, l.g.Out), make([]float32, l.u.Out)
-		l.g.forward(x, g)
-		l.u.forward(x, u)
-		for i := range g {
-			g[i] = silu(g[i]) * u[i]
+
+		l.o.forwardSeq(attn, mlpOut, nNew)
+		for j := 0; j < nNew*H; j++ {
+			h[j] += mlpOut[j]
 		}
-		l.d.forward(g, z)
-		for i := range h {
-			h[i] += z[i]
+		for i := 0; i < nNew; i++ {
+			copy(xn[i*H:(i+1)*H], h[i*H:(i+1)*H])
+			rmsNorm(xn[i*H:(i+1)*H], l.post, H, eps)
+		}
+		l.g.forwardSeq(xn, gate, nNew)
+		l.u.forwardSeq(xn, up, nNew)
+		for j := range gate {
+			gate[j] = silu(gate[j]) * up[j]
+		}
+		l.d.forwardSeq(gate, mlpOut, nNew)
+		for j := 0; j < nNew*H; j++ {
+			h[j] += mlpOut[j]
 		}
 	}
-	return h
+	d.kvLen = base + nNew
+
+	last := make([]float32, H)
+	copy(last, h[(nNew-1)*H:nNew*H])
+	return last
 }
+
+func (d *decoder) step(h []float32, _ int) []float32 {
+	return d.forward(h, 1)
+}
+
 func (d *decoder) logits(h []float32) []float32 {
 	x := append([]float32(nil), h...)
 	rmsNorm(x, d.norm, d.c.Hidden, d.c.RMSEps)
@@ -138,8 +262,13 @@ func (d *decoder) logits(h []float32) []float32 {
 	d.head.forward(x, z)
 	return z
 }
+
 func (d *decoder) embed(id int) []float32 {
 	x := make([]float32, d.c.Hidden)
 	d.emb.row(id, x)
 	return x
+}
+
+func (d *decoder) embedInto(id int, dst []float32) {
+	d.emb.row(id, dst)
 }
