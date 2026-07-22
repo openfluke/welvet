@@ -128,6 +128,27 @@ func (m *Model) CloseGPU() {
 	m.gpu = nil
 }
 
+// ContextLimit is the live prefill+decode token window (GPU fuse KV cap, else MaxSeqLen).
+func (m *Model) ContextLimit() int {
+	if m == nil {
+		return 0
+	}
+	switch eng := m.gpu.(type) {
+	case *fusedgpu.HybridEngine:
+		if eng != nil && eng.MaxSeq() > 0 {
+			return eng.MaxSeq()
+		}
+	case *fusedgpu.Engine:
+		if eng != nil {
+			// dense fused path uses Spec.MaxSeq via internal; fall through to MaxSeqLen
+		}
+	}
+	if m.MaxSeqLen > 0 {
+		return m.MaxSeqLen
+	}
+	return fusedgpu.DefaultMaxSeq
+}
+
 // ForwardTokensGPU runs the fused GPU path when synced; falls back to host ForwardTokens.
 func (m *Model) ForwardTokensGPU(ids []uint32) ([]float32, error) {
 	if m == nil {

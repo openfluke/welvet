@@ -4,11 +4,12 @@ import (
 	"fmt"
 
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/model/entity"
+	"github.com/openfluke/welvet/fusedgpu"
 	"github.com/openfluke/welvet/layers/gdn"
-	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/layers/rmsnorm"
 	"github.com/openfluke/welvet/layers/swiglu"
+	"github.com/openfluke/welvet/model/entity"
+	"github.com/openfluke/welvet/quant"
 )
 
 // loadHybridEntity loads Qwen3.5 / Bonsai text tower from ENTITY.
@@ -24,9 +25,7 @@ func loadHybridEntity(ef *entity.File, m *Model, spec *entity.TransformerSpec) e
 	if m.PartialRotary <= 0 {
 		m.PartialRotary = 1
 	}
-	if m.MaxSeqLen > 8192 {
-		m.MaxSeqLen = 8192 // practical KV cap for laptop VRAM/RAM
-	}
+	m.MaxSeqLen = fusedgpu.ClampHostMaxSeq(m.MaxSeqLen)
 
 	embBlob, err := ef.LoadQuantBlob("transformer.embeddings.packed")
 	if err != nil {

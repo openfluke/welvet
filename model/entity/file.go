@@ -70,6 +70,9 @@ type TransformerSpec struct {
 	Architecture string           `json:"architecture"`
 	HiddenSize   int              `json:"hidden_size"`
 	VocabSize    int              `json:"vocab_size"`
+	// MaxSeqLen is the model context window (from HF max_position_embeddings).
+	// 0 means "unset" — loader falls back to HF snapshot / fusedgpu.DefaultMaxSeq.
+	MaxSeqLen    int              `json:"max_seq_len,omitempty"`
 	LMHeadTied   bool             `json:"lm_head_tied,omitempty"`
 	HasFinalNorm bool             `json:"has_final_norm,omitempty"`
 	WeightDType  string           `json:"weight_dtype,omitempty"`

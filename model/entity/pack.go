@@ -257,6 +257,7 @@ func PackFromHF(snapshotDir, outPath string, opts PackOptions) error {
 		Architecture: kind.String(),
 		HiddenSize:   dims.HiddenSize,
 		VocabSize:    dims.VocabSize,
+		MaxSeqLen:    hf.MaxSeqLenFromConfig(config),
 		LMHeadTied:   globals.LMHeadTied,
 		HasFinalNorm: globals.HasFinalNorm,
 		WeightDType:  "FLOAT32",

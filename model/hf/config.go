@@ -66,6 +66,26 @@ func LoadConfigJSON(path string) (map[string]any, error) {
 	return config, nil
 }
 
+// MaxSeqLenFromConfig reads the model context window from HF config.json.
+// Prefers max_position_embeddings, then max_sequence_length / n_positions.
+// Returns 0 when none are present.
+func MaxSeqLenFromConfig(config map[string]any) int {
+	if config == nil {
+		return 0
+	}
+	for _, key := range []string{
+		"max_position_embeddings",
+		"max_sequence_length",
+		"n_positions",
+		"seq_length",
+	} {
+		if v, ok := ConfigInt(config, key); ok && v > 0 {
+			return v
+		}
+	}
+	return 0
+}
+
 // EOSTokenIDs extracts eos_token_id from config (default [2]).
 func EOSTokenIDs(config map[string]any) []int {
 	var tokens []int

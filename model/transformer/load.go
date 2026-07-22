@@ -5,13 +5,14 @@ import (
 	"path/filepath"
 
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/fusedgpu"
 	"github.com/openfluke/welvet/layers/embedding"
-	"github.com/openfluke/welvet/model/entity"
-	"github.com/openfluke/welvet/model/hf"
 	"github.com/openfluke/welvet/layers/mha"
-	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/layers/rmsnorm"
 	"github.com/openfluke/welvet/layers/swiglu"
+	"github.com/openfluke/welvet/model/entity"
+	"github.com/openfluke/welvet/model/hf"
+	"github.com/openfluke/welvet/quant"
 )
 
 // LoadEntity builds a Model from a packed Welvet .entity file.
@@ -31,10 +32,10 @@ func LoadEntity(path string) (*Model, error) {
 	}
 	spec := hdr.Transformer
 	d := spec.Dims
-	maxSeq := 2048
 	if d.NumLayers <= 0 || d.NumHeads <= 0 || spec.HiddenSize <= 0 {
 		return nil, fmt.Errorf("entity: invalid dims")
 	}
+	maxSeq := resolveMaxSeqLen(spec)
 
 	// Qwen3.5 hybrid / dense Qwen3 BinaryPacked (Bonsai) path
 	if spec.Architecture == "qwen35_hybrid" || spec.Architecture == "qwen3_dense" || len(d.LayerTypes) > 0 {
@@ -54,6 +55,10 @@ func LoadEntity(path string) (*Model, error) {
 			cfgPath := filepath.Join(m.Snapshot, "config.json")
 			if cfg, err := hf.LoadConfigJSON(cfgPath); err == nil {
 				m.EOSTokens = hf.EOSTokenIDs(cfg)
+				// Prefer live HF context if entity was packed before MaxSeqLen existed.
+				if n := hf.MaxSeqLenFromConfig(cfg); n > 0 {
+					m.MaxSeqLen = fusedgpu.ClampHostMaxSeq(n)
+				}
 			}
 		}
 		if err := loadHybridEntity(ef, m, spec); err != nil {
@@ -96,6 +101,9 @@ func LoadEntity(path string) (*Model, error) {
 		cfgPath := filepath.Join(m.Snapshot, "config.json")
 		if cfg, err := hf.LoadConfigJSON(cfgPath); err == nil {
 			m.EOSTokens = hf.EOSTokenIDs(cfg)
+			if n := hf.MaxSeqLenFromConfig(cfg); n > 0 {
+				m.MaxSeqLen = fusedgpu.ClampHostMaxSeq(n)
+			}
 		}
 	}
 
@@ -229,4 +237,20 @@ func LoadEntity(path string) (*Model, error) {
 
 	m.EntityPath = path
 	return m, nil
+}
+
+// resolveMaxSeqLen prefers the entity header, then a live HF snapshot, else default.
+func resolveMaxSeqLen(spec *entity.TransformerSpec) int {
+	if spec != nil && spec.MaxSeqLen > 0 {
+		return fusedgpu.ClampHostMaxSeq(spec.MaxSeqLen)
+	}
+	if spec != nil && spec.Snapshot != "" {
+		cfgPath := filepath.Join(spec.Snapshot, "config.json")
+		if cfg, err := hf.LoadConfigJSON(cfgPath); err == nil {
+			if n := hf.MaxSeqLenFromConfig(cfg); n > 0 {
+				return fusedgpu.ClampHostMaxSeq(n)
+			}
+		}
+	}
+	return fusedgpu.ClampHostMaxSeq(fusedgpu.DefaultMaxSeq)
 }

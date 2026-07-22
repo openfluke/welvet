@@ -37,13 +37,15 @@ func (m *Model) ExportHybridFusedGPUSpec() (*fusedgpu.HybridSpec, error) {
 	if m.Blocks[0].AttnNorm != nil && m.Blocks[0].AttnNorm.Cfg.Eps > 0 {
 		eps = float32(m.Blocks[0].AttnNorm.Cfg.Eps)
 	}
-	maxSeq := m.MaxSeqLen
-	if maxSeq <= 0 {
-		maxSeq = 256
-	}
-	const gpuMaxSeq = 512
-	if maxSeq > gpuMaxSeq {
-		maxSeq = gpuMaxSeq
+	// Context comes from the model / HF max_position_embeddings (see LoadEntity).
+	// Hard ceiling is the WGSL scores workgroup array (fusedgpu.AttnScoresMaxSeq).
+	// Callers with a known free-VRAM budget can further clamp via
+	// fusedgpu.ClampMaxSeqForKVBudget before upload.
+	maxSeq := fusedgpu.ClampAttnMaxSeq(m.MaxSeqLen)
+	if full, kvH, hd := hybridAttnKVShape(m); full > 0 {
+		kvMiB := fusedgpu.EstimateHybridKVBytes(full, kvH, hd, maxSeq) / (1024 * 1024)
+		fmt.Printf("  hybrid fuse MaxSeq=%d (model=%d, shader_cap=%d, KV~%d MiB)\n",
+			maxSeq, m.MaxSeqLen, fusedgpu.AttnScoresMaxSeq, kvMiB)
 	}
 
 	// Resolve tied LM before any take() — taking embed would nil the shared blob.
@@ -179,6 +181,25 @@ func (m *Model) ExportHybridFusedGPUSpec() (*fusedgpu.HybridSpec, error) {
 	// Host packed payloads were moved into staging; mark so CPU paths reload from entity.
 	m.hostWeightsReleased = true
 	return spec, nil
+}
+
+// hybridAttnKVShape returns (#full_attention layers, numKVHeads, headDim) for KV sizing.
+func hybridAttnKVShape(m *Model) (fullAttn, kvHeads, headDim int) {
+	if m == nil {
+		return 0, 0, 0
+	}
+	for i := range m.Blocks {
+		b := &m.Blocks[i]
+		if b.LayerType != "full_attention" {
+			continue
+		}
+		fullAttn++
+		if kvHeads <= 0 {
+			kvHeads = b.NumKVHeads
+			headDim = b.HeadDim
+		}
+	}
+	return fullAttn, kvHeads, headDim
 }
 
 func takeBinarySpecFromDense(l *dense.Layer) (fusedgpu.BinarySpec, error) {

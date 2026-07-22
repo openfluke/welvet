@@ -43,15 +43,12 @@ func (m *Model) ExportFusedGPUSpec() (*fusedgpu.Spec, error) {
 	if maxSeq <= 0 {
 		maxSeq = m.MaxSeqLen
 	}
-	if maxSeq <= 0 {
-		maxSeq = 512
+	// Dense Q4 fuse uses a smaller KV window (VRAM-heavy vs BinaryG128 hybrid).
+	// Named constant — not a magic number; still ≤ AttnScoresMaxSeq.
+	if maxSeq <= 0 || maxSeq > fusedgpu.DenseFusedDefaultMaxSeq {
+		maxSeq = fusedgpu.DenseFusedDefaultMaxSeq
 	}
-	// Cap KV footprint for fused GPU — host MaxSeqLen may be 2048+ for long-context
-	// CPU paths; 4GB cards OOM on kc_* after several sequential SyncGPU uploads.
-	const gpuMaxSeq = 256
-	if maxSeq > gpuMaxSeq {
-		maxSeq = gpuMaxSeq
-	}
+	maxSeq = fusedgpu.ClampDenseFusedMaxSeq(maxSeq)
 
 	emb, err := weights.MatrixF32(m.Embed.Weights)
 	if err != nil {

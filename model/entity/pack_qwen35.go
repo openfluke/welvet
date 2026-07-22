@@ -294,6 +294,7 @@ func PackFromQwen35MLX(snapshotDir, outPath string, opts PackOptions) error {
 		Architecture: hf.ArchQwen35Hybrid.String(),
 		HiddenSize:   dims.HiddenSize,
 		VocabSize:    dims.VocabSize,
+		MaxSeqLen:    hf.MaxSeqLenFromConfig(cfg),
 		LMHeadTied:   false,
 		HasFinalNorm: true,
 		WeightDType:  "PACKED",

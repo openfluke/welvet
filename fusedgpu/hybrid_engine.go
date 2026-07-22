@@ -106,8 +106,9 @@ func newHybridEngine(spec *HybridSpec) (*hybridEngine, error) {
 		eps:     spec.Eps,
 	}
 	if e.maxSeq <= 0 {
-		e.maxSeq = 256
+		e.maxSeq = DefaultMaxSeq
 	}
+	e.maxSeq = ClampAttnMaxSeq(e.maxSeq)
 	if e.eps <= 0 {
 		e.eps = 1e-6
 	}

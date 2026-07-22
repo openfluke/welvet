@@ -812,6 +812,7 @@ struct Params {
 @group(0) @binding(4) var<storage, read> vCache: array<f32>;
 @group(0) @binding(5) var<storage, read_write> out: array<f32>;
 
+// NOTE: array lengths must match fusedgpu.HybridAttnMaxHeadDim / AttnScoresMaxSeq.
 var<workgroup> qv: array<f32, 256>;
 var<workgroup> scores: array<f32, 2048>;
 var<workgroup> mbuf: array<f32, 64>;

@@ -241,6 +241,7 @@ func PackFromQwen3MLX(snapshotDir, outPath string, opts PackOptions) error {
 		Architecture: "qwen3_dense",
 		HiddenSize:   dims.HiddenSize,
 		VocabSize:    dims.VocabSize,
+		MaxSeqLen:    hf.MaxSeqLenFromConfig(cfg),
 		LMHeadTied:   tied,
 		HasFinalNorm: true,
 		WeightDType:  "PACKED",
