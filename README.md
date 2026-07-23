@@ -95,9 +95,9 @@ Status rollup — version points live in the [scorecard](#version-scorecard) onl
 | Area | Status |
 |------|--------|
 | Engine layout (one feature → one folder) | ✅ |
-| Rules: no engine tests / no fallbacks / no hardcoded float32 / no QAT | ✅ |
+| Rules: no engine tests / no fallbacks / no hardcoded float32 / no QAT / train keeps storage truth | ✅ |
 | `core` types (34 dtypes, Tensor\[T\], activations, backends) | ✅ |
-| `weights` FormatNone × 34 stream pack/MatVec | ✅ |
+| `weights` FormatNone × 34 stream pack/MatVec + in-dtype ApplySGD (no retained f32 master) | ✅ |
 | `quant` Pack/Unpack/MatVec all 20 formats (CPU) | ✅ |
 | `simd` Plan 9 kernels linked (amd64/arm64) | ✅ |
 | webgpu | Dense GEMV/GEMVT (incl. Affine resident) + RMS/LN/Softmax exotic + SwiGLU + MHA attn/RoPE fwd+bwd + tiled CNN + Embedding + RNN/LSTM | ✅ |
@@ -106,6 +106,7 @@ Status rollup — version points live in the [scorecard](#version-scorecard) onl
 | **Dense** k/IQ/Affine SIMD (group Dot* + scales; no F32 inflate) | ✅ |
 | `architecture/` volumetric grid (cells, hops, remote links) | ✅ |
 | `runtime/forward/` / `backward` / `training` — Dense…Residual + ConvT1–3 + Parallel + KMeans + Mamba + Metacognition + GDN | ✅ |
+| Cross-Numeric Train (w2a Step) — Op kinds × weight dtype × act host (smoke ~735 / full ~10.7k) | ✅ |
 | ConvT / Parallel / KMeans / Mamba / Metacognition / GDN — full timed matrix + train grids (GDN truncated BPTT) | ✅ |
 | Model IO / transformer / entity / tokenizer / hf | ✅ |
 | `apps/octo/` interactive model shell (download / convert / chat) | 🚧 |
@@ -147,8 +148,9 @@ cd w2a && go test ./tests/metacognition -v
 2. **No fallbacks** — missing path → hard error (no SIMD→Go, no fake GPU).
 3. **Nothing hardcoded to float32** — APIs are `Tensor[T]` / generics. Host wires are `WireF32` / `WireF64` / `WireI8` via `weights.SelectWire` (float64 & integers are **not** forced through f32). WebGPU WGSL ALU is f32 on typical adapters — narrowing happens only at the device boundary.
 4. **No QAT** — `DType` + `QuantFormat` are storage truth.
-5. **One poly feature → one folder.**
-6. **v1.0 = scorecard 100/100** (every board row ✅).
+5. **Train keeps storage truth** — `weights.ApplySGD` updates FormatNone in native lanes (or unpack→update→re-Pack for packed formats). No retained float32 master beside storage (`RetainsF32Master` only for FormatNone+float32).
+6. **One poly feature → one folder.**
+7. **v1.0 = scorecard 100/100** (every board row ✅).
 
 ---
 
@@ -177,7 +179,10 @@ It does **not** mean “FP32 master” or “untyped.”
 
 1. Pick **either** a native dtype under FormatNone **or** a packed quant format — that pair *is* storage truth.
 2. Convert hubs through a temporary f32 scratch, then **re-encodes and drops it**. Nothing keeps a parallel master.
-3. w2a / Octo lines like `none/float16 → Q4_0` mean: decode current storage → scratch → encode destination (lossy when leaving high precision).
+3. **SGD** uses the same rule: FormatNone → in-dtype `ApplySGD`; packed → short-lived unpack scratch → update → re-Pack. Weight dtype ⊥ activation `Tensor[T]` (Cross-Numeric Train in w2a Step).
+4. w2a / Octo lines like `none/float16 → Q4_0` mean: decode current storage → scratch → encode destination (lossy when leaving high precision).
+
+Public Dense demotion + full W×A showcase (charts/PDF): [down-the-dem](https://github.com/openfluke/down-the-dem).
 
 Tables below list the 34 dtypes and 20 formats.
 
@@ -300,7 +305,7 @@ Row **Wt** is the share of that package inside its scorecard section (not additi
 | Package | Features | Wt | Status |
 |---------|----------|---:|:------:|
 | `core/` | 34 DTypes, `Numeric`, `Tensor[T]`, activations, Layer/Network, Backend enum | 3 | ✅ |
-| `weights/` | FormatNone pack/stream MatVec (f64 acc), SelectWire F32/F64/I8, DecodeRow(F64) | 3 | ✅ |
+| `weights/` | FormatNone pack/stream MatVec (f64 acc), SelectWire F32/F64/I8, DecodeRow(F64), ApplySGD (in-dtype / re-Pack; no retained f32 master) | 3 | ✅ |
 | `quant/` | All 20 formats Pack/Unpack/MatVec/MatVecT | 3 | ✅ |
 | `simd/` | DotTile, DotI8/U8, DotQ4_0, Saxpy, BitNet helpers (amd64/arm64 `.s`) | 3 | ✅ |
 | `webgpu/` | Dense GEMV/GEMVT/DenseDW + `norm` / `softmax` / `swiglu_fuse` shaders | 2 | ✅ |
@@ -316,8 +321,8 @@ Row **Wt** is the share of that package inside its scorecard section (not additi
 | `architecture/` | Volumetric grid, cells, hops, remote links, Op bind | 2 | ✅ |
 | `runtime/forward/` | Grid walk; Dense…Residual + ConvT + Parallel + KMeans + Mamba + Metacognition + GDN | 2 | ✅ |
 | `runtime/backward/` | Reverse tape; same layer set | 2 | ✅ |
-| `runtime/training/` | MSE + SGD; ApplyGradSGD for same layer set | 1 | ✅ |
-| `runtime/step/` | Discrete-time volumetric step mesh — Forward/Backward/ApplyTween; all Ops × dtype × quant × CPU/SIMD | 1 | ✅ |
+| `runtime/training/` | MSE + SGD; ApplyGradSGD → store ApplySGD for same layer set; storage-truth train | 1 | ✅ |
+| `runtime/step/` | Discrete-time volumetric step mesh — Forward/Backward/ApplyTween/StepMesh; Cross-Numeric Train (kinds × weight dtype × act host) | 1 | ✅ |
 
 ### Layers (full w2a timed matrix + train grids; peak fused ALU in §12)
 
