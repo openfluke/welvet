@@ -14,6 +14,7 @@ import (
 	"github.com/openfluke/welvet/layers/layernorm"
 	"github.com/openfluke/welvet/layers/lstm"
 	"github.com/openfluke/welvet/layers/mha"
+	"github.com/openfluke/welvet/layers/parallel"
 	"github.com/openfluke/welvet/layers/residual"
 	"github.com/openfluke/welvet/layers/rmsnorm"
 	"github.com/openfluke/welvet/layers/rnn"
@@ -50,6 +51,21 @@ func collectDenseChildren(op any) []*dense.Layer {
 		return v.Children
 	case *residual.Layer:
 		return v.Children
+	case *parallel.Layer:
+		var out []*dense.Layer
+		for _, ch := range v.Branches {
+			out = append(out, collectDenseChildren(ch)...)
+		}
+		if v.Gate != nil {
+			out = append(out, v.Gate)
+		}
+		return out
+	case *parallel.Stack:
+		var out []*dense.Layer
+		for _, ch := range v.Children {
+			out = append(out, collectDenseChildren(ch)...)
+		}
+		return out
 	default:
 		return nil
 	}
@@ -193,6 +209,10 @@ func applyGradSGDAny[T core.Numeric](op any, dW *core.Tensor[T], lr float64) err
 		return residual.ApplyGradSGD(v, dW, lr)
 	case *softmax.Layer:
 		return softmax.ApplyGradSGD(v, dW, lr)
+	case *parallel.Layer:
+		return parallel.ApplyGradSGD(v, dW, lr)
+	case *parallel.Stack:
+		return parallel.ApplyGradSGDStack(v, dW, lr)
 	default:
 		return fmt.Errorf("tween: ApplyGradSGD unsupported %T", op)
 	}
@@ -291,6 +311,18 @@ func layerBackwardAny[T core.Numeric](
 			return nil, nil, fmt.Errorf("softmax op %T", cell.Op)
 		}
 		return softmax.Backward(sl, gradOut, input, pre)
+	case core.LayerParallel:
+		pl, ok := cell.Op.(*parallel.Layer)
+		if !ok {
+			return nil, nil, fmt.Errorf("parallel op %T", cell.Op)
+		}
+		return parallel.Backward(pl, gradOut, input, pre)
+	case core.LayerStack:
+		sl, ok := cell.Op.(*parallel.Stack)
+		if !ok {
+			return nil, nil, fmt.Errorf("stack op %T", cell.Op)
+		}
+		return parallel.BackwardStack(sl, gradOut, input, pre)
 	default:
 		return nil, nil, fmt.Errorf("tween: backward unsupported type %s", cell.Layer.Type)
 	}

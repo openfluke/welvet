@@ -71,6 +71,8 @@ func cloneOp(op any) (any, error) {
 		return cloneResidual(v)
 	case *parallel.Layer:
 		return cloneParallel(v)
+	case *parallel.Stack:
+		return cloneStack(v)
 	case *kmeans.Layer:
 		return cloneKMeans(v)
 	case *mamba.Layer:
@@ -602,6 +604,27 @@ func cloneParallel(src *parallel.Layer) (*parallel.Layer, error) {
 		gate = g
 	}
 	dst, err := parallel.NewFromBranches(src.Cfg, branches, gate)
+	if err != nil {
+		return nil, err
+	}
+	dst.Exec = src.Exec
+	dst.Core = src.Core
+	return dst, nil
+}
+
+func cloneStack(src *parallel.Stack) (*parallel.Stack, error) {
+	if src == nil {
+		return nil, nil
+	}
+	children := make([]any, len(src.Children))
+	for i, ch := range src.Children {
+		cp, err := cloneOp(ch)
+		if err != nil {
+			return nil, fmt.Errorf("evolution: clone stack child %d: %w", i, err)
+		}
+		children[i] = cp
+	}
+	dst, err := parallel.NewStack(children...)
 	if err != nil {
 		return nil, err
 	}

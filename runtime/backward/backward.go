@@ -198,6 +198,12 @@ func dispatchBwd[T core.Numeric](st forward.Step[T], gradOut *core.Tensor[T]) (g
 			return nil, nil, fmt.Errorf("parallel cell Op is %T", st.Cell.Op)
 		}
 		return parallel.Backward(pl, gradOut, st.Input, st.Pre)
+	case core.LayerStack:
+		sl, ok := st.Cell.Op.(*parallel.Stack)
+		if !ok || sl == nil {
+			return nil, nil, fmt.Errorf("stack cell Op is %T", st.Cell.Op)
+		}
+		return parallel.BackwardStack(sl, gradOut, st.Input, st.Pre)
 	case core.LayerKMeans:
 		kl, ok := st.Cell.Op.(*kmeans.Layer)
 		if !ok || kl == nil {

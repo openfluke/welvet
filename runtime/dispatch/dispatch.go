@@ -77,6 +77,8 @@ func Forward[T core.Numeric](op any, input *core.Tensor[T]) (pre, post *core.Ten
 		return residual.Forward(v, input)
 	case *parallel.Layer:
 		return parallel.Forward(v, input)
+	case *parallel.Stack:
+		return parallel.ForwardStack(v, input)
 	case *kmeans.Layer:
 		return kmeans.Forward(v, input)
 	case *mamba.Layer:
@@ -132,6 +134,8 @@ func Backward[T core.Numeric](op any, gradOut, input, pre *core.Tensor[T]) (grad
 		return residual.Backward(v, gradOut, input, pre)
 	case *parallel.Layer:
 		return parallel.Backward(v, gradOut, input, pre)
+	case *parallel.Stack:
+		return parallel.BackwardStack(v, gradOut, input, pre)
 	case *kmeans.Layer:
 		return kmeans.Backward(v, gradOut, input, pre)
 	case *mamba.Layer:
@@ -223,6 +227,9 @@ func SyncExec(op any, exec core.ExecConfig) {
 	case *parallel.Layer:
 		v.Exec = exec
 		v.SyncBranchExec()
+	case *parallel.Stack:
+		v.Exec = exec
+		v.SyncChildExec()
 	case *kmeans.Layer:
 		v.Exec = exec
 		if v.Centers != nil {
@@ -282,6 +289,8 @@ func Pack(op any, format quant.Format) error {
 		return v.Pack(format)
 	case *parallel.Layer:
 		return v.Pack(format)
+	case *parallel.Stack:
+		return v.Pack(format)
 	case *kmeans.Layer:
 		return v.Pack(format)
 	case *mamba.Layer:
@@ -336,6 +345,8 @@ func SetDType(op any, dt core.DType) error {
 	case *residual.Layer:
 		return v.SetDType(dt)
 	case *parallel.Layer:
+		return v.SetDType(dt)
+	case *parallel.Stack:
 		return v.SetDType(dt)
 	case *kmeans.Layer:
 		return v.SetDType(dt)
@@ -394,6 +405,8 @@ func GradWSize(op any) int {
 		return v.GradWSize()
 	case *parallel.Layer:
 		return v.GradWSize()
+	case *parallel.Stack:
+		return v.GradWSize()
 	case *kmeans.Layer:
 		return v.GradWSize()
 	case *mamba.Layer:
@@ -449,6 +462,8 @@ func ApplyGradSGD[T core.Numeric](op any, dW *core.Tensor[T], lr float64) error 
 		return residual.ApplyGradSGD(v, dW, lr)
 	case *parallel.Layer:
 		return parallel.ApplyGradSGD(v, dW, lr)
+	case *parallel.Stack:
+		return parallel.ApplyGradSGDStack(v, dW, lr)
 	case *kmeans.Layer:
 		return kmeans.ApplyGradSGD(v, dW, lr)
 	case *mamba.Layer:

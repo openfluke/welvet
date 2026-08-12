@@ -222,6 +222,12 @@ func dispatch[T core.Numeric](cell *architecture.Cell, input *core.Tensor[T]) (p
 			return nil, nil, fmt.Errorf("parallel cell Op is %T, want *parallel.Layer", cell.Op)
 		}
 		return parallel.Forward(pl, input)
+	case core.LayerStack:
+		sl, ok := cell.Op.(*parallel.Stack)
+		if !ok || sl == nil {
+			return nil, nil, fmt.Errorf("stack cell Op is %T, want *parallel.Stack", cell.Op)
+		}
+		return parallel.ForwardStack(sl, input)
 	case core.LayerKMeans:
 		kl, ok := cell.Op.(*kmeans.Layer)
 		if !ok || kl == nil {

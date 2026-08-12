@@ -75,6 +75,8 @@ func branchForward[T core.Numeric](op any, input, flat *core.Tensor[T]) (pre, po
 		return residual.Forward(v, input)
 	case *Layer:
 		return Forward(v, input)
+	case *Stack:
+		return ForwardStack(v, input)
 	case *kmeans.Layer:
 		return kmeans.Forward(v, input)
 	case *mamba.Layer:
@@ -133,6 +135,8 @@ func branchBackward[T core.Numeric](op any, gradOut, input, flat, pre *core.Tens
 		return residual.Backward(v, gradOut, input, pre)
 	case *Layer:
 		return Backward(v, gradOut, input, pre)
+	case *Stack:
+		return BackwardStack(v, gradOut, input, pre)
 	case *kmeans.Layer:
 		return kmeans.Backward(v, gradOut, input, pre)
 	case *mamba.Layer:
@@ -184,6 +188,8 @@ func branchPack(op any, format quant.Format) error {
 		return v.Pack(format)
 	case *Layer:
 		return v.Pack(format)
+	case *Stack:
+		return v.Pack(format)
 	case *kmeans.Layer:
 		return v.Pack(format)
 	case *mamba.Layer:
@@ -234,6 +240,8 @@ func branchSetDType(op any, dt core.DType) error {
 	case *residual.Layer:
 		return v.SetDType(dt)
 	case *Layer:
+		return v.SetDType(dt)
+	case *Stack:
 		return v.SetDType(dt)
 	case *kmeans.Layer:
 		return v.SetDType(dt)
@@ -287,6 +295,8 @@ func branchGradWSize(op any) int {
 		return v.GradWSize()
 	case *Layer:
 		return v.GradWSize()
+	case *Stack:
+		return v.GradWSize()
 	case *kmeans.Layer:
 		return v.GradWSize()
 	case *mamba.Layer:
@@ -338,6 +348,8 @@ func branchApplyGradSGD[T core.Numeric](op any, dW *core.Tensor[T], lr float64) 
 		return residual.ApplyGradSGD(v, dW, lr)
 	case *Layer:
 		return ApplyGradSGD(v, dW, lr)
+	case *Stack:
+		return ApplyGradSGDStack(v, dW, lr)
 	case *kmeans.Layer:
 		return kmeans.ApplyGradSGD(v, dW, lr)
 	case *mamba.Layer:
@@ -439,6 +451,9 @@ func branchSyncExec(op any, exec core.ExecConfig) {
 	case *Layer:
 		v.Exec = exec
 		v.SyncBranchExec()
+	case *Stack:
+		v.Exec = exec
+		v.SyncChildExec()
 	case *kmeans.Layer:
 		v.Exec = exec
 		if v.Centers != nil {

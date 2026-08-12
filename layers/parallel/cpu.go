@@ -324,7 +324,16 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 		if needsDenseFlat(ch) {
 			denseIn = flat
 		}
-		gx, dw, err := branchBackward(ch, branchGy, input, denseIn, branchPres[i])
+		// Preserve branch activation rank (e.g. GDN/MHA [B,T,D] vs flat [B*T,D]).
+		gy := branchGy
+		if branchOuts[i] != nil && gy != nil &&
+			gy.Len() == branchOuts[i].Len() &&
+			!shapeEq(gy.Shape, branchOuts[i].Shape) {
+			shaped := core.NewTensor[T](branchOuts[i].Shape...)
+			copy(shaped.Data, gy.Data)
+			gy = shaped
+		}
+		gx, dw, err := branchBackward(ch, gy, input, denseIn, branchPres[i])
 		if err != nil {
 			return err
 		}
@@ -451,4 +460,16 @@ func flattenFeat[T core.Numeric](in *core.Tensor[T], lay layInfo, feat int) *cor
 	}
 	copy(out.Data, in.Data[:n])
 	return out
+}
+
+func shapeEq(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

@@ -28,6 +28,7 @@ const (
 	LayerMetacognition      LayerType = 19
 	LayerMamba             LayerType = 20
 	LayerGDN               LayerType = 21
+	LayerStack             LayerType = 22 // heterogeneous Op chain (nested cameral host)
 )
 
 func (t LayerType) String() string {
@@ -76,6 +77,8 @@ func (t LayerType) String() string {
 		return "Mamba"
 	case LayerGDN:
 		return "GDN"
+	case LayerStack:
+		return "Stack"
 	default:
 		return fmt.Sprintf("LayerType(%d)", int(t))
 	}

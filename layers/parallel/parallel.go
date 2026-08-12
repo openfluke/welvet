@@ -10,13 +10,14 @@ import (
 )
 
 // Layer is Parallel / MoE over polymorphic branch Ops (any cell Op, including
-// nested Parallel / Sequential). Gate remains Dense for filter mode.
+// nested Parallel / Sequential / Stack). Gate remains Dense for filter mode.
 type Layer struct {
-	Core     core.Layer
-	Cfg      Config
-	Exec     core.ExecConfig
-	Branches []any         // branch Ops (Dense, MHA, Parallel, …)
-	Gate     *dense.Layer  // Rows=Branches, Cols=Dim; used when CombineFilter
+	Core        core.Layer
+	Cfg         Config
+	Exec        core.ExecConfig
+	Branches    []any        // branch Ops (Dense, MHA, Parallel, Stack, …)
+	Gate        *dense.Layer // Rows=Branches, Cols=Dim; used when CombineFilter
+	BranchModes []TrainMode  // optional per-hemisphere mode; empty ⇒ inherit parent
 }
 
 // New creates Parallel with FormatNone Float32 zeros (Dense branches).

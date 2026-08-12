@@ -223,6 +223,12 @@ func CollectStores(op any) []*weights.Store {
 		}
 		out = append(out, storesFromDense(v.Gate)...)
 		return out
+	case *parallel.Stack:
+		var out []*weights.Store
+		for _, ch := range v.Children {
+			out = append(out, CollectStores(ch)...)
+		}
+		return out
 	case *kmeans.Layer:
 		return storesFromDense(v.Centers)
 	case *mamba.Layer:
@@ -242,7 +248,7 @@ func CollectStores(op any) []*weights.Store {
 }
 
 // FlattenOp returns concatenated scale-applied float32 weights for any Op
-// (including GDN blobs). Empty → nil (caller may use neutral marker).
+// (including nested GDN blobs under Parallel/Stack). Empty → nil.
 func FlattenOp(op any) ([]float32, error) {
 	var flat []float32
 	for _, s := range CollectStores(op) {
@@ -255,23 +261,56 @@ func FlattenOp(op any) ([]float32, error) {
 		}
 		flat = append(flat, v...)
 	}
-	if gl, ok := op.(*gdn.Layer); ok && gl != nil {
-		for _, b := range []*quant.Blob{gl.InQKV, gl.InZ, gl.InB, gl.InA, gl.Out} {
+	if err := appendGDNFlat(op, &flat); err != nil {
+		return nil, err
+	}
+	return flat, nil
+}
+
+func appendGDNFlat(op any, flat *[]float32) error {
+	switch v := op.(type) {
+	case *gdn.Layer:
+		if v == nil {
+			return nil
+		}
+		for _, b := range []*quant.Blob{v.InQKV, v.InZ, v.InB, v.InA, v.Out} {
 			if b == nil {
 				continue
 			}
 			u, err := quant.Unpack(b)
 			if err != nil {
-				return nil, err
+				return err
 			}
-			flat = append(flat, u...)
+			*flat = append(*flat, u...)
 		}
-		flat = append(flat, gl.ConvWeight...)
-		flat = append(flat, gl.ALog...)
-		flat = append(flat, gl.DtBias...)
-		flat = append(flat, gl.NormGamma...)
+		*flat = append(*flat, v.ConvWeight...)
+		*flat = append(*flat, v.ALog...)
+		*flat = append(*flat, v.DtBias...)
+		*flat = append(*flat, v.NormGamma...)
+		return nil
+	case *parallel.Layer:
+		if v == nil {
+			return nil
+		}
+		for _, ch := range v.Branches {
+			if err := appendGDNFlat(ch, flat); err != nil {
+				return err
+			}
+		}
+		return nil
+	case *parallel.Stack:
+		if v == nil {
+			return nil
+		}
+		for _, ch := range v.Children {
+			if err := appendGDNFlat(ch, flat); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return nil
 	}
-	return flat, nil
 }
 
 func lstmStores(l *lstm.Layer) []*weights.Store {

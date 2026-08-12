@@ -155,6 +155,8 @@ func applyCell[T core.Numeric](op any, dW *core.Tensor[T], lr float64) error {
 		return convt3.ApplyGradSGD(v, dW, lr)
 	case *parallel.Layer:
 		return parallel.ApplyGradSGD(v, dW, lr)
+	case *parallel.Stack:
+		return parallel.ApplyGradSGDStack(v, dW, lr)
 	case *kmeans.Layer:
 		return kmeans.ApplyGradSGD(v, dW, lr)
 	case *metacognition.Layer:
