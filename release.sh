@@ -58,18 +58,33 @@ read_version() {
 from pathlib import Path
 import re
 text = Path("README.md").read_text(encoding="utf-8")
+
+ver = None
+m = re.search(r"\|\s*\*\*Version\*\*\s*\|\s*\*\*(v[\d.]+)\*\*", text)
+if m:
+    ver = m.group(1)
+
 earned = None
 m = re.search(r"\*\*(\d+(?:\.\d+)?)\s*/\s*100\*\*\s*pts", text)
 if m:
     earned = float(m.group(1))
+
+if earned is None and ver:
+    if ver == "v1.0":
+        earned = 100.0
+    elif ver.startswith("v0."):
+        # v0.95 / v0.95.1 → scorecard major from first component after v0.
+        head = ver[3:].split(".", 1)[0]
+        earned = float(head)
+
+if ver is None:
+    if earned is None:
+        raise SystemExit("could not parse Welvet version from README.md")
+    ver = "v1.0" if earned >= 100 else f"v0.{int(round(earned)):02d}"
+
 if earned is None:
-    m = re.search(r"\|\s*\*\*Version\*\*\s*\|\s*\*\*(v[\d.]+)\*\*", text)
-    if m:
-        v = m.group(1)
-        earned = 100.0 if v == "v1.0" else float(v[3:]) if v.startswith("v0.") else None
-if earned is None:
-    raise SystemExit("could not parse Welvet version from README.md")
-ver = "v1.0" if earned >= 100 else f"v0.{int(round(earned)):02d}"
+    raise SystemExit("could not parse Welvet scorecard points from README.md")
+
 print(f"{ver} {earned}")
 PY
 }
@@ -142,6 +157,11 @@ Pure Go AI engine release aligned to scorecard **${earned}/100** → **${tag}**.
 \`\`\`bash
 go get github.com/openfluke/welvet@${tag}
 \`\`\`
+
+### What's new in v0.95.1
+- **lucy** — shared SoftAcc / Availability / AdaptPct / Score measuring harness
+- **Nested multi-cameral** — Hemispheres + Stack sandwiches
+- **BranchModes** — distinct TrainMode per hemisphere (Mix via TrainStackMSE)
 
 ### What's in this tree
 - Layers, 34 dtypes, 20 quant formats

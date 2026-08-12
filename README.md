@@ -4,7 +4,7 @@
 
 | | |
 |--|--|
-| **Version** | **v0.95** |
+| **Version** | **v0.95.1** |
 | **Toward v1.0** | **95 / 100** pts (see [Version scorecard](#version-scorecard)) |
 
 Not v1 yet — apps, stubs, and Accel still leave points on the table.
@@ -51,7 +51,8 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v0.95 (pre-v1).** v1.0 = scorecard **100/100** (every board row ✅).
+**Status: v0.95.1 (pre-v1).** Scorecard still **95/100**; this is a patch on v0.95
+(lucy measuring, nested cameral / BranchModes). v1.0 = scorecard **100/100**.
 
 | Legend | Meaning | Pts credit |
 |--------|---------|------------|
@@ -63,8 +64,9 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 
 ## Version scorecard
 
-**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0** (today: `round(95)` → **v0.95**).  
-Recompute whenever a board row flips status. Weights sum to **100**.
+**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0** (scorecard today:
+`round(95)` → **v0.95**). Patch tags (e.g. **v0.95.1**) ship engine deltas without
+moving the scorecard. Recompute the board whenever a row flips status. Weights sum to **100**.
 
 | # | Section | Wt | How scored today | Earned |
 |--:|---------|---:|------------------|-------:|
