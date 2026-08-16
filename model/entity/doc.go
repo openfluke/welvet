@@ -4,6 +4,7 @@
 //   - Open / Inspect / LoadBlob / LoadQuantBlob — read packed transformer checkpoints
 //   - PackFromHF / ImportFromHF — Hugging Face snapshot → .entity
 //   - WriteTransformerFile — write a packed transformer checkpoint
+//   - WriteCameralFile / LoadCameral — sandwich Stack (Bi/Tri, BranchModes, FastProxy, …)
 //   - SerializeNetwork / ParseNetwork — volumetric-grid ENTITY (used by stub/serialization)
 //
 // Tests live in w2a — not here.

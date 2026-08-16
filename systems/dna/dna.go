@@ -206,16 +206,18 @@ func CollectStores(op any) []*weights.Store {
 		}
 	case *sequential.Layer:
 		var out []*weights.Store
-		for _, ch := range v.Children {
-			out = append(out, storesFromDense(ch)...)
+		for _, ch := range v.ChildOps() {
+			out = append(out, CollectStores(ch)...)
 		}
 		return out
 	case *residual.Layer:
 		var out []*weights.Store
-		for _, ch := range v.Children {
-			out = append(out, storesFromDense(ch)...)
+		for _, ch := range v.ChildOps() {
+			out = append(out, CollectStores(ch)...)
 		}
 		return out
+	case *parallel.ResidualSkip:
+		return CollectStores(v.F)
 	case *parallel.Layer:
 		var out []*weights.Store
 		for _, ch := range v.Branches {
@@ -308,6 +310,11 @@ func appendGDNFlat(op any, flat *[]float32) error {
 			}
 		}
 		return nil
+	case *parallel.ResidualSkip:
+		if v == nil {
+			return nil
+		}
+		return appendGDNFlat(v.F, flat)
 	default:
 		return nil
 	}

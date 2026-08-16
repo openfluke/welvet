@@ -167,6 +167,14 @@ func (e *engine) mkBuf(label string, size uint64, usage wgpu.BufferUsage, data [
 	} else {
 		usage |= wgpu.BufferUsageCopyDst | wgpu.BufferUsageCopySrc
 	}
+	if usage&wgpu.BufferUsageStorage != 0 {
+		if lim := MaxStorageBindingLimit(); lim > 0 && size > lim {
+			return nil, fmt.Errorf(
+				"storage buffer %s is %d bytes > adapter maxSSBO %d bytes",
+				label, size, lim,
+			)
+		}
+	}
 	var b *wgpu.Buffer
 	var err error
 	if len(data) > 0 {

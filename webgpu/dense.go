@@ -12,11 +12,12 @@ import (
 )
 
 var (
-	mu      sync.Mutex
-	tried   bool
-	haveGPU bool
-	initErr error
-	sess    *session
+	mu        sync.Mutex
+	tried     bool
+	haveGPU   bool
+	initErr   error
+	sess      *session
+	lastProbe string
 )
 
 type session struct {
@@ -132,6 +133,47 @@ func AdapterName() string {
 	return sess.name
 }
 
+// Peek reports cached GPU state without probing (safe for caps / UI).
+func Peek() (available, probed bool, err error, adapter string) {
+	mu.Lock()
+	defer mu.Unlock()
+	name := ""
+	if sess != nil {
+		name = sess.name
+	}
+	return haveGPU, tried, initErr, name
+}
+
+// LastProbe returns the most recent adapter/limits dump (empty if never probed).
+func LastProbe() string {
+	mu.Lock()
+	defer mu.Unlock()
+	return lastProbe
+}
+
+// Reset clears a failed/successful GPU probe so the next Available() can retry
+// (e.g. after AdrenoTools/Turnip hooks the Vulkan loader).
+func Reset() {
+	mu.Lock()
+	defer mu.Unlock()
+	if sess != nil {
+		// Release the probe device so it doesn't race Chaos/fusedgpu submits.
+		if sess.queue != nil {
+			sess.queue.Release()
+			sess.queue = nil
+		}
+		if sess.device != nil {
+			sess.device.Release()
+			sess.device = nil
+		}
+		sess = nil
+	}
+	tried = false
+	haveGPU = false
+	initErr = nil
+	lastProbe = ""
+}
+
 func ensure() {
 	mu.Lock()
 	defer mu.Unlock()
@@ -187,31 +229,157 @@ func makePipeline(dev *wgpu.Device, code, label string) (*wgpu.ComputePipeline, 
 	})
 }
 
+func requestAnyAdapter(instance *wgpu.Instance) (*wgpu.Adapter, error) {
+	attempts := []*wgpu.RequestAdapterOptions{
+		{PowerPreference: wgpu.PowerPreferenceHighPerformance},
+		{PowerPreference: wgpu.PowerPreferenceLowPower},
+		{ForceFallbackAdapter: true},
+		{},
+	}
+	var last error
+	for _, opt := range attempts {
+		adapt, err := instance.RequestAdapter(opt)
+		if err == nil && adapt != nil {
+			return adapt, nil
+		}
+		last = err
+	}
+	if last == nil {
+		last = fmt.Errorf("no adapter")
+	}
+	return nil, last
+}
+
+func formatLimits(l wgpu.Limits) string {
+	return fmt.Sprintf(
+		"maxBuf=%d maxSSBO=%d maxSSBO/stage=%d maxBindGroups=%d maxComputeWG=%d maxInvoc/WG=%d",
+		l.MaxBufferSize,
+		l.MaxStorageBufferBindingSize,
+		l.MaxStorageBuffersPerShaderStage,
+		l.MaxBindGroups,
+		l.MaxComputeWorkgroupsPerDimension,
+		l.MaxComputeInvocationsPerWorkgroup,
+	)
+}
+
+func dumpAdapter(label string, adapt *wgpu.Adapter) string {
+	if adapt == nil {
+		return label + ": <nil>"
+	}
+	info := adapt.GetInfo()
+	lim := adapt.GetLimits().Limits
+	return fmt.Sprintf("%s: name=%q vendor=%q arch=%q driver=%q backend=%v type=%v | %s",
+		label, info.Name, info.VendorName, info.Architecture, info.DriverDescription, info.BackendType, info.AdapterType, formatLimits(lim))
+}
+
 func newSession() (*session, error) {
+	var report strings.Builder
+	backendEnv := strings.TrimSpace(os.Getenv("WELVET_WGPU_BACKEND"))
+	fmt.Fprintf(&report, "webgpu probe goos=%s goarch=%s WELVET_WGPU_BACKEND=%q\n", runtime.GOOS, runtime.GOARCH, backendEnv)
+
 	instance := wgpu.CreateInstance(resolveBackends())
 	if instance == nil {
-		return nil, fmt.Errorf("webgpu: CreateInstance returned nil")
+		msg := "CreateInstance returned nil"
+		report.WriteString(msg + "\n")
+		lastProbe = report.String()
+		fmt.Print(lastProbe)
+		return nil, fmt.Errorf("webgpu: %s", msg)
 	}
-	adapter, err := instance.RequestAdapter(&wgpu.RequestAdapterOptions{
-		PowerPreference: wgpu.PowerPreferenceHighPerformance,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("webgpu: RequestAdapter: %w", err)
+
+	// Enumerate preference modes for debugging (first success wins).
+	opts := []*wgpu.RequestAdapterOptions{
+		{PowerPreference: wgpu.PowerPreferenceHighPerformance},
+		{PowerPreference: wgpu.PowerPreferenceLowPower},
+		{ForceFallbackAdapter: true},
+		{},
 	}
+	labels := []string{"high-perf", "low-power", "force-fallback", "default"}
+	var adapter *wgpu.Adapter
+	for i, opt := range opts {
+		adapt, err := instance.RequestAdapter(opt)
+		if err != nil || adapt == nil {
+			fmt.Fprintf(&report, "  adapter %-14s FAIL: %v\n", labels[i], err)
+			continue
+		}
+		line := dumpAdapter("  adapter "+labels[i], adapt)
+		report.WriteString(line + "\n")
+		if adapter == nil {
+			adapter = adapt
+			fmt.Fprintf(&report, "  → selected %s\n", labels[i])
+		} else {
+			adapt.Release()
+		}
+	}
+	if adapter == nil {
+		msg := "RequestAdapter: no adapter from any option"
+		report.WriteString(msg + "\n")
+		lastProbe = report.String()
+		fmt.Print(lastProbe)
+		instance.Release()
+		return nil, fmt.Errorf("webgpu: %s", msg)
+	}
+
+	info := adapter.GetInfo()
 	limits := adapter.GetLimits().Limits
-	// Match fusedgpu: allow large BinaryPacked matrices (LM head ~190MiB) in one binding.
-	if limits.MaxStorageBufferBindingSize < 1<<30 {
-		limits.MaxStorageBufferBindingSize = 1 << 30
+	advertised := limits
+
+	var device *wgpu.Device
+	var err error
+	via := ""
+
+	// Only attempt the desktop 1GiB/2GiB bump when the adapter already advertises
+	// at least that much — asking above advertised always fails on Adreno.
+	canInflate := advertised.MaxStorageBufferBindingSize >= 1<<30 && advertised.MaxBufferSize >= 2<<30
+	if canInflate {
+		inflated := advertised
+		inflated.MaxStorageBufferBindingSize = 1 << 30
+		inflated.MaxBufferSize = 2 << 30
+		fmt.Fprintf(&report, "  try RequestDevice inflated: %s\n", formatLimits(inflated))
+		device, err = adapter.RequestDevice(&wgpu.DeviceDescriptor{
+			RequiredLimits: &wgpu.RequiredLimits{Limits: inflated},
+		})
+		if err == nil {
+			via = "inflated"
+		} else {
+			fmt.Fprintf(&report, "  inflated FAIL: %v\n", err)
+		}
+	} else {
+		fmt.Fprintf(&report, "  skip inflated (adapter maxSSBO=%d maxBuf=%d < 1GiB/2GiB)\n",
+			advertised.MaxStorageBufferBindingSize, advertised.MaxBufferSize)
 	}
-	if limits.MaxBufferSize < 2<<30 {
-		limits.MaxBufferSize = 2 << 30
+	if device == nil {
+		fmt.Fprintf(&report, "  try RequestDevice advertised: %s\n", formatLimits(advertised))
+		device, err = adapter.RequestDevice(&wgpu.DeviceDescriptor{
+			RequiredLimits: &wgpu.RequiredLimits{Limits: advertised},
+		})
+		if err == nil {
+			via = "advertised"
+		} else {
+			fmt.Fprintf(&report, "  advertised FAIL: %v\n", err)
+		}
 	}
-	device, err := adapter.RequestDevice(&wgpu.DeviceDescriptor{
-		RequiredLimits: &wgpu.RequiredLimits{Limits: limits},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("webgpu: RequestDevice: %w", err)
+	if device == nil {
+		fmt.Fprintf(&report, "  try RequestDevice(nil) defaults\n")
+		device, err = adapter.RequestDevice(nil)
+		if err == nil {
+			via = "defaults"
+		}
 	}
+	if err != nil || device == nil {
+		fmt.Fprintf(&report, "  defaults FAIL: %v\n", err)
+		fmt.Fprintf(&report, "RESULT: FAIL adapter=%q maxSSBO=%d maxBuf=%d\n",
+			info.Name, advertised.MaxStorageBufferBindingSize, advertised.MaxBufferSize)
+		lastProbe = report.String()
+		fmt.Print(lastProbe)
+		adapter.Release()
+		instance.Release()
+		return nil, fmt.Errorf("webgpu: RequestDevice (%s / %v): %w", info.Name, info.BackendType, err)
+	}
+	fmt.Fprintf(&report, "RESULT: OK via=%s adapter=%q backend=%v maxSSBO=%d maxBuf=%d\n",
+		via, info.Name, info.BackendType, advertised.MaxStorageBufferBindingSize, advertised.MaxBufferSize)
+	lastProbe = report.String()
+	fmt.Print(lastProbe)
+
 	pipeFP32, err := makePipeline(device, ShaderDenseFP32, "welvet-dense-fp32")
 	if err != nil {
 		return nil, fmt.Errorf("webgpu: FP32 pipeline: %w", err)
@@ -224,7 +392,6 @@ func newSession() (*session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("webgpu: I8 pipeline: %w", err)
 	}
-	info := adapter.GetInfo()
 	return &session{
 		device:   device,
 		queue:    device.GetQueue(),

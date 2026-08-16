@@ -34,6 +34,9 @@ func branchForward[T core.Numeric](op any, input, flat *core.Tensor[T]) (pre, po
 	if op == nil {
 		return nil, nil, fmt.Errorf("parallel: nil branch")
 	}
+	if v, ok := op.(*View); ok {
+		return ForwardView(v, input)
+	}
 	switch v := op.(type) {
 	case *dense.Layer:
 		in := input
@@ -73,6 +76,8 @@ func branchForward[T core.Numeric](op any, input, flat *core.Tensor[T]) (pre, po
 		return sequential.Forward(v, input)
 	case *residual.Layer:
 		return residual.Forward(v, input)
+	case *ResidualSkip:
+		return residualSkipForward(v, input, flat)
 	case *Layer:
 		return Forward(v, input)
 	case *Stack:
@@ -93,6 +98,9 @@ func branchForward[T core.Numeric](op any, input, flat *core.Tensor[T]) (pre, po
 func branchBackward[T core.Numeric](op any, gradOut, input, flat, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
 	if op == nil {
 		return nil, nil, fmt.Errorf("parallel: nil branch")
+	}
+	if v, ok := op.(*View); ok {
+		return BackwardView(v, gradOut, input, pre)
 	}
 	switch v := op.(type) {
 	case *dense.Layer:
@@ -133,6 +141,8 @@ func branchBackward[T core.Numeric](op any, gradOut, input, flat, pre *core.Tens
 		return sequential.Backward(v, gradOut, input, pre)
 	case *residual.Layer:
 		return residual.Backward(v, gradOut, input, pre)
+	case *ResidualSkip:
+		return residualSkipBackward(v, gradOut, input, flat, pre)
 	case *Layer:
 		return Backward(v, gradOut, input, pre)
 	case *Stack:
@@ -151,6 +161,9 @@ func branchBackward[T core.Numeric](op any, gradOut, input, flat, pre *core.Tens
 }
 
 func branchPack(op any, format quant.Format) error {
+	if v, ok := op.(*View); ok {
+		return v.Pack(format)
+	}
 	switch v := op.(type) {
 	case *dense.Layer:
 		return v.Pack(format)
@@ -186,6 +199,8 @@ func branchPack(op any, format quant.Format) error {
 		return v.Pack(format)
 	case *residual.Layer:
 		return v.Pack(format)
+	case *ResidualSkip:
+		return branchPack(v.F, format)
 	case *Layer:
 		return v.Pack(format)
 	case *Stack:
@@ -204,6 +219,9 @@ func branchPack(op any, format quant.Format) error {
 }
 
 func branchSetDType(op any, dt core.DType) error {
+	if v, ok := op.(*View); ok {
+		return v.SetDType(dt)
+	}
 	switch v := op.(type) {
 	case *dense.Layer:
 		return v.SetDType(dt)
@@ -239,6 +257,8 @@ func branchSetDType(op any, dt core.DType) error {
 		return v.SetDType(dt)
 	case *residual.Layer:
 		return v.SetDType(dt)
+	case *ResidualSkip:
+		return branchSetDType(v.F, dt)
 	case *Layer:
 		return v.SetDType(dt)
 	case *Stack:
@@ -258,6 +278,9 @@ func branchSetDType(op any, dt core.DType) error {
 }
 
 func branchGradWSize(op any) int {
+	if v, ok := op.(*View); ok {
+		return v.GradWSize()
+	}
 	switch v := op.(type) {
 	case *dense.Layer:
 		return v.GradWSize()
@@ -293,6 +316,8 @@ func branchGradWSize(op any) int {
 		return v.GradWSize()
 	case *residual.Layer:
 		return v.GradWSize()
+	case *ResidualSkip:
+		return branchGradWSize(v.F)
 	case *Layer:
 		return v.GradWSize()
 	case *Stack:
@@ -311,6 +336,9 @@ func branchGradWSize(op any) int {
 }
 
 func branchApplyGradSGD[T core.Numeric](op any, dW *core.Tensor[T], lr float64) error {
+	if _, ok := op.(*View); ok {
+		return nil
+	}
 	switch v := op.(type) {
 	case *dense.Layer:
 		return dense.ApplyGradSGD(v, dW, lr)
@@ -346,6 +374,8 @@ func branchApplyGradSGD[T core.Numeric](op any, dW *core.Tensor[T], lr float64) 
 		return sequential.ApplyGradSGD(v, dW, lr)
 	case *residual.Layer:
 		return residual.ApplyGradSGD(v, dW, lr)
+	case *ResidualSkip:
+		return branchApplyGradSGD(v.F, dW, lr)
 	case *Layer:
 		return ApplyGradSGD(v, dW, lr)
 	case *Stack:
@@ -364,6 +394,9 @@ func branchApplyGradSGD[T core.Numeric](op any, dW *core.Tensor[T], lr float64) 
 }
 
 func branchSyncExec(op any, exec core.ExecConfig) {
+	if _, ok := op.(*View); ok {
+		return
+	}
 	switch v := op.(type) {
 	case *dense.Layer:
 		v.Exec = exec
@@ -436,18 +469,17 @@ func branchSyncExec(op any, exec core.ExecConfig) {
 		v.Exec = exec
 	case *sequential.Layer:
 		v.Exec = exec
-		for _, ch := range v.Children {
-			if ch != nil {
-				ch.Exec = exec
-			}
+		for _, ch := range v.ChildOps() {
+			branchSyncExec(ch, exec)
 		}
 	case *residual.Layer:
 		v.Exec = exec
-		for _, ch := range v.Children {
-			if ch != nil {
-				ch.Exec = exec
-			}
+		for _, ch := range v.ChildOps() {
+			branchSyncExec(ch, exec)
 		}
+	case *ResidualSkip:
+		v.Exec = exec
+		branchSyncExec(v.F, exec)
 	case *Layer:
 		v.Exec = exec
 		v.SyncBranchExec()

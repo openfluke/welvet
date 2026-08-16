@@ -41,12 +41,12 @@ func ParseLayerType(s string) (LayerType, error) {
 	if s == "" {
 		return LayerDense, fmt.Errorf("core: empty layer type")
 	}
-	for t := LayerDense; t <= LayerGDN; t++ {
+	for t := LayerDense; t <= LayerStack; t++ {
 		if t.String() == s {
 			return t, nil
 		}
 	}
-	if n, err := strconv.Atoi(s); err == nil && n >= 0 && n <= int(LayerGDN) {
+	if n, err := strconv.Atoi(s); err == nil && n >= 0 && n <= int(LayerStack) {
 		return LayerType(n), nil
 	}
 	return LayerDense, fmt.Errorf("core: unknown layer type %q", s)

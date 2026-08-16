@@ -24,6 +24,8 @@ type Stack struct {
 	Exec       core.ExecConfig
 	Children   []any
 	ChildModes []TrainMode // optional per-child mode; empty ⇒ inherit parent
+	AltTimes   int         // TweenAlt: Split→Tween pairs per update (0 ⇒ 1)
+	accel      splitAccel  // LinearCache / HeadProxyAsync / Sparse
 }
 
 // NewStack builds a Stack from ordered Ops. Each child keeps its own
@@ -61,6 +63,9 @@ func NewStack(children ...any) (*Stack, error) {
 }
 
 func opInputHeight(op any) int {
+	if v, ok := op.(*View); ok && v != nil && len(v.Shape) > 0 {
+		return v.Shape[len(v.Shape)-1]
+	}
 	switch v := op.(type) {
 	case *dense.Layer:
 		return v.Core.InputHeight
@@ -72,6 +77,8 @@ func opInputHeight(op any) int {
 		return v.Core.InputHeight
 	case *residual.Layer:
 		return v.Core.InputHeight
+	case *ResidualSkip:
+		return opInputHeight(v.F)
 	case *cnn1.Layer:
 		return v.Core.InputHeight
 	case *cnn2.Layer:
@@ -84,6 +91,9 @@ func opInputHeight(op any) int {
 }
 
 func opOutputHeight(op any) int {
+	if v, ok := op.(*View); ok && v != nil && len(v.Shape) > 0 {
+		return v.Shape[len(v.Shape)-1]
+	}
 	switch v := op.(type) {
 	case *dense.Layer:
 		return v.Core.OutputHeight
@@ -95,6 +105,8 @@ func opOutputHeight(op any) int {
 		return v.Core.OutputHeight
 	case *residual.Layer:
 		return v.Core.OutputHeight
+	case *ResidualSkip:
+		return opOutputHeight(v.F)
 	case *cnn1.Layer:
 		return v.Core.OutputHeight
 	case *cnn2.Layer:

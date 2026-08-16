@@ -5,7 +5,6 @@ import (
 
 	"github.com/openfluke/welvet/architecture"
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/systems/dna"
 	"github.com/openfluke/welvet/layers/cnn1"
 	"github.com/openfluke/welvet/layers/cnn2"
 	"github.com/openfluke/welvet/layers/cnn3"
@@ -21,6 +20,7 @@ import (
 	"github.com/openfluke/welvet/layers/sequential"
 	"github.com/openfluke/welvet/layers/softmax"
 	"github.com/openfluke/welvet/layers/swiglu"
+	"github.com/openfluke/welvet/systems/dna"
 )
 
 func collectDenseChildren(op any) []*dense.Layer {
@@ -48,9 +48,19 @@ func collectDenseChildren(op any) []*dense.Layer {
 		}
 		return out
 	case *sequential.Layer:
-		return v.Children
+		var out []*dense.Layer
+		for _, ch := range v.ChildOps() {
+			out = append(out, collectDenseChildren(ch)...)
+		}
+		return out
 	case *residual.Layer:
-		return v.Children
+		var out []*dense.Layer
+		for _, ch := range v.ChildOps() {
+			out = append(out, collectDenseChildren(ch)...)
+		}
+		return out
+	case *parallel.ResidualSkip:
+		return collectDenseChildren(v.F)
 	case *parallel.Layer:
 		var out []*dense.Layer
 		for _, ch := range v.Branches {

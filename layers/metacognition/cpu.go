@@ -16,6 +16,9 @@ func BackwardCPUTiled[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor
 }
 
 func flatten[T core.Numeric](cfg Config, input *core.Tensor[T]) (*core.Tensor[T], error) {
+	if input == nil {
+		return nil, fmt.Errorf("metacognition: nil tensor")
+	}
 	dim := cfg.Dim
 	switch {
 	case len(input.Shape) == 2 && input.Shape[1] == dim:
@@ -105,9 +108,11 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 			gy.Data[i] = core.FromFloat64[T](core.AsFloat64(gy.Data[i]) * l.lastGate)
 		}
 	}
-	preF, err := flatten(l.Cfg, pre)
-	if err != nil {
-		// recompute
+	var preF *core.Tensor[T]
+	if pre != nil {
+		preF, err = flatten(l.Cfg, pre)
+	}
+	if pre == nil || err != nil || preF == nil {
 		p, _, e := dense.Forward(l.Observed, flat)
 		if e != nil {
 			return nil, nil, e

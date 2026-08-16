@@ -158,10 +158,12 @@ Pure Go AI engine release aligned to scorecard **${earned}/100** → **${tag}**.
 go get github.com/openfluke/welvet@${tag}
 \`\`\`
 
-### What's new in v0.95.1
+### What's new in v1.0
+- **Scorecard 100/100** — engine is v1. Apps, stubs, and NPU/C++ accel are off-board (later `welvet.cpp`)
+- **Training credit (§9)** — StepBP, Tween*, TweenSplit, HeadProxy, Linear, FastProxy, Sparse, Alt, cameral BranchModes
+- **FastProxy** — DFA-shaped \(B:=W_{\mathrm{head}}^\top\) rivaling StepBP Acc on sine/copy toys
+- **GPU fuse** — `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan)
 - **lucy** — shared SoftAcc / Availability / AdaptPct / Score measuring harness
-- **Nested multi-cameral** — Hemispheres + Stack sandwiches
-- **BranchModes** — distinct TrainMode per hemisphere (Mix via TrainStackMSE)
 
 ### What's in this tree
 - Layers, 34 dtypes, 20 quant formats

@@ -2,6 +2,7 @@ package transformer
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/dense"
@@ -34,6 +35,7 @@ func NamedProfiles() []ExecProfile {
 		{Name: "simd_sc", Backend: core.BackendSIMD, MultiCore: false, TileSize: 32},
 		{Name: "simd_mc", Backend: core.BackendSIMD, MultiCore: true, TileSize: 32},
 		{Name: "gpu", Backend: core.BackendWebGPU, MultiCore: true, TileSize: 32},
+		{Name: "gpu_multi_fuse", Backend: core.BackendWebGPU, MultiCore: true, TileSize: 32, Fused: true},
 		{Name: "simd_fuse", Backend: core.BackendSIMD, MultiCore: true, TileSize: 32, Fused: true},
 		{Name: "gpu_fuse", Backend: core.BackendWebGPU, MultiCore: true, TileSize: 32, Fused: true},
 	}
@@ -53,6 +55,13 @@ func (p ExecProfile) Validate() error {
 		}
 		return nil
 	case core.BackendWebGPU:
+		// On mobile, do NOT call webgpu.Available() here — it creates a sticky
+		// second wgpu device. Chaos already owns Vulkan for the planet; fusedgpu
+		// creates the AI device in SyncGPU/SyncHybridFused. A third/second
+		// concurrent QueueSubmit SIGABRTs Adreno (wgpuQueueSubmitForIndex).
+		if runtime.GOOS == "android" || runtime.GOOS == "ios" {
+			return nil
+		}
 		if !webgpu.Available() {
 			if err := webgpu.InitError(); err != nil {
 				return fmt.Errorf("WebGPU: %w (set WELVET_WGPU_BACKEND=vulkan|dx12|metal if needed)", err)
@@ -90,8 +99,10 @@ func (p ExecProfile) FusedNote() string {
 	switch p.Name {
 	case "simd_fuse":
 		return "packed fused GEMV (Q4/Q8/Q4_1/Q5 asm; k/IQ inflate-once + DotTile)"
+	case "gpu_multi_fuse":
+		return "WebGPU fused decoder; shards LM head by maxSSBO and (on Android) one token per command buffer so Turnip stays under submit limits"
 	case "gpu_fuse":
-		return "full on-device fused decoder (Q4 Lucy, or BinaryG128 hybrid — all weights on GPU; ~8GB+ VRAM for Bonsai)"
+		return "full on-device fused decoder (multi-token packs/submit — desktop; crashes Turnip A710 if used packed)"
 	default:
 		return ""
 	}
@@ -132,6 +143,7 @@ func (m *Model) ApplyExec(p ExecProfile) error {
 		UseWebGPU: p.Backend == core.BackendWebGPU,
 	}
 	m.Exec = exec
+	m.ExecProfileName = p.Name
 	m.Fused = p.Fused
 	if p.Fused {
 		format := p.PackFormat
@@ -160,24 +172,27 @@ func (m *Model) ApplyExec(p ExecProfile) error {
 			// Keep a resident HybridEngine. FinchKit re-calls ApplyExec on every
 			// generate; tearing down after releaseHostPackedWeights made the next
 			// Export fail and silently fell back to simd_fuse (Octo only ApplyExec once).
-			if _, ok := m.gpu.(*fusedgpu.HybridEngine); ok && m.HybridGPUFuse() {
-				m.Fused = true
-			} else {
-				m.CloseGPU()
-				m.CloseHybridGPU()
-				m.Fused = true
-				if err := m.SyncHybridFused(); err != nil {
-					return fmt.Errorf("hybrid gpu fuse: %w", err)
-				}
-				name := m.GPUAdapterName()
-				vramHint := "needs ~8GB+ VRAM for 27B; ~2–3GB for dense 8B"
-				if m.Architecture == "qwen3_dense" {
-					vramHint = "dense BinaryG128 (~2–3GB VRAM)"
-				}
-				if name != "" {
-					fmt.Printf("  gpu_fuse (BinaryG128): full on-device fuse on %s (%s)\n", name, vramHint)
-				} else {
-					fmt.Printf("  gpu_fuse (BinaryG128): full on-device fuse (%s)\n", vramHint)
+			if m.HybridGPUFuse() {
+				switch m.gpu.(type) {
+				case *fusedgpu.HybridEngine, *fusedgpu.HybridVKEngine:
+					m.Fused = true
+				default:
+					m.CloseGPU()
+					m.CloseHybridGPU()
+					m.Fused = true
+					if err := m.SyncHybridFused(); err != nil {
+						return fmt.Errorf("hybrid gpu fuse: %w", err)
+					}
+					name := m.GPUAdapterName()
+					vramHint := "needs ~8GB+ VRAM for 27B; ~2–3GB for dense 8B"
+					if m.Architecture == "qwen3_dense" {
+						vramHint = "dense BinaryG128 (~2–3GB VRAM)"
+					}
+					if name != "" {
+						fmt.Printf("  gpu_fuse (BinaryG128): full on-device fuse on %s (%s)\n", name, vramHint)
+					} else {
+						fmt.Printf("  gpu_fuse (BinaryG128): full on-device fuse (%s)\n", vramHint)
+					}
 				}
 			}
 		} else {

@@ -240,6 +240,157 @@ fn main(
 }
 `
 
+// Q∥K∥V BinaryG128 GEMV with attn pre-RMS folded in (each WG recomputes inv_rms).
+// Replaces rmsnorm + bingemv(Q) + bingemv_dual(K∥V) on the full-attention path.
+const shaderBinG128QKVRMS = `
+struct Params { inputSize: u32, qRows: u32, kvRows: u32, epsBits: u32, };
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> hidden: array<f32>;
+@group(0) @binding(2) var<storage, read> gamma: array<f32>;
+@group(0) @binding(3) var<storage, read> qScales: array<f32>;
+@group(0) @binding(4) var<storage, read> qWeights: array<u32>;
+@group(0) @binding(5) var<storage, read> kScales: array<f32>;
+@group(0) @binding(6) var<storage, read> kWeights: array<u32>;
+@group(0) @binding(7) var<storage, read> vScales: array<f32>;
+@group(0) @binding(8) var<storage, read> vWeights: array<u32>;
+@group(0) @binding(9) var<storage, read_write> qOut: array<f32>;
+@group(0) @binding(10) var<storage, read_write> kOut: array<f32>;
+@group(0) @binding(11) var<storage, read_write> vOut: array<f32>;
+
+const TILE: u32 = 1024u;
+var<workgroup> xin: array<f32, 1024>;
+var<workgroup> partial: array<f32, 128>;
+
+@compute @workgroup_size(128)
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let tid = lid.x;
+    let o = wg_id.x * 128u + tid;
+    let inN = params.inputSize;
+    let qN = params.qRows;
+    let kvN = params.kvRows;
+    let doQ = o < qN;
+    let doKV = o < kvN;
+
+    var local: f32 = 0.0;
+    for (var i = tid; i < inN; i += 128u) {
+        let v = hidden[i];
+        local += v * v;
+    }
+    partial[tid] = local;
+    workgroupBarrier();
+    var stride = 64u;
+    loop {
+        if (stride == 0u) { break; }
+        if (tid < stride) { partial[tid] += partial[tid + stride]; }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    let inv = inverseSqrt(partial[0] / f32(inN) + bitcast<f32>(params.epsBits));
+    workgroupBarrier();
+
+    var qSum: f32 = 0.0;
+    var kSum: f32 = 0.0;
+    var vSum: f32 = 0.0;
+    var tile: u32 = 0u;
+    loop {
+        if (tile >= inN) { break; }
+        var n = TILE;
+        if (tile + n > inN) { n = inN - tile; }
+        for (var i = tid; i < n; i += 128u) {
+            xin[i] = hidden[tile + i] * inv * gamma[tile + i];
+        }
+        workgroupBarrier();
+        if (doQ || doKV) {
+            let wBase = o * inN + tile;
+            var c: u32 = 0u;
+            loop {
+                if (c + 32u > n) { break; }
+                if (doQ) {
+                    let qWord = qWeights[(wBase + c) / 32u];
+                    let qScale = qScales[(wBase + c) / 128u];
+                    for (var j: u32 = 0u; j < 32u; j += 8u) {
+                        let qw = qWord >> j;
+                        qSum += xin[c + j] * (f32(qw & 1u) * 2.0 - 1.0) * qScale;
+                        qSum += xin[c + j + 1u] * (f32((qw >> 1u) & 1u) * 2.0 - 1.0) * qScale;
+                        qSum += xin[c + j + 2u] * (f32((qw >> 2u) & 1u) * 2.0 - 1.0) * qScale;
+                        qSum += xin[c + j + 3u] * (f32((qw >> 3u) & 1u) * 2.0 - 1.0) * qScale;
+                        qSum += xin[c + j + 4u] * (f32((qw >> 4u) & 1u) * 2.0 - 1.0) * qScale;
+                        qSum += xin[c + j + 5u] * (f32((qw >> 5u) & 1u) * 2.0 - 1.0) * qScale;
+                        qSum += xin[c + j + 6u] * (f32((qw >> 6u) & 1u) * 2.0 - 1.0) * qScale;
+                        qSum += xin[c + j + 7u] * (f32((qw >> 7u) & 1u) * 2.0 - 1.0) * qScale;
+                    }
+                }
+                if (doKV) {
+                    let kWord = kWeights[(wBase + c) / 32u];
+                    let vWord = vWeights[(wBase + c) / 32u];
+                    let kScale = kScales[(wBase + c) / 128u];
+                    let vScale = vScales[(wBase + c) / 128u];
+                    for (var j: u32 = 0u; j < 32u; j += 8u) {
+                        let kw = kWord >> j;
+                        let vw = vWord >> j;
+                        let xa = xin[c + j];
+                        let xb = xin[c + j + 1u];
+                        let xc = xin[c + j + 2u];
+                        let xd = xin[c + j + 3u];
+                        let xe = xin[c + j + 4u];
+                        let xf = xin[c + j + 5u];
+                        let xg = xin[c + j + 6u];
+                        let xh = xin[c + j + 7u];
+                        kSum += xa * (f32(kw & 1u) * 2.0 - 1.0) * kScale;
+                        vSum += xa * (f32(vw & 1u) * 2.0 - 1.0) * vScale;
+                        kSum += xb * (f32((kw >> 1u) & 1u) * 2.0 - 1.0) * kScale;
+                        vSum += xb * (f32((vw >> 1u) & 1u) * 2.0 - 1.0) * vScale;
+                        kSum += xc * (f32((kw >> 2u) & 1u) * 2.0 - 1.0) * kScale;
+                        vSum += xc * (f32((vw >> 2u) & 1u) * 2.0 - 1.0) * vScale;
+                        kSum += xd * (f32((kw >> 3u) & 1u) * 2.0 - 1.0) * kScale;
+                        vSum += xd * (f32((vw >> 3u) & 1u) * 2.0 - 1.0) * vScale;
+                        kSum += xe * (f32((kw >> 4u) & 1u) * 2.0 - 1.0) * kScale;
+                        vSum += xe * (f32((vw >> 4u) & 1u) * 2.0 - 1.0) * vScale;
+                        kSum += xf * (f32((kw >> 5u) & 1u) * 2.0 - 1.0) * kScale;
+                        vSum += xf * (f32((vw >> 5u) & 1u) * 2.0 - 1.0) * vScale;
+                        kSum += xg * (f32((kw >> 6u) & 1u) * 2.0 - 1.0) * kScale;
+                        vSum += xg * (f32((vw >> 6u) & 1u) * 2.0 - 1.0) * vScale;
+                        kSum += xh * (f32((kw >> 7u) & 1u) * 2.0 - 1.0) * kScale;
+                        vSum += xh * (f32((vw >> 7u) & 1u) * 2.0 - 1.0) * vScale;
+                    }
+                }
+                c += 32u;
+            }
+            if (c < n) {
+                if (doQ) {
+                    let qWord = qWeights[(wBase + c) / 32u];
+                    let qScale = qScales[(wBase + c) / 128u];
+                    for (var j: u32 = 0u; j < n - c; j++) {
+                        qSum += xin[c + j] * (f32((qWord >> j) & 1u) * 2.0 - 1.0) * qScale;
+                    }
+                }
+                if (doKV) {
+                    let kWord = kWeights[(wBase + c) / 32u];
+                    let vWord = vWeights[(wBase + c) / 32u];
+                    let kScale = kScales[(wBase + c) / 128u];
+                    let vScale = vScales[(wBase + c) / 128u];
+                    for (var j: u32 = 0u; j < n - c; j++) {
+                        let xv = xin[c + j];
+                        kSum += xv * (f32((kWord >> j) & 1u) * 2.0 - 1.0) * kScale;
+                        vSum += xv * (f32((vWord >> j) & 1u) * 2.0 - 1.0) * vScale;
+                    }
+                }
+            }
+        }
+        workgroupBarrier();
+        tile += TILE;
+    }
+    if (doQ) { qOut[o] = qSum; }
+    if (doKV) {
+        kOut[o] = kSum;
+        vOut[o] = vSum;
+    }
+}
+`
+
 // Fused BinaryG128 gate+up → silu(gate)*up into intermediate.
 const shaderBinG128SwiGLU = `
 struct Params { inputSize: u32, intermediate: u32, _p0: u32, _p1: u32, };
@@ -272,6 +423,121 @@ fn main(
         if (tile + n > inN) { n = inN - tile; }
         for (var i = tid; i < n; i += 128u) {
             xin[i] = input[tile + i];
+        }
+        workgroupBarrier();
+        if (o < outN) {
+            let wBase = o * inN + tile;
+            var c: u32 = 0u;
+            loop {
+                if (c + 32u > n) { break; }
+                let gWord = gateWeights[(wBase + c) / 32u];
+                let uWord = upWeights[(wBase + c) / 32u];
+                let gScale = gateScales[(wBase + c) / 128u];
+                let uScale = upScales[(wBase + c) / 128u];
+                for (var j: u32 = 0u; j < 32u; j += 8u) {
+                    let gw = gWord >> j;
+                    let uw = uWord >> j;
+                    let x0 = xin[c + j];
+                    let x1 = xin[c + j + 1u];
+                    let x2 = xin[c + j + 2u];
+                    let x3 = xin[c + j + 3u];
+                    let x4 = xin[c + j + 4u];
+                    let x5 = xin[c + j + 5u];
+                    let x6 = xin[c + j + 6u];
+                    let x7 = xin[c + j + 7u];
+                    gSum += x0 * (f32(gw & 1u) * 2.0 - 1.0) * gScale;
+                    uSum += x0 * (f32(uw & 1u) * 2.0 - 1.0) * uScale;
+                    gSum += x1 * (f32((gw >> 1u) & 1u) * 2.0 - 1.0) * gScale;
+                    uSum += x1 * (f32((uw >> 1u) & 1u) * 2.0 - 1.0) * uScale;
+                    gSum += x2 * (f32((gw >> 2u) & 1u) * 2.0 - 1.0) * gScale;
+                    uSum += x2 * (f32((uw >> 2u) & 1u) * 2.0 - 1.0) * uScale;
+                    gSum += x3 * (f32((gw >> 3u) & 1u) * 2.0 - 1.0) * gScale;
+                    uSum += x3 * (f32((uw >> 3u) & 1u) * 2.0 - 1.0) * uScale;
+                    gSum += x4 * (f32((gw >> 4u) & 1u) * 2.0 - 1.0) * gScale;
+                    uSum += x4 * (f32((uw >> 4u) & 1u) * 2.0 - 1.0) * uScale;
+                    gSum += x5 * (f32((gw >> 5u) & 1u) * 2.0 - 1.0) * gScale;
+                    uSum += x5 * (f32((uw >> 5u) & 1u) * 2.0 - 1.0) * uScale;
+                    gSum += x6 * (f32((gw >> 6u) & 1u) * 2.0 - 1.0) * gScale;
+                    uSum += x6 * (f32((uw >> 6u) & 1u) * 2.0 - 1.0) * uScale;
+                    gSum += x7 * (f32((gw >> 7u) & 1u) * 2.0 - 1.0) * gScale;
+                    uSum += x7 * (f32((uw >> 7u) & 1u) * 2.0 - 1.0) * uScale;
+                }
+                c += 32u;
+            }
+            if (c < n) {
+                let gWord = gateWeights[(wBase + c) / 32u];
+                let uWord = upWeights[(wBase + c) / 32u];
+                let gScale = gateScales[(wBase + c) / 128u];
+                let uScale = upScales[(wBase + c) / 128u];
+                for (var j: u32 = 0u; j < n - c; j++) {
+                    let xv = xin[c + j];
+                    gSum += xv * (f32((gWord >> j) & 1u) * 2.0 - 1.0) * gScale;
+                    uSum += xv * (f32((uWord >> j) & 1u) * 2.0 - 1.0) * uScale;
+                }
+            }
+        }
+        workgroupBarrier();
+        tile += TILE;
+    }
+    if (o < outN) {
+        let silu = gSum / (1.0 + exp(-gSum));
+        output[o] = silu * uSum;
+    }
+}
+`
+
+// SwiGLU with FFN pre-RMS folded in (reads residual hidden + gamma).
+const shaderBinG128SwiGLURMS = `
+struct Params { inputSize: u32, intermediate: u32, epsBits: u32, _p1: u32, };
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> hidden: array<f32>;
+@group(0) @binding(2) var<storage, read> gamma: array<f32>;
+@group(0) @binding(3) var<storage, read> gateScales: array<f32>;
+@group(0) @binding(4) var<storage, read> gateWeights: array<u32>;
+@group(0) @binding(5) var<storage, read> upScales: array<f32>;
+@group(0) @binding(6) var<storage, read> upWeights: array<u32>;
+@group(0) @binding(7) var<storage, read_write> output: array<f32>;
+
+const TILE: u32 = 1024u;
+var<workgroup> xin: array<f32, 1024>;
+var<workgroup> partial: array<f32, 128>;
+
+@compute @workgroup_size(128)
+fn main(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let tid = lid.x;
+    let o = wg_id.x * 128u + tid;
+    let inN = params.inputSize;
+    let outN = params.intermediate;
+
+    var local: f32 = 0.0;
+    for (var i = tid; i < inN; i += 128u) {
+        let v = hidden[i];
+        local += v * v;
+    }
+    partial[tid] = local;
+    workgroupBarrier();
+    var stride = 64u;
+    loop {
+        if (stride == 0u) { break; }
+        if (tid < stride) { partial[tid] += partial[tid + stride]; }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    let inv = inverseSqrt(partial[0] / f32(inN) + bitcast<f32>(params.epsBits));
+    workgroupBarrier();
+
+    var gSum: f32 = 0.0;
+    var uSum: f32 = 0.0;
+    var tile: u32 = 0u;
+    loop {
+        if (tile >= inN) { break; }
+        var n = TILE;
+        if (tile + n > inN) { n = inN - tile; }
+        for (var i = tid; i < n; i += 128u) {
+            xin[i] = hidden[tile + i] * inv * gamma[tile + i];
         }
         workgroupBarrier();
         if (o < outN) {

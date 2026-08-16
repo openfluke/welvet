@@ -18,6 +18,8 @@ type GenMetrics struct {
 	VRAMMB           float64 // GPU buffer bytes (0 if CPU/SIMD)
 	HeapMB           float64
 	WeightsMB        float64 // packed weight blobs still on host (0 after gpu_fuse release)
+	DecodeChunk      int     // GPU sample steps packed per submit (1 = no pack)
+	ExecProfile      string
 }
 
 // FormatFooter returns the Lucy-style one-line speed + memory summary.
@@ -33,13 +35,18 @@ func (m GenMetrics) FormatFooter() string {
 			mem = fmt.Sprintf(" | mem: %.0f MB RSS (%.0f MB host weights)", m.HostMB, m.WeightsMB)
 		}
 	}
+	pack := ""
+	if m.DecodeChunk > 0 {
+		pack = fmt.Sprintf(" | pack: chunk=%d profile=%s", m.DecodeChunk, m.ExecProfile)
+	}
 	return fmt.Sprintf(
-		"\n\n(prefill: %.2f tok/s, %d prompt tokens | decode: %.2f tok/s, %d generated | total: %.2f tok/s%s)\n",
+		"\n\n(prefill: %.2f tok/s, %d prompt tokens | decode: %.2f tok/s, %d generated | total: %.2f tok/s%s%s)\n",
 		m.PrefillTokPerSec,
 		m.PrefillTokens,
 		m.DecodeTokPerSec,
 		m.GeneratedTokens,
 		m.TotalTokPerSec,
+		pack,
 		mem,
 	)
 }

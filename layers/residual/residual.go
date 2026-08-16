@@ -8,12 +8,15 @@ import (
 	"github.com/openfluke/welvet/quant"
 )
 
-// Layer is Residual: y = F(x) + x with F = Dense children.
+// Layer is Residual: y = F(x) + x. F is Dense children, or mixed Ops
+// (Dense, SwiGLU, RMSNorm, LayerNorm) via NewFromOps. Parallel-as-F is
+// parallel.ResidualGraft (import cycle).
 type Layer struct {
 	Core     core.Layer
 	Cfg      Config
 	Exec     core.ExecConfig
 	Children []*dense.Layer
+	Ops      []any // heterogeneous F; when set, ChildOps prefers this
 }
 
 // New creates Residual with Depth square Dense children (FormatNone Float32).
@@ -78,6 +81,9 @@ func (l *Layer) syncChildExec() {
 		ch.Core.TileSize = l.Core.TileSize
 		ch.Core.MultiCore = l.Core.MultiCore
 	}
+	for _, op := range l.Ops {
+		childSetExec(op, l.Exec)
+	}
 }
 
 // SetDType sets dtype on all F children.
@@ -85,8 +91,8 @@ func (l *Layer) SetDType(dt core.DType) error {
 	if l == nil {
 		return fmt.Errorf("residual: nil")
 	}
-	for i, ch := range l.Children {
-		if err := ch.Weights.SetDType(dt); err != nil {
+	for i, op := range l.ChildOps() {
+		if err := childSetDType(op, dt); err != nil {
 			return fmt.Errorf("residual child %d: %w", i, err)
 		}
 	}
@@ -99,8 +105,8 @@ func (l *Layer) Pack(format quant.Format) error {
 	if l == nil {
 		return fmt.Errorf("residual: nil")
 	}
-	for i, ch := range l.Children {
-		if err := ch.Weights.Pack(format); err != nil {
+	for i, op := range l.ChildOps() {
+		if err := childPack(op, format); err != nil {
 			return fmt.Errorf("residual child %d: %w", i, err)
 		}
 	}
@@ -145,10 +151,8 @@ func (l *Layer) GradWSize() int {
 		return 0
 	}
 	n := 0
-	for _, ch := range l.Children {
-		if ch != nil && ch.Weights != nil {
-			n += ch.Weights.Rows * ch.Weights.Cols
-		}
+	for _, op := range l.ChildOps() {
+		n += childGradWSize(op)
 	}
 	return n
 }

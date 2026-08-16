@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/layers/dense"
 )
 
 // ApplyGradSGD applies concatenated F child dWs.
@@ -17,11 +16,14 @@ func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) erro
 		return fmt.Errorf("residual: dW len %d < %d", dW.Len(), need)
 	}
 	off := 0
-	for i, ch := range l.Children {
-		n := ch.Weights.Rows * ch.Weights.Cols
-		slice := core.NewTensor[T](ch.Weights.Rows, ch.Weights.Cols)
+	for i, op := range l.ChildOps() {
+		n := childGradWSize(op)
+		if n == 0 {
+			continue
+		}
+		slice := core.NewTensor[T](n)
 		copy(slice.Data, dW.Data[off:off+n])
-		if err := dense.ApplyGradSGD(ch, slice, lr); err != nil {
+		if err := childApplySGD(op, slice, lr); err != nil {
 			return fmt.Errorf("residual child %d SGD: %w", i, err)
 		}
 		off += n

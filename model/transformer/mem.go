@@ -56,6 +56,8 @@ func (m *Model) gpuBufferBytes() uint64 {
 	switch g := m.gpu.(type) {
 	case *fusedgpu.HybridEngine:
 		return g.VRAMBytes()
+	case *fusedgpu.HybridVKEngine:
+		return g.VRAMBytes()
 	case *fusedgpu.Engine:
 		return g.VRAMBytes()
 	default:

@@ -1,5 +1,5 @@
 // Package parallel is Parallel / MoE combine (loom Parallel) plus Stack for
-// nested multi-cameral graphs with TrainMode (SGD / Tween / TweenChain) and
+// nested multi-cameral graphs with TrainMode (SGD / Tween / TweenChain / TweenSplit) and
 // optional per-hemisphere BranchModes / per-child ChildModes.
 //
 // Parallel branches are polymorphic Ops. Combine modes: concat (default), add,

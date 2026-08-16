@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/layers/dense"
 )
 
 // ForwardCPUTiled — y = F(x) + x.
@@ -25,16 +24,15 @@ func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 	xFlat := flatten(input, lay)
 	fx := xFlat
 	var lastPre *core.Tensor[T]
-	if len(l.Children) == 0 {
-		// identity F → y = 2x; keep classic residual as F=0 → y=x via empty add of zeros?
-		// Empty F: treat as F(x)=0 so y=x (loom identity when no transform).
+	ops := l.ChildOps()
+	if len(ops) == 0 {
 		out := core.NewTensor[T](input.Shape...)
 		copy(out.Data, input.Data)
 		return out, out, nil
 	}
 	current := xFlat
-	for i, ch := range l.Children {
-		p, o, err := dense.Forward(ch, current)
+	for i, ch := range ops {
+		p, o, err := callFwd(ch, current)
 		if err != nil {
 			return nil, nil, fmt.Errorf("residual F fwd child %d: %w", i, err)
 		}
@@ -61,18 +59,18 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 	gy := flatten(gradOut, lay)
 	xFlat := flatten(input, lay)
 
-	if len(l.Children) == 0 {
-		// y=x → gradIn = gy
+	ops := l.ChildOps()
+	if len(ops) == 0 {
 		return unflatten(gy, lay, l.Cfg.Dim), nil, nil
 	}
 
-	n := len(l.Children)
+	n := len(ops)
 	ins := make([]*core.Tensor[T], n)
 	pres := make([]*core.Tensor[T], n)
 	current := xFlat
-	for i, ch := range l.Children {
+	for i, ch := range ops {
 		ins[i] = current
-		p, o, err := dense.Forward(ch, current)
+		p, o, err := callFwd(ch, current)
 		if err != nil {
 			return nil, nil, fmt.Errorf("residual F recompute child %d: %w", i, err)
 		}
@@ -80,11 +78,10 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 		current = o
 	}
 
-	// ∂L/∂fx = gy; then reverse through F
 	dWs := make([]*core.Tensor[T], n)
 	gFx := gy
 	for i := n - 1; i >= 0; i-- {
-		gx, dw, err := dense.Backward(l.Children[i], gFx, ins[i], pres[i])
+		gx, dw, err := callBwd(ops[i], gFx, ins[i], pres[i])
 		if err != nil {
 			return nil, nil, fmt.Errorf("residual F bwd child %d: %w", i, err)
 		}
@@ -101,11 +98,15 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 	gradW = core.NewTensor[T](need)
 	off := 0
 	for i, dw := range dWs {
-		if dw == nil {
-			return nil, nil, fmt.Errorf("residual: nil dW child %d", i)
+		n := childGradWSize(ops[i])
+		if n == 0 {
+			continue
 		}
-		copy(gradW.Data[off:], dw.Data)
-		off += dw.Len()
+		if dw == nil || dw.Len() < n {
+			return nil, nil, fmt.Errorf("residual: nil/short dW child %d", i)
+		}
+		copy(gradW.Data[off:off+n], dw.Data[:n])
+		off += n
 	}
 	return gradIn, gradW, nil
 }

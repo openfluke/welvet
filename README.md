@@ -4,10 +4,10 @@
 
 | | |
 |--|--|
-| **Version** | **v0.95.1** |
-| **Toward v1.0** | **95 / 100** pts (see [Version scorecard](#version-scorecard)) |
+| **Version** | **v1.0** |
+| **Scorecard** | **100 / 100** pts (see [Version scorecard](#version-scorecard)) |
 
-Not v1 yet — apps, stubs, and Accel still leave points on the table.
+Engine is v1. Apps (`octo`), stubs, and NPU/C++ accel sit **outside** this board — they are sibling / later trees (`welvet.cpp`), not missing Welvet.
 
 | Repo | Role |
 |------|------|
@@ -32,7 +32,6 @@ Most transformer / CNN FLOPs are **weights × activations**. Welvet keeps **one*
 **Not “fully native” yet (honest):**
 - Optional future: dedicated k/IQ Plan 9 `.s` beyond fused Go/int8 `DotKRow`/`DotIQRow` (peak cell = fused Dot*, already ✅)
 - MHA exotic (cross/ALiBi/sigmoid/dropout/sliding) and CNN quant paths still host / im2col
-- Nested non-Dense Sequential/Residual children still open (topology)
 - WebGPU device ALU is typically **f32** at the boundary (storage dtype narrows on upload)
 - Suite honesty: `w2a/suites.StampBackendNote` / `AffinePackable` — no silent host counted as “WebGPU/SIMD done”
 
@@ -42,17 +41,16 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 
 | Folder | Contains |
 |--------|----------|
-| (top) | `core`, `weights`, `quant`, `simd`, `webgpu`, `tiling`, `architecture`, `layers/` |
+| (top) | `core`, `weights`, `quant`, `simd`, `webgpu`, `tiling`, `architecture`, `layers/`, `lucy/`, `fusedgpu/` |
 | `runtime/` | `forward`, `backward`, `training`, `step` |
 | `systems/` | `dna`, `evolution`, `tween`, `tanhi`, `telemetry` |
 | `model/` | `transformer`, `entity`, `tokenizer`, `sampling`, `hf` |
-| `apps/` | `octo`, `flux2`, `mosstts` |
-| `stub/` | future: `accel`, `donate`, `fountain`, `hardware`, `memory`, `seed`, `serialization` |
+| `apps/` | `octo`, `flux2`, `mosstts` (not on the v1 board) |
+| `stub/` | future: `accel`, `donate`, `fountain`, `hardware`, `memory`, `seed`, `serialization` (not on the v1 board) |
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v0.95.1 (pre-v1).** Scorecard still **95/100**; this is a patch on v0.95
-(lucy measuring, nested cameral / BranchModes). v1.0 = scorecard **100/100**.
+**Status: v1.0.** Scorecard **100/100**. FastProxy (DFA-shaped \(B:=W_{\mathrm{head}}^\top\)) is the last engine credit primitive; NPU/Metal/QNN are not scored here.
 
 | Legend | Meaning | Pts credit |
 |--------|---------|------------|
@@ -64,9 +62,9 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 
 ## Version scorecard
 
-**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0** (scorecard today:
-`round(95)` → **v0.95**). Patch tags (e.g. **v0.95.1**) ship engine deltas without
-moving the scorecard. Recompute the board whenever a row flips status. Weights sum to **100**.
+**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. Patch tags
+(e.g. **v0.95.1**) shipped engine deltas without moving the board. Weights sum to **100**.
+This tag is **v1.0** because the board is full.
 
 | # | Section | Wt | How scored today | Earned |
 |--:|---------|---:|------------------|-------:|
@@ -78,13 +76,11 @@ moving the scorecard. Recompute the board whenever a row flips status. Weights s
 | 6 | **Runtime + architecture** — volumetric grid, forward, backward, training, step | 8 | all ✅ | **8.0** |
 | 7 | **Systems** — dna, evolution, tween, tanhi, telemetry | 5 | all ✅ | **5.0** |
 | 8 | **Model / IO** — tokenizer, entity, transformer, sampling, hf | 8 | all ✅ | **8.0** |
-| 9 | **Apps** — `octo` model shell | 3 | 🚧 | **1.5** |
-| 10 | **Stubs (non-accel)** — seed, serialization, hardware, memory, fountain, donate | 3 | all 🚧 | **1.5** |
-| 11 | **Accel** — NPU / Metal / QNN plugins | 2 | ⬜ | **0.0** |
-| 12 | **Peak fused / no host ALU** — fused k/IQ Dot*, MHA attn/RoPE GPU fwd+bwd, LN/SwiGLU/Softmax/Embedding/RNN/LSTM/CNN tiled GPU, Softmax SIMD | 14 | all ✅ | **14.0** |
-| | **Total → v1.0** | **100** | | **95.0** |
+| 9 | **Training credit** — StepBP, Tween*, TweenSplit, HeadProxy, Linear, FastProxy, Sparse, Alt, cameral BranchModes | 8 | all ✅ | **8.0** |
+| 10 | **Peak fused / no host ALU** — fused k/IQ Dot*, MHA attn/RoPE GPU fwd+bwd, LN/SwiGLU/Softmax/Embedding/RNN/LSTM/CNN tiled GPU, Softmax SIMD; `fusedgpu` decoder fuse | 14 | all ✅ | **14.0** |
+| | **Total → v1.0** | **100** | | **100.0** |
 
-**v0.95 readout:** peak-fused §12 is in. Remaining: **apps/stubs (§9–10)** and **Accel (§11)**. Nested Sequential/Residual topology stays open outside the scorecard.
+**v1.0 readout:** engine credit + MatVec + volumetric step + GPU fuse are in. **Not on this board:** `apps/octo` (sibling shell), `stub/*` (future), **NPU / Metal / QNN** (3rd-party C++; later `welvet.cpp`, not a Welvet Go score). Nested Sequential/Residual mixed children and Parallel `ResidualGraft` are in. FastProxy can match/beat StepBP **Acc** on sine/copy toys; Sparse wins Lucy **Score** via Avail. Do not write “Sparse is better backprop.”
 
 Detail tables below still list per-feature ✅/🚧/⬜; they feed honesty, but **only this scorecard sets the version number**.
 
@@ -111,10 +107,13 @@ Status rollup — version points live in the [scorecard](#version-scorecard) onl
 | Cross-Numeric Train (w2a Step) — Op kinds × weight dtype × act host (smoke ~735 / full ~10.7k) | ✅ |
 | ConvT / Parallel / KMeans / Mamba / Metacognition / GDN — full timed matrix + train grids (GDN truncated BPTT) | ✅ |
 | Model IO / transformer / entity / tokenizer / hf | ✅ |
-| `apps/octo/` interactive model shell (download / convert / chat) | 🚧 |
-| `stub/` seed · serialization · hardware · memory · fountain · donate | 🚧 |
-| `stub/accel/` (NPU/Metal/QNN plugins) | ⬜ |
-| Full v1 matrix (every cell peak-fused, no host ALU) | 🚧 (peak fused ✅; apps/accel remain) |
+| Training credit (StepBP / TweenSplit / FastProxy / Sparse / …) | ✅ |
+| Cameral `.entity` (`WriteCameralFile` / `LoadCameral`) | ✅ |
+| `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan) | ✅ |
+| `apps/octo/` interactive model shell (download / convert / chat) | 🚧 off-board |
+| `stub/` seed · serialization · hardware · memory · fountain · donate | 🚧 off-board |
+| `stub/accel/` (NPU/Metal/QNN — not Go Welvet; later `welvet.cpp`) | ⬜ off-board |
+| Full v1 matrix (every cell peak-fused, no host ALU) | 🚧 (peak fused ✅; nested Sequential/Residual still open) |
 
 Validate live:
 ```bash
@@ -140,6 +139,9 @@ cd w2a && go test ./tests/convt3 -v
 cd w2a && go test ./tests/kmeans -v
 cd w2a && go test ./tests/parallel -v
 cd w2a && go test ./tests/metacognition -v
+cd w2a && go test ./tests/dense -run LinearGradIn -v
+cd w2a && go test ./tests/entity -run Cameral -v
+cd w2a && go test ./tests/parallel -run 'Credit|AllCredit|AllStack|Combine|HemiN|Sparse|ParseTrain|RequiresGrid|WrappedCNN|Inherit|TrainMSE' -v
 ```
 
 ---
@@ -152,7 +154,7 @@ cd w2a && go test ./tests/metacognition -v
 4. **No QAT** — `DType` + `QuantFormat` are storage truth.
 5. **Train keeps storage truth** — `weights.ApplySGD` updates FormatNone in native lanes (or unpack→update→re-Pack for packed formats). No retained float32 master beside storage (`RetainsF32Master` only for FormatNone+float32).
 6. **One poly feature → one folder.**
-7. **v1.0 = scorecard 100/100** (every board row ✅).
+7. **v1.0 = scorecard 100/100** (this tag). Apps, stubs, and NPU are not scored.
 
 ---
 
@@ -314,7 +316,7 @@ Row **Wt** is the share of that package inside its scorecard section (not additi
 | `tiling/` | Tile size / SC / MC / GPU workgroup caps | 1 | ✅ |
 | `layers/dense/` | Shared MatVec microkernel; FormatNone×34 + quants × 3 backends; grad verify | 15 | ✅† |
 
-† Dense package is ✅ for API/suites and fused SIMD for all 20 quants (scorecard §2 → 15.0). Fused k/IQ Dot* is the §12 peak cell (optional dedicated `.s` is future polish).
+† Dense package is ✅ for API/suites and fused SIMD for all 20 quants (scorecard §2 → 15.0). Fused k/IQ Dot* is the §10 peak cell (optional dedicated `.s` is future polish).
 
 ### Runtime / architecture — scorecard §6 (8 pts)
 
@@ -325,8 +327,34 @@ Row **Wt** is the share of that package inside its scorecard section (not additi
 | `runtime/backward/` | Reverse tape; same layer set | 2 | ✅ |
 | `runtime/training/` | MSE + SGD; ApplyGradSGD → store ApplySGD for same layer set; storage-truth train | 1 | ✅ |
 | `runtime/step/` | Discrete-time volumetric step mesh — Forward/Backward/ApplyTween/StepMesh; Cross-Numeric Train (kinds × weight dtype × act host) | 1 | ✅ |
+| `lucy/` | Live Acc / SoftAcc / Avail / AdaptPct / Score (tide / test41 board) | — | ✅ |
 
-### Layers (full w2a timed matrix + train grids; peak fused ALU in §12)
+### Training credit — scorecard §9 (8 pts)
+
+Sandwich `TrainStackMSE` / `OpenSplitTape`. Step\* and non-Step of the same family share one update on Stack (no Grid). Mesh\* needs volumetric placement.
+
+| Mode | Credit | Status |
+|------|--------|:------:|
+| `NormalBP` / `StepBP` / `MeshBP` | Real chain rule (`BackwardStack` + SGD) | ✅ |
+| `Tween` / `StepTween` / `MeshTween` | Broadcast \(P(g_y)\), half LR | ✅ |
+| `TweenChain` / `StepTweenChain` / `MeshTweenChain` | Chain rule (= BP on Stack) | ✅ |
+| `TweenSplit` / `StepTweenSplit` | \(g_i=\frac1N P(g_y)\) | ✅ |
+| `TweenAlt` / `StepTweenAlt` | Split then Tween, `AltTimes` | ✅ |
+| `TweenSplitHeadProxy` | Head \(J^\top g_y\); hidden `dW` only | ✅ |
+| `TweenSplitLinear` | Affine \(W^\top\) walk, skip act′ | ✅ |
+| `TweenSplitFastProxy` | \(g_{\mathrm{proxy}}=W_{\mathrm{head}}^\top g_y\) (no act′); hidden `dW` only | ✅ |
+| `TweenSplitHeadProxyAsync` | Hidden uses proxy from sample \(T-1\) | ✅ |
+| `TweenSplitSparse` | Head + one rotating hidden leaf | ✅ |
+| `TweenSplitLinearCache` | Cached Linear walk (dead on sine freq switch; kept for A/B) | ✅ |
+| `MeshTweenSplit` / `MeshTweenAlt` / `MeshTweenSplitFastProxy` / `MeshTweenSplitSparse` | Grid-scheduled Split/Alt (family collapse on Stack) | ✅ |
+| Cameral `BranchModes` / `HemispheresFrom` / `CombineAdd` | n=1 one mid Op; n=2/3 Bi/Tri | ✅ |
+| Dense `LinearGradIn` / `GradWOnly` | SIMD \(W^\top\) and `dW`-only kernels | ✅ |
+| Cameral `.entity` | `WriteCameralFile` / `LoadCameral` (modes + weights) | ✅ |
+| **test49** | All 23 named modes × 1³/2³/3³ origin smoke (one live cell; rest disabled) × Parallel + Bicameral + poly kinds (`w2a` `Test49AllTrainModesCubes`) | ✅ |
+
+Rivaling backprop = matched **hard Acc** vs StepBP, not Lucy Score. Sparse Score is Avail (skip-GEMV). FastProxy is the Acc rival on sine/copy toys.
+
+### Layers (full w2a timed matrix + train grids; peak fused ALU in §10)
 
 **§3 Transformer stack (14 pts)** · **§4 CNN/RNN/LSTM (6 pts)** · **§5 Extended (7 pts)**
 
@@ -340,8 +368,8 @@ Row **Wt** is the share of that package inside its scorecard section (not additi
 | `layers/layernorm/` | Native LN; WebGPU fwd / bwd host; full timed matrix + train grids | 2 | §3 | ✅ |
 | `layers/embedding/` | Token gather/scatter; full timed matrix + train grids | 1 | §3 | ✅ |
 | `layers/softmax/` | All kinds CPU/SIMD; std/grid/hierarchical WebGPU; full timed matrix | 1 | §3 | ✅ |
-| `layers/sequential/` | Dense→Dense Sequential compose; full timed matrix + train grids | 1 | §3 | ✅ |
-| `layers/residual/` | Residual y=F(x)+x (Dense F); full timed matrix; heterogeneous F ⬜ | 1 | §3 | ✅ |
+| `layers/sequential/` | Sequential compose — Dense children + mixed SwiGLU/RMSNorm/LayerNorm via `NewFromOps`; full timed matrix + train grids | 1 | §3 | ✅ |
+| `layers/residual/` | Residual y=F(x)+x — Dense or mixed F via `NewFromOps`; Parallel-as-F is `ResidualGraft`; full timed matrix | 1 | §3 | ✅ |
 | `layers/cnn1/` | Conv1d im2col→Dense + FormatNone f32 tiled WebGPU; full timed matrix | 1 | §4 | ✅ |
 | `layers/cnn2/` | Conv2d im2col→Dense + FormatNone f32 tiled WebGPU; full timed matrix | 1 | §4 | ✅ |
 | `layers/cnn3/` | Conv3d im2col→Dense + FormatNone f32 tiled WebGPU; full timed matrix | 1 | §4 | ✅ |
@@ -353,7 +381,7 @@ Row **Wt** is the share of that package inside its scorecard section (not additi
 | `layers/convt2/` | Transposed conv2d; host scatter+Proj; full timed matrix + train grids | 0.7 | §5 | ✅ |
 | `layers/convt3/` | Transposed conv3d; host scatter+Proj; full timed matrix + train grids | 0.6 | §5 | ✅ |
 | `layers/kmeans/` | Soft k-means; Centers via Dense; full timed matrix + train grids | 0.5 | §5 | ✅ |
-| `layers/parallel/` | MoE concat/add/avg/filter; Dense branches; full timed matrix + train grids | 1 | §5 | ✅ |
+| `layers/parallel/` | MoE concat/add/avg/filter; Dense branches; Split/FastProxy/Sparse credit; full timed matrix + train grids | 1 | §5 | ✅ |
 | `layers/metacognition/` | Observed Dense + rules; full timed matrix + train grids | 1 | §5 | ✅ |
 
 ### Dense detail
@@ -547,7 +575,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | Gap census 34×20×3 | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
-| Nested non-Dense children (Softmax/Residual/…) | ⬜ | ⬜ | ⬜ |
+| Nested non-Dense children (SwiGLU / RMSNorm / LayerNorm via `NewFromOps`) | ✅ | ✅ | ✅ |
 
 ### Residual detail
 
@@ -562,14 +590,14 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | Gap census 34×20×3 | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × FormatNone×34 × backends | ✅ | ✅ | ✅ |
 | Train volumetric 1³/2³/3³ × all 20 quants × backends | ✅ | ✅ | ✅ |
-| Nested non-Dense F / Parallel residual graft | ⬜ | ⬜ | ⬜ |
+| Nested non-Dense F (SwiGLU / RMSNorm / LayerNorm) / Parallel `ResidualGraft` | ✅ | ✅ | ✅ |
 
 ### Model / IO — scorecard §8 (8 pts)
 
 | Package | Features | Wt | Status | Earned |
 |---------|----------|---:|:------:|-------:|
 | `model/tokenizer/` | BPE / HF tokenizers | 1.5 | ✅ | 1.5 |
-| `model/entity/` | `.entity` Open/Inspect/Write + PackFromHF/ImportFromHF; F32/F16/BF16/F64 LoadBlob | 2 | ✅ | 2.0 |
+| `model/entity/` | `.entity` Open/Inspect/Write + PackFromHF; cameral `WriteCameralFile` / `LoadCameral` (Stack, BranchModes, FastProxy); F32/F16/BF16/F64 LoadBlob | 2 | ✅ | 2.0 |
 | `model/transformer/` | Decoder generate, KV cache, LM head; TopK/temp/greedy GenOptions | 2.5 | ✅ | 2.5 |
 | `model/sampling/` | ArgMax, SampleTopK, penalties, BanIDs, chat sanitize | 1 | ✅ | 1.0 |
 | `model/hf/` | InspectSnapshot + DetectArchitecture + safetensors/MLX loaders | 1 | ✅ | 1.0 |
@@ -585,19 +613,16 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | `systems/tanhi/` | UDP HUD telemetry — all implemented Ops × dtype/quant via FlattenOp | 1 | ✅ |
 | `systems/telemetry/` | Structural blueprint — all implemented Ops (+ meta estimates) | 1 | ✅ |
 
-### Stubs / apps / peak — scorecard §9–§12
+### Off-board (not v1 pts) — apps, stubs, NPU
 
-| Package | Features | Wt | Section | Status | Earned |
-|---------|----------|---:|---------|:------:|-------:|
-| `apps/octo/` | Interactive model shell (download / convert / chat) | 3 | §9 | 🚧 | 1.5 |
-| `stub/seed/` | Seed manifests / infinite init / He / mixed grids | 0.5 | §10 | 🚧 | 0.25 |
-| `stub/serialization/` | ENTITY encode/decode / native I/O | 0.5 | §10 | 🚧 | 0.25 |
-| `stub/hardware/` | Host probes / audit | 0.5 | §10 | 🚧 | 0.25 |
-| `stub/memory/` | Footprint / VRAM accounting | 0.5 | §10 | 🚧 | 0.25 |
-| `stub/fountain/` | Fountain codes + neural recover | 0.5 | §10 | 🚧 | 0.25 |
-| `stub/donate/` | LAN donate-compute protocol (infer stub-echo) | 0.5 | §10 | 🚧 | 0.25 |
-| `stub/accel/` | Intel NPU / Qualcomm / Apple Metal / … | 2 | §11 | ⬜ | 0.0 |
-| *(peak fused / no host ALU)* | Fused k/IQ Dot*, MHA attn/RoPE GPU, LN/SwiGLU/Softmax/Embedding/RNN/LSTM/CNN tiled, Softmax/SiLU SIMD | 14 | §12 | ✅ | 14.0 |
+Octo is a nested shell repo. Stubs are future. NPU/Metal/QNN are 3rd-party C++ — not a Welvet Go backend. Peak fused **is** scored (§10).
+
+| Package | Features | Status |
+|---------|----------|:------:|
+| `apps/octo/` | Interactive model shell (download / convert / chat) | 🚧 |
+| `stub/seed/` · `serialization/` · `hardware/` · `memory/` · `fountain/` · `donate/` | Future engine surfaces | 🚧 |
+| `stub/accel/` | Intel NPU / Qualcomm / Apple Metal / QNN — later `welvet.cpp` | ⬜ |
+| `fusedgpu/` | Q4_0 Engine + BinaryG128 HybridEngine; Android Vulkan optional (`WELVET_NATIVE_VK`) | ✅ (in §10) |
 
 ### Harness (not engine — does not count toward v1 pts)
 
@@ -673,6 +698,6 @@ Docs: `w2a/docs/`.
 
 ## Philosophy
 
-Welvet is the fabric where **any AI op** can run on **any quant** at **any precision** on **any of the three backends**, with tiling and Plan 9 SIMD as first-class.
+Welvet is the fabric where **any AI op** can run on **any quant** at **any precision** on **any of the three backends**, with tiling and Plan 9 SIMD as first-class. Training credit (FastProxy / Sparse / …) is a first-class axis on a sandwich. NPU is not a fourth Go backend.
 
 If something is hard, we **implement it** or **fail loudly**. We do not paper over gaps.

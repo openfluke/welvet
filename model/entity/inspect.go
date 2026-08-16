@@ -14,6 +14,7 @@ type Info struct {
 	BlobCount     int
 	HasTokenizer  bool
 	Transformer   *TransformerSpec
+	Cameral       *CameralSpec
 }
 
 // Inspect opens path, reads the header, and closes the file.
@@ -35,6 +36,7 @@ func Inspect(path string) (*Info, error) {
 		BlobCount:     len(hdr.Blobs),
 		HasTokenizer:  ef.HasTokenizerBlob(),
 		Transformer:   hdr.Transformer,
+		Cameral:       hdr.Cameral,
 	}, nil
 }
 

@@ -7,10 +7,21 @@ import (
 )
 
 // TrainStackMSE runs ForwardStack → MSE → TrainStack under mode.
-// Covers SGD / Tween / TweenChain (and per-child overrides via ChildModes).
+// Split-family modes use one collect tape (OpenSplitTape). Alt recomputes
+// the MSE gap between Split and Tween phases.
 func TrainStackMSE[T core.Numeric](s *Stack, input, target *core.Tensor[T], mode TrainMode, lr float64) (loss float64, err error) {
 	if s == nil || input == nil || target == nil {
 		return 0, fmt.Errorf("parallel: TrainStackMSE nil")
+	}
+	if mode.Resolve(ModeNormalBP).Family() == familyTweenAlt {
+		return trainTweenAltStackMSE(s, input, target, lr)
+	}
+	if mode.Resolve(ModeNormalBP).Family() == familyTweenSplit {
+		tape, err := OpenSplitTape(s, input)
+		if err != nil {
+			return 0, err
+		}
+		return tape.Train(target, mode, lr)
 	}
 	pre, post, err := ForwardStack(s, input)
 	if err != nil {
@@ -30,6 +41,16 @@ func TrainStackMSE[T core.Numeric](s *Stack, input, target *core.Tensor[T], mode
 func TrainMSE[T core.Numeric](l *Layer, input, target *core.Tensor[T], mode TrainMode, lr float64) (loss float64, err error) {
 	if l == nil || input == nil || target == nil {
 		return 0, fmt.Errorf("parallel: TrainMSE nil")
+	}
+	if mode.Resolve(ModeNormalBP).Family() == familyTweenAlt {
+		return trainTweenAltLayerMSE(l, input, target, lr)
+	}
+	if mode.Resolve(ModeNormalBP).Family() == familyTweenSplit {
+		tape, err := OpenSplitTape(l, input)
+		if err != nil {
+			return 0, err
+		}
+		return tape.Train(target, mode, lr)
 	}
 	pre, post, err := Forward(l, input)
 	if err != nil {

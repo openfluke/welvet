@@ -18,6 +18,8 @@ type Layer struct {
 	Branches    []any        // branch Ops (Dense, MHA, Parallel, Stack, …)
 	Gate        *dense.Layer // Rows=Branches, Cols=Dim; used when CombineFilter
 	BranchModes []TrainMode  // optional per-hemisphere mode; empty ⇒ inherit parent
+	AltTimes    int          // TweenAlt: Split→Tween pairs per update (0 ⇒ 1)
+	accel       splitAccel   // LinearCache / HeadProxyAsync / Sparse
 }
 
 // New creates Parallel with FormatNone Float32 zeros (Dense branches).

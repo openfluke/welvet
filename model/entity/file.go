@@ -92,6 +92,7 @@ type headerDoc struct {
 	Network       json.RawMessage  `json:"network,omitempty"`
 	Transformer   *TransformerSpec `json:"transformer,omitempty"`
 	Wav2Vec2      *Wav2Vec2Spec    `json:"wav2vec2,omitempty"`
+	Cameral       *CameralSpec     `json:"cameral,omitempty"`
 	Blobs         []WeightBlob     `json:"blobs"`
 }
 
@@ -101,6 +102,7 @@ type Header struct {
 	Flags         uint16
 	Transformer   *TransformerSpec
 	Wav2Vec2      *Wav2Vec2Spec
+	Cameral       *CameralSpec
 	Blobs         []WeightBlob
 	DataOffset    int
 	Status        string
@@ -175,6 +177,7 @@ func (ef *File) readHeader() error {
 		Flags:         flags,
 		Transformer:   doc.Transformer,
 		Wav2Vec2:      doc.Wav2Vec2,
+		Cameral:       doc.Cameral,
 		Blobs:         doc.Blobs,
 		DataOffset:    fixedHeaderSize() + int(headerLen),
 		Status:        doc.Status,

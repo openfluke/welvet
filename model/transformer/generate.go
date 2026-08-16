@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -113,8 +116,8 @@ func (m *Model) Generate(
 	m.Quiet = opts.Silent
 	prefillStart := time.Now()
 
-	if he, ok := m.gpu.(*fusedgpu.HybridEngine); ok && he != nil {
-		return m.generateHybridGPUSample(he, encode, decode, ids, eos, stream, allTokens, opts, prefillStart)
+	if hs := m.hybridGPUSampler(); hs != nil {
+		return m.generateHybridGPUSample(hs, encode, decode, ids, eos, stream, allTokens, opts, prefillStart)
 	}
 
 	logits, err := m.ForwardTokens(ids)
@@ -195,8 +198,31 @@ func (m *Model) Generate(
 	return finalizeAssistantReply(stream.String(), opts.EnableThinking && m.SupportsThinking()), metrics, nil
 }
 
+func (m *Model) hybridGPUSampler() hybridGPUSampler {
+	if m == nil {
+		return nil
+	}
+	switch eng := m.gpu.(type) {
+	case *fusedgpu.HybridEngine:
+		return eng
+	case *fusedgpu.HybridVKEngine:
+		return eng
+	default:
+		return nil
+	}
+}
+
+// hybridGPUSampler is implemented by HybridEngine and HybridVKEngine.
+type hybridGPUSampler interface {
+	PrefillSample(ids []uint32) (uint32, error)
+	DecodeChunk(k int) ([]uint32, error)
+	Reset() error
+	Pos() int
+	MaxSeq() int
+}
+
 func (m *Model) generateHybridGPUSample(
-	he *fusedgpu.HybridEngine,
+	he hybridGPUSampler,
 	encode func(text string, addSpecial bool) []uint32,
 	decode func(ids []uint32, skipSpecial bool) string,
 	ids []uint32,
@@ -213,22 +239,37 @@ func (m *Model) generateHybridGPUSample(
 	if err != nil {
 		return "", zero, fmt.Errorf("prefill: %w", err)
 	}
+	// Decode packing: how many sample+advance steps per GPU submit.
+	//   gpu_multi_fuse → always 1 (Android-safe / A/B baseline)
+	//   gpu_fuse on desktop → pack several steps (Mac/Linux/Windows)
+	// Override: BIRDKIT_GPU_MULTI_CHUNK=N  or  BIRDKIT_GPU_MULTI_ONESHOT=1
+	chunkSize := 1
+	if runtime.GOOS != "android" && m.ExecProfileName == "gpu_fuse" {
+		chunkSize = 8
+	}
+	if s := strings.TrimSpace(os.Getenv("BIRDKIT_GPU_MULTI_CHUNK")); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			chunkSize = n
+		}
+	}
 	if err := opts.Context.Err(); err != nil {
-		return "", buildMetrics(m, len(ids), 0, prefillElapsed, 0), err
+		return "", buildMetrics(m, len(ids), 0, prefillElapsed, 0, chunkSize), err
 	}
 	if !opts.Silent {
-		fmt.Printf("  prompt loaded in %s (%.2f tok/s) [gpu sample]\nAssistant: ",
+		fmt.Printf("  prompt loaded in %s (%.2f tok/s) [gpu sample decode_chunk=%d profile=%s]\nAssistant: ",
 			prefillElapsed.Round(time.Millisecond),
-			float64(len(ids))/math.Max(prefillElapsed.Seconds(), 1e-9))
+			float64(len(ids))/math.Max(prefillElapsed.Seconds(), 1e-9),
+			chunkSize, m.ExecProfileName)
 	}
 
 	decodeStart := time.Now()
 	generatedCount := 0
 	thinkClosed := false
+	pending := make([]uint32, 0, 2)
 
 	for generatedCount < opts.MaxTokens {
 		if err := opts.Context.Err(); err != nil {
-			metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
+			metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart), chunkSize)
 			return finalizeAssistantReply(stream.String(), opts.EnableThinking), metrics, err
 		}
 		if _, stop := eos[int(tok)]; stop {
@@ -247,12 +288,12 @@ func (m *Model) generateHybridGPUSample(
 			thinkClosed = true
 			allTokens = append(allTokens, closeIDs...)
 			if err := he.Reset(); err != nil {
-				metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
+				metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart), chunkSize)
 				return finalizeAssistantReply(stream.String(), true), metrics, err
 			}
 			tok, err = he.PrefillSample(allTokens)
 			if err != nil {
-				metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
+				metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart), chunkSize)
 				return finalizeAssistantReply(stream.String(), true), metrics, fmt.Errorf("reprefill after think: %w", err)
 			}
 			continue
@@ -261,21 +302,38 @@ func (m *Model) generateHybridGPUSample(
 			break
 		}
 
-		if generatedCount >= opts.MaxTokens {
+		if generatedCount >= opts.MaxTokens || he.Pos() >= he.MaxSeq() {
 			break
 		}
-		if he.Pos() >= he.MaxSeq() {
-			break
+		if len(pending) == 0 {
+			remainBudget := opts.MaxTokens - generatedCount
+			remainSeq := he.MaxSeq() - he.Pos()
+			k := chunkSize
+			// Optional one-shot mode: do decode in one large submit.
+			if strings.EqualFold(strings.TrimSpace(os.Getenv("BIRDKIT_GPU_MULTI_ONESHOT")), "1") {
+				k = remainBudget
+			}
+			if k > remainBudget {
+				k = remainBudget
+			}
+			if k > remainSeq {
+				k = remainSeq
+			}
+			if k < 1 {
+				break
+			}
+			next, err := he.DecodeChunk(k)
+			if err != nil {
+				metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart), chunkSize)
+				return stream.String(), metrics, fmt.Errorf("decode step %d: %w", generatedCount, err)
+			}
+			pending = append(pending[:0], next...)
 		}
-		next, err := he.DecodeChunk(1)
-		if err != nil {
-			metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, time.Since(decodeStart))
-			return stream.String(), metrics, fmt.Errorf("decode step %d: %w", generatedCount, err)
-		}
-		tok = next[0]
+		tok = pending[0]
+		pending = pending[1:]
 	}
 	decodeElapsed := time.Since(decodeStart)
-	metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, decodeElapsed)
+	metrics := buildMetrics(m, len(ids), generatedCount, prefillElapsed, decodeElapsed, chunkSize)
 	if generatedCount > 0 && opts.PrintMetrics && !opts.Silent {
 		fmt.Print(metrics.FormatFooter())
 	}
@@ -335,12 +393,15 @@ func finalizeAssistantReply(reply string, thinking bool) string {
 	return reply
 }
 
-func buildMetrics(m *Model, promptTokens, generatedCount int, prefillElapsed, decodeElapsed time.Duration) GenMetrics {
+func buildMetrics(m *Model, promptTokens, generatedCount int, prefillElapsed, decodeElapsed time.Duration, decodeChunk ...int) GenMetrics {
 	metrics := GenMetrics{
 		PrefillTime:     prefillElapsed,
 		DecodeTime:      decodeElapsed,
 		PrefillTokens:   promptTokens,
 		GeneratedTokens: generatedCount,
+	}
+	if len(decodeChunk) > 0 {
+		metrics.DecodeChunk = decodeChunk[0]
 	}
 	if generatedCount > 0 {
 		if decodeElapsed > 0 {
@@ -360,6 +421,7 @@ func buildMetrics(m *Model, promptTokens, generatedCount int, prefillElapsed, de
 		metrics.VRAMMB = fp.VRAMMB
 		metrics.HeapMB = fp.HeapMB
 		metrics.WeightsMB = fp.WeightsMB
+		metrics.ExecProfile = m.ExecProfileName
 	}
 	return metrics
 }

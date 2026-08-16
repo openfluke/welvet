@@ -69,6 +69,12 @@ func cloneOp(op any) (any, error) {
 		return cloneSequential(v)
 	case *residual.Layer:
 		return cloneResidual(v)
+	case *parallel.ResidualSkip:
+		f, err := cloneOp(v.F)
+		if err != nil {
+			return nil, err
+		}
+		return &parallel.ResidualSkip{F: f, Exec: v.Exec}, nil
 	case *parallel.Layer:
 		return cloneParallel(v)
 	case *parallel.Stack:
@@ -378,6 +384,23 @@ func cloneSequential(src *sequential.Layer) (*sequential.Layer, error) {
 	if src == nil {
 		return nil, nil
 	}
+	if len(src.Ops) > 0 {
+		ops := make([]any, len(src.Ops))
+		for i, op := range src.Ops {
+			cp, err := cloneOp(op)
+			if err != nil {
+				return nil, fmt.Errorf("clone sequential op %d: %w", i, err)
+			}
+			ops[i] = cp
+		}
+		dst, err := sequential.NewFromOps(src.Cfg, ops)
+		if err != nil {
+			return nil, err
+		}
+		dst.Exec = src.Exec
+		dst.Core = src.Core
+		return dst, nil
+	}
 	dim := src.Cfg.Dim
 	childN := dim * dim
 	packed := make([]float32, 0, len(src.Children)*childN)
@@ -409,6 +432,23 @@ func cloneSequential(src *sequential.Layer) (*sequential.Layer, error) {
 func cloneResidual(src *residual.Layer) (*residual.Layer, error) {
 	if src == nil {
 		return nil, nil
+	}
+	if len(src.Ops) > 0 {
+		ops := make([]any, len(src.Ops))
+		for i, op := range src.Ops {
+			cp, err := cloneOp(op)
+			if err != nil {
+				return nil, fmt.Errorf("clone residual F %d: %w", i, err)
+			}
+			ops[i] = cp
+		}
+		dst, err := residual.NewFromOps(src.Cfg, ops)
+		if err != nil {
+			return nil, err
+		}
+		dst.Exec = src.Exec
+		dst.Core = src.Core
+		return dst, nil
 	}
 	dim := src.Cfg.Dim
 	childN := dim * dim

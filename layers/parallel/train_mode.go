@@ -2,6 +2,7 @@ package parallel
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/dense"
@@ -13,6 +14,14 @@ import (
 //	NormalBP / StepBP / MeshBP     — backprop + SGD (FamilyBP)
 //	Tween / StepTween / MeshTween  — local / gap tween, no chain rule (FamilyTween)
 //	TweenChain / StepTweenChain / MeshTweenChain — chain-rule updates (FamilyTweenChain)
+//	TweenSplit / StepTweenSplit    — one output gap, split across every trainable leaf (FamilyTweenSplit)
+//	TweenSplitHeadProxy            — head full J^T g_y, hidden 1/(N-1) P(gx_head)
+//	TweenSplitLinear               — 1/N P(W̃^T g_y), skip act' on the walk
+//	TweenSplitFastProxy            — SIMD W_head^T g_y (no act'), hidden 1/(N-1) Split, all dW-only
+//	TweenSplitLinearCache          — Linear walk cached every CacheEvery (default 20)
+//	TweenSplitHeadProxyAsync       — hidden use proxy from sample T-1; head computes T
+//	TweenSplitSparse               — head + one rotating hidden leaf per sample
+//	TweenAlt / StepTweenAlt        — Split then Tween, repeat AltTimes (FamilyTweenAlt)
 //	Inherit                        — use the parent mode (BranchModes / ChildModes only)
 //
 // Step* vs Normal* is scheduling (online vs batched); Mesh* is volumetric forward.
@@ -30,6 +39,20 @@ const (
 	ModeMeshBP
 	ModeMeshTween
 	ModeMeshTweenChain
+	ModeTweenSplit
+	ModeStepTweenSplit
+	ModeTweenAlt
+	ModeStepTweenAlt
+	ModeTweenSplitHeadProxy
+	ModeTweenSplitLinear
+	ModeTweenSplitFastProxy
+	ModeTweenSplitLinearCache
+	ModeTweenSplitHeadProxyAsync
+	ModeTweenSplitSparse
+	ModeMeshTweenSplit
+	ModeMeshTweenAlt
+	ModeMeshTweenSplitFastProxy
+	ModeMeshTweenSplitSparse
 )
 
 // ModeSGD is the legacy alias for ModeNormalBP.
@@ -42,6 +65,8 @@ const (
 	familyBP trainFamily = iota
 	familyTween
 	familyTweenChain
+	familyTweenSplit
+	familyTweenAlt
 )
 
 // AllConcreteTrainModes is the test41 set (no Inherit).
@@ -51,6 +76,115 @@ func AllConcreteTrainModes() []TrainMode {
 		ModeTween, ModeTweenChain,
 		ModeStepTween, ModeStepTweenChain,
 		ModeMeshBP, ModeMeshTween, ModeMeshTweenChain,
+	}
+}
+
+// AllTrainModes is every named TrainMode including Inherit and Split/Alt credit.
+func AllTrainModes() []TrainMode {
+	return []TrainMode{
+		ModeInherit,
+		ModeNormalBP, ModeStepBP,
+		ModeTween, ModeTweenChain,
+		ModeStepTween, ModeStepTweenChain,
+		ModeMeshBP, ModeMeshTween, ModeMeshTweenChain,
+		ModeTweenSplit, ModeStepTweenSplit,
+		ModeTweenAlt, ModeStepTweenAlt,
+		ModeTweenSplitHeadProxy, ModeTweenSplitLinear,
+		ModeTweenSplitFastProxy, ModeTweenSplitLinearCache,
+		ModeTweenSplitHeadProxyAsync, ModeTweenSplitSparse,
+		ModeMeshTweenSplit, ModeMeshTweenAlt,
+		ModeMeshTweenSplitFastProxy, ModeMeshTweenSplitSparse,
+	}
+}
+
+// AllCreditTrainModes is the stack-local Split / Alt credit set (scorecard §9).
+// Mesh* credit is AllMeshCreditTrainModes (Needs a Grid for a true mesh tick).
+func AllCreditTrainModes() []TrainMode {
+	return []TrainMode{
+		ModeTweenSplit, ModeStepTweenSplit,
+		ModeTweenAlt, ModeStepTweenAlt,
+		ModeTweenSplitHeadProxy, ModeTweenSplitLinear,
+		ModeTweenSplitFastProxy, ModeTweenSplitLinearCache,
+		ModeTweenSplitHeadProxyAsync, ModeTweenSplitSparse,
+	}
+}
+
+// AllMeshCreditTrainModes is Split/Alt/FastProxy/Sparse scheduled on a Grid.
+func AllMeshCreditTrainModes() []TrainMode {
+	return []TrainMode{
+		ModeMeshTweenSplit, ModeMeshTweenAlt,
+		ModeMeshTweenSplitFastProxy, ModeMeshTweenSplitSparse,
+	}
+}
+
+// AllStackLocalTrainModes is every named mode TrainStackMSE can run without a Grid
+// (no Inherit, no Mesh*).
+func AllStackLocalTrainModes() []TrainMode {
+	var out []TrainMode
+	for _, m := range AllTrainModes() {
+		if m == ModeInherit || m.RequiresGrid() {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// AllNamedTrainModes is every concrete update: test41 nine + Split/Alt credit + Mesh*
+// credit. Inherit is omitted (it is not an update). This is the test49 set.
+func AllNamedTrainModes() []TrainMode {
+	var out []TrainMode
+	for _, m := range AllTrainModes() {
+		if m == ModeInherit {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// ParseTrainMode maps a persistence / CLI name to TrainMode.
+// Empty string is Inherit. Aliases: sgd/bp → NormalBP, fastproxy → TweenSplitFastProxy, sparse → TweenSplitSparse.
+func ParseTrainMode(s string) (TrainMode, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ModeInherit, nil
+	}
+	for _, m := range AllTrainModes() {
+		if strings.EqualFold(m.String(), s) {
+			return m, nil
+		}
+	}
+	key := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(s, "_", ""), "-", ""))
+	switch key {
+	case "bp", "sgd", "normal":
+		return ModeNormalBP, nil
+	case "fastproxy", "fast":
+		return ModeTweenSplitFastProxy, nil
+	case "sparse":
+		return ModeTweenSplitSparse, nil
+	case "headproxy":
+		return ModeTweenSplitHeadProxy, nil
+	case "linear":
+		return ModeTweenSplitLinear, nil
+	case "linearcache":
+		return ModeTweenSplitLinearCache, nil
+	case "headproxyasync", "asyncproxy":
+		return ModeTweenSplitHeadProxyAsync, nil
+	case "alt":
+		return ModeTweenAlt, nil
+	case "split":
+		return ModeTweenSplit, nil
+	case "meshsplit", "meshtweensplit":
+		return ModeMeshTweenSplit, nil
+	case "meshfastproxy", "meshfast":
+		return ModeMeshTweenSplitFastProxy, nil
+	case "meshsparse":
+		return ModeMeshTweenSplitSparse, nil
+	case "meshalt":
+		return ModeMeshTweenAlt, nil
+	default:
+		return ModeInherit, fmt.Errorf("parallel: unknown train mode %q", s)
 	}
 }
 
@@ -76,6 +210,34 @@ func (m TrainMode) String() string {
 		return "MeshTween"
 	case ModeMeshTweenChain:
 		return "MeshTweenChain"
+	case ModeTweenSplit:
+		return "TweenSplit"
+	case ModeStepTweenSplit:
+		return "StepTweenSplit"
+	case ModeTweenAlt:
+		return "TweenAlt"
+	case ModeStepTweenAlt:
+		return "StepTweenAlt"
+	case ModeTweenSplitHeadProxy:
+		return "TweenSplitHeadProxy"
+	case ModeTweenSplitLinear:
+		return "TweenSplitLinear"
+	case ModeTweenSplitFastProxy:
+		return "TweenSplitFastProxy"
+	case ModeTweenSplitLinearCache:
+		return "TweenSplitLinearCache"
+	case ModeTweenSplitHeadProxyAsync:
+		return "TweenSplitHeadProxyAsync"
+	case ModeTweenSplitSparse:
+		return "TweenSplitSparse"
+	case ModeMeshTweenSplit:
+		return "MeshTweenSplit"
+	case ModeMeshTweenAlt:
+		return "MeshTweenAlt"
+	case ModeMeshTweenSplitFastProxy:
+		return "MeshTweenSplitFastProxy"
+	case ModeMeshTweenSplitSparse:
+		return "MeshTweenSplitSparse"
 	default:
 		return fmt.Sprintf("TrainMode(%d)", m)
 	}
@@ -88,6 +250,14 @@ func (m TrainMode) Family() trainFamily {
 		return familyTween
 	case ModeTweenChain, ModeStepTweenChain, ModeMeshTweenChain:
 		return familyTweenChain
+	case ModeTweenSplit, ModeStepTweenSplit, ModeMeshTweenSplit,
+		ModeTweenSplitHeadProxy, ModeTweenSplitLinear,
+		ModeTweenSplitFastProxy, ModeTweenSplitLinearCache,
+		ModeTweenSplitHeadProxyAsync, ModeTweenSplitSparse,
+		ModeMeshTweenSplitFastProxy, ModeMeshTweenSplitSparse:
+		return familyTweenSplit
+	case ModeTweenAlt, ModeStepTweenAlt, ModeMeshTweenAlt:
+		return familyTweenAlt
 	default:
 		return familyBP
 	}
@@ -96,11 +266,18 @@ func (m TrainMode) Family() trainFamily {
 // RequiresGrid reports Mesh* modes that need volumetric placement for a true mesh tick.
 func (m TrainMode) RequiresGrid() bool {
 	switch m {
-	case ModeMeshBP, ModeMeshTween, ModeMeshTweenChain:
+	case ModeMeshBP, ModeMeshTween, ModeMeshTweenChain,
+		ModeMeshTweenSplit, ModeMeshTweenAlt,
+		ModeMeshTweenSplitFastProxy, ModeMeshTweenSplitSparse:
 		return true
 	default:
 		return false
 	}
+}
+
+// IsSplitFamily is the one-tape Split credit class (not Alt).
+func (m TrainMode) IsSplitFamily() bool {
+	return m.Family() == familyTweenSplit
 }
 
 // UseChainRule matches test41 tween chain-rule modes.
@@ -171,6 +348,12 @@ func Train[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T], parent
 	}
 	mode := parentMode.Resolve(ModeNormalBP)
 	fam := mode.Family()
+	if fam == familyTweenSplit {
+		return trainTweenSplitFamily(l, gradOut, input, lr, mode)
+	}
+	if fam == familyTweenAlt {
+		return trainTweenAltOp(l, gradOut, input, altTimesOf(l.AltTimes), lr)
+	}
 	if !hasMixedBranchModes(l) && (fam == familyBP || fam == familyTweenChain) {
 		_, dW, err := Backward(l, gradOut, input, pre)
 		if err != nil {
@@ -322,6 +505,12 @@ func TrainStack[T core.Numeric](s *Stack, gradOut, input, pre *core.Tensor[T], p
 	}
 	mode := parentMode.Resolve(ModeNormalBP)
 	fam := mode.Family()
+	if fam == familyTweenSplit {
+		return trainTweenSplitFamily(s, gradOut, input, lr, mode)
+	}
+	if fam == familyTweenAlt {
+		return trainTweenAltOp(s, gradOut, input, altTimesOf(s.AltTimes), lr)
+	}
 	if !needsMixedStackTrain(s) && (fam == familyBP || fam == familyTweenChain) {
 		_, dW, err := BackwardStack(s, gradOut, input, pre)
 		if err != nil {
@@ -411,6 +600,31 @@ func trainOpReturnGradIn[T core.Numeric](op any, gradOut, input, pre, post *core
 	switch mode.Family() {
 	case familyTween:
 		return trainTweenLocal(op, gradOut, input, post, lr)
+	case familyTweenSplit:
+		if err := trainTweenSplitFamily(op, gradOut, input, lr, mode); err != nil {
+			return nil, err
+		}
+		gIn := core.NewTensor[T](input.Shape...)
+		if gradOut != nil && gIn.Len() == gradOut.Len() {
+			copy(gIn.Data, gradOut.Data)
+		}
+		return gIn, nil
+	case familyTweenAlt:
+		times := 1
+		switch v := op.(type) {
+		case *Stack:
+			times = altTimesOf(v.AltTimes)
+		case *Layer:
+			times = altTimesOf(v.AltTimes)
+		}
+		if err := trainTweenAltOp(op, gradOut, input, times, lr); err != nil {
+			return nil, err
+		}
+		gIn := core.NewTensor[T](input.Shape...)
+		if gradOut != nil && gIn.Len() == gradOut.Len() {
+			copy(gIn.Data, gradOut.Data)
+		}
+		return gIn, nil
 	case familyBP, familyTweenChain:
 		switch v := op.(type) {
 		case *Layer:
@@ -469,44 +683,22 @@ func trainOpReturnGradIn[T core.Numeric](op any, gradOut, input, pre, post *core
 	}
 }
 
-// trainTweenLocal: gap-style update — treat gradOut as a soft target gap on Dense leaves.
+// trainTweenLocal: no chain rule. Project the output gap onto every trainable
+// leaf's real post shape (CNN/LSTM/MHA included) using that leaf's forward input.
 func trainTweenLocal[T core.Numeric](op any, gradOut, input, post *core.Tensor[T], lr float64) (*core.Tensor[T], error) {
-	// Soft nudge: Hebbian-like via Backward with scaled gap, then half LR.
-	softLR := lr * 0.5
-	switch v := op.(type) {
-	case *Layer:
-		// Update each branch with ModeTween so BranchModes still apply; default all tween.
-		return trainTweenParallel(v, gradOut, input, softLR)
-	case *Stack:
-		for i := len(v.Children) - 1; i >= 0; i-- {
-			cm := v.EffectiveChildMode(i, ModeTween)
-			if cm.Family() != familyTween {
-				gIn, err := trainOpReturnGradIn(v.Children[i], gradOut, input, nil, post, cm, lr)
-				if err != nil {
-					return nil, err
-				}
-				gradOut = gIn
-				continue
-			}
-			if err := applyTweenStores(v.Children[i], gradOut, input, softLR); err != nil {
-				return nil, err
-			}
-		}
-		gIn := core.NewTensor[T](input.Shape...)
-		if gradOut != nil && gIn.Len() == gradOut.Len() {
-			copy(gIn.Data, gradOut.Data)
-		}
-		return gIn, nil
-	default:
-		if err := applyTweenStores(op, gradOut, input, softLR); err != nil {
-			return nil, err
-		}
-		gIn := core.NewTensor[T](input.Shape...)
-		if gradOut != nil && gIn.Len() == gradOut.Len() {
-			copy(gIn.Data, gradOut.Data)
-		}
-		return gIn, nil
+	_ = post
+	if input == nil {
+		return nil, fmt.Errorf("parallel: tween nil input")
 	}
+	softLR := lr * 0.5
+	if err := applyProjectedTween(op, gradOut, input, softLR); err != nil {
+		return nil, err
+	}
+	gIn := core.NewTensor[T](input.Shape...)
+	if gradOut != nil && gIn.Len() == gradOut.Len() {
+		copy(gIn.Data, gradOut.Data)
+	}
+	return gIn, nil
 }
 
 func trainTweenParallel[T core.Numeric](l *Layer, gradOut, input *core.Tensor[T], lr float64) (*core.Tensor[T], error) {

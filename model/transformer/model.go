@@ -68,6 +68,8 @@ type Model struct {
 
 	// Exec is the active generate backend (set by ApplyExec).
 	Exec core.ExecConfig
+	// ExecProfileName is the UI/CLI profile (gpu_fuse, gpu_multi_fuse, …).
+	ExecProfileName string
 	// Fused enables packed-quant fused matmul paths (simd_fuse / gpu_fuse).
 	Fused bool
 	// PackFormat is the active fused quant layout (all k-quants / IQ / BitNet).

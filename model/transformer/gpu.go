@@ -80,7 +80,8 @@ func (m *Model) SyncHybridFused() error {
 		return fmt.Errorf("transformer: nil model")
 	}
 	if m.gpu != nil {
-		if _, ok := m.gpu.(*fusedgpu.HybridEngine); ok {
+		switch m.gpu.(type) {
+		case *fusedgpu.HybridEngine, *fusedgpu.HybridVKEngine:
 			return nil
 		}
 		m.CloseGPU()
@@ -104,12 +105,30 @@ func (m *Model) SyncHybridFused() error {
 	runtime.GC()
 	debug.FreeOSMemory()
 
+	// Android default: try native Vulkan first (Dawn barrier bypass). Toggle via
+	// fusedgpu.SetPreferNativeVK / WELVET_NATIVE_VK=0 for WebGPU A/B.
+	if fusedgpu.PreferNativeVK() {
+		if eng, err := fusedgpu.NewHybridVKFromSpec(spec); err == nil {
+			m.gpu = eng
+			fusedgpu.NoteHybridBackend("vk")
+			fusedgpu.NoteVKDeviceName(eng.AdapterName())
+			m.releaseHostPackedWeights()
+			fusedgpu.ALog(fmt.Sprintf("Hybrid native Vulkan ready (%s)", eng.AdapterName()))
+			fmt.Printf("✅ Hybrid native Vulkan ready (%s)\n", eng.AdapterName())
+			return nil
+		} else {
+			fusedgpu.ALog(fmt.Sprintf("native VK unavailable, wgpu fallback: %v", err))
+			fmt.Printf("native VK unavailable, wgpu fallback: %v\n", err)
+		}
+	}
+
 	eng, err := fusedgpu.NewHybridFromSpec(spec)
 	if err != nil {
 		_ = m.ensureHostPackedWeights()
 		return fmt.Errorf("fusedgpu hybrid: %w", err)
 	}
 	m.gpu = eng
+	fusedgpu.NoteHybridBackend("wgpu")
 	m.releaseHostPackedWeights()
 	return nil
 }
@@ -124,6 +143,8 @@ func (m *Model) CloseGPU() {
 		eng.Close()
 	case *fusedgpu.HybridEngine:
 		eng.Close()
+	case *fusedgpu.HybridVKEngine:
+		eng.Close()
 	}
 	m.gpu = nil
 }
@@ -135,6 +156,10 @@ func (m *Model) ContextLimit() int {
 	}
 	switch eng := m.gpu.(type) {
 	case *fusedgpu.HybridEngine:
+		if eng != nil && eng.MaxSeq() > 0 {
+			return eng.MaxSeq()
+		}
+	case *fusedgpu.HybridVKEngine:
 		if eng != nil && eng.MaxSeq() > 0 {
 			return eng.MaxSeq()
 		}
@@ -163,6 +188,10 @@ func (m *Model) ForwardTokensGPU(ids []uint32) ([]float32, error) {
 		if eng != nil {
 			return eng.AppendTokens(ids)
 		}
+	case *fusedgpu.HybridVKEngine:
+		if eng != nil {
+			return eng.AppendTokens(ids)
+		}
 	}
 	return m.forwardTokensHost(ids)
 }
@@ -175,6 +204,10 @@ func (m *Model) GPUAdapterName() string {
 			return eng.AdapterName()
 		}
 	case *fusedgpu.HybridEngine:
+		if eng != nil {
+			return eng.AdapterName()
+		}
+	case *fusedgpu.HybridVKEngine:
 		if eng != nil {
 			return eng.AdapterName()
 		}
@@ -209,6 +242,10 @@ func (m *Model) ResetKV() {
 			_ = eng.Reset()
 		}
 	case *fusedgpu.HybridEngine:
+		if eng != nil {
+			_ = eng.Reset()
+		}
+	case *fusedgpu.HybridVKEngine:
 		if eng != nil {
 			_ = eng.Reset()
 		}
