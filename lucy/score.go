@@ -1,16 +1,19 @@
 // Package lucy is the Lucy mid-stream adaptation measuring harness.
 //
-// SoftAcc / Availability / AdaptPct / Score — shared by test41-w benches,
+// Acc / Availability / Throughput / Score — shared by test41-w benches,
 // tide, and live_mnist. Pure measuring math; no datasets, no train loops.
 //
+//	Hard Acc     = argmax accuracy % (AvgAccuracy)
 //	SoftAcc      = 100 × (1 − |pred−target| / scale)   clamped [0,100]
 //	Availability = InferMs / (InferMs + TrainMs) × 100
-//	Score        = Throughput × Availability × SoftAcc / 10_000
+//	Score        = Throughput × Availability × Acc / 10_000
 //	AdaptPct     = mean SoftAcc in AdaptWindows after each switch marker
-//	ZeroDowntime = SoftAcc × Availability / 100
+//	ZeroDowntime = Acc × Availability / 100
 //
-// Sine SoftAcc uses SoftAccScaleSine (0.10). Classification SoftAcc on p(true)
-// uses SoftAccScaleClass (1.0) so SoftAcc ≈ 100×p(true).
+// Score is live-fit: can the net learn (Acc) while still serving (Thru × Avail).
+// SGD that blocks inference tanks Availability. SoftAcc is serve-confidence
+// only — it is not the Acc term. Sine SoftAcc uses SoftAccScaleSine (0.10).
+// Classification SoftAcc on p(true) uses SoftAccScaleClass (1.0).
 package lucy
 
 import (
@@ -69,8 +72,8 @@ type Snapshot struct {
 	BlockedTrain time.Duration `json:"blocked_train"`
 	Duration     time.Duration `json:"duration"`
 
-	AvgAccuracy float64 `json:"avg_accuracy"` // hard Acc 0–100
-	SoftAcc     float64 `json:"soft_acc"`     // SoftAcc 0–100 — Acc term in Score
+	AvgAccuracy float64 `json:"avg_accuracy"` // hard Acc 0–100 — Acc term in Score
+	SoftAcc     float64 `json:"soft_acc"`     // serve-confidence 0–100 (not Score)
 	AdaptPct    float64 `json:"adapt_pct"`
 	Stability   float64 `json:"stability"`
 	Consistency float64 `json:"consistency"`
@@ -175,18 +178,19 @@ func Availability(inferMs, trainMs float64) float64 {
 	return a
 }
 
-// Score is Throughput × Availability × SoftAcc / 10_000.
-func Score(throughput, availability, softAcc float64) float64 {
-	s := throughput * availability * softAcc / 10000
+// Score is Throughput × Availability × Acc / 10_000.
+// Acc is hard argmax accuracy. SoftAcc is not this term.
+func Score(throughput, availability, acc float64) float64 {
+	s := throughput * availability * acc / 10000
 	if math.IsNaN(s) || math.IsInf(s, 0) {
 		return 0
 	}
 	return s
 }
 
-// ZeroDowntime is SoftAcc × Availability / 100.
-func ZeroDowntime(softAcc, availability float64) float64 {
-	return softAcc * availability / 100
+// ZeroDowntime is Acc × Availability / 100 — still serving while learning.
+func ZeroDowntime(acc, availability float64) float64 {
+	return acc * availability / 100
 }
 
 // AppendWindow adds w and drops the oldest when over MaxRetainedWindows.
@@ -244,6 +248,9 @@ func Finalize(s *Snapshot, opts ...Options) {
 		} else if s.TotalOutputs > 0 {
 			s.AvgAccuracy = 100 * float64(s.TotalCorrect) / float64(s.TotalOutputs)
 		}
+	}
+	if s.AvgAccuracy == 0 && s.TotalOutputs > 0 {
+		s.AvgAccuracy = 100 * float64(s.TotalCorrect) / float64(s.TotalOutputs)
 	}
 
 	nWin := len(s.Windows)
@@ -312,8 +319,8 @@ func Finalize(s *Snapshot, opts ...Options) {
 		}
 	}
 
-	s.Score = Score(s.Throughput, s.Availability, s.SoftAcc)
-	s.ZeroDowntime = ZeroDowntime(s.SoftAcc, s.Availability)
+	s.Score = Score(s.Throughput, s.Availability, s.AvgAccuracy)
+	s.ZeroDowntime = ZeroDowntime(s.AvgAccuracy, s.Availability)
 	s.WeightMiB = float64(s.WeightBytes) / (1024 * 1024)
 	s.HeapMiB = float64(s.HeapBytes) / (1024 * 1024)
 	mb := s.WeightMiB
@@ -323,9 +330,9 @@ func Finalize(s *Snapshot, opts ...Options) {
 	s.MobileScore = s.Score / mb
 	s.MobileThroughput = s.Throughput / mb
 	s.MobileAvailability = s.Availability / mb
-	s.MobileAccuracy = s.SoftAcc / mb
+	s.MobileAccuracy = s.AvgAccuracy / mb
 	if s.Duration > 0 {
-		s.AccPerSec = s.SoftAcc / s.Duration.Seconds()
+		s.AccPerSec = s.AvgAccuracy / s.Duration.Seconds()
 		s.MobileAccPerSec = s.AccPerSec / mb
 	}
 }
