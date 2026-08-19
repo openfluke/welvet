@@ -14,6 +14,9 @@
 // SGD that blocks inference tanks Availability. SoftAcc is serve-confidence
 // only — it is not the Acc term. Sine SoftAcc uses SoftAccScaleSine (0.10).
 // Classification SoftAcc on p(true) uses SoftAccScaleClass (1.0).
+//
+// BuildLPD ranks a board of Samples for consciousness (Acc/Thru/Avail keep)
+// then Lucy density (Q × shrink vs Acc-champ RAM). Traps get LPD 0.
 package lucy
 
 import (
@@ -182,6 +185,15 @@ func Availability(inferMs, trainMs float64) float64 {
 // Acc is hard argmax accuracy. SoftAcc is not this term.
 func Score(throughput, availability, acc float64) float64 {
 	s := throughput * availability * acc / 10000
+	if math.IsNaN(s) || math.IsInf(s, 0) {
+		return 0
+	}
+	return s
+}
+
+// Realtime is Throughput × Availability / 100 — serve+train duty-cycle speed.
+func Realtime(throughput, availability float64) float64 {
+	s := throughput * availability / 100
 	if math.IsNaN(s) || math.IsInf(s, 0) {
 		return 0
 	}

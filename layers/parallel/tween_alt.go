@@ -16,6 +16,14 @@ func altTimesOf(n int) int {
 // trainTweenAltStackMSE: for AltTimes cycles, recompute the MSE gap then
 // TweenSplit, recompute, then Tween. Split → Tween → Split → Tween …
 func trainTweenAltStackMSE[T core.Numeric](s *Stack, input, target *core.Tensor[T], lr float64) (float64, error) {
+	return trainTweenAltStackGap(s, input, target, lr, mseGrad[T])
+}
+
+func trainTweenAltStackCE[T core.Numeric](s *Stack, input, target *core.Tensor[T], lr float64) (float64, error) {
+	return trainTweenAltStackGap(s, input, target, lr, ceGrad[T])
+}
+
+func trainTweenAltStackGap[T core.Numeric](s *Stack, input, target *core.Tensor[T], lr float64, gap outputGap[T]) (float64, error) {
 	times := altTimesOf(s.AltTimes)
 	var last float64
 	for i := 0; i < times; i++ {
@@ -23,7 +31,7 @@ func trainTweenAltStackMSE[T core.Numeric](s *Stack, input, target *core.Tensor[
 		if err != nil {
 			return last, err
 		}
-		loss, gy, err := mseGrad(post, target)
+		loss, gy, err := gap(post, target)
 		if err != nil {
 			return last, err
 		}
@@ -35,7 +43,7 @@ func trainTweenAltStackMSE[T core.Numeric](s *Stack, input, target *core.Tensor[
 		if err != nil {
 			return last, err
 		}
-		loss, gy, err = mseGrad(post, target)
+		loss, gy, err = gap(post, target)
 		if err != nil {
 			return last, err
 		}

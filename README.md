@@ -4,7 +4,7 @@
 
 | | |
 |--|--|
-| **Version** | **v1.0** |
+| **Version** | **v1.0.1** |
 | **Scorecard** | **100 / 100** pts (see [Version scorecard](#version-scorecard)) |
 
 Engine is v1. Apps (`octo`), stubs, and NPU/C++ accel sit **outside** this board — they are sibling / later trees (`welvet.cpp`), not missing Welvet.
@@ -50,7 +50,8 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v1.0.** Scorecard **100/100**. FastProxy (DFA-shaped \(B:=W_{\mathrm{head}}^\top\)) is the last engine credit primitive; NPU/Metal/QNN are not scored here.
+**Status: v1.0.1.** Scorecard still **100/100** (v1.0 board). This patch ships Lucy density
+(`lucy.BuildLPD`) plus `TrainStackCE` (class gap, same credit walk as MSE). NPU/Metal/QNN are not scored here.
 
 | Legend | Meaning | Pts credit |
 |--------|---------|------------|
@@ -64,7 +65,7 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 
 **Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. Patch tags
 (e.g. **v0.95.1**) shipped engine deltas without moving the board. Weights sum to **100**.
-This tag is **v1.0** because the board is full.
+This tag is **v1.0.1** (patch on the full v1.0 board).
 
 | # | Section | Wt | How scored today | Earned |
 |--:|---------|---:|------------------|-------:|
@@ -80,7 +81,7 @@ This tag is **v1.0** because the board is full.
 | 10 | **Peak fused / no host ALU** — fused k/IQ Dot*, MHA attn/RoPE GPU fwd+bwd, LN/SwiGLU/Softmax/Embedding/RNN/LSTM/CNN tiled GPU, Softmax SIMD; `fusedgpu` decoder fuse | 14 | all ✅ | **14.0** |
 | | **Total → v1.0** | **100** | | **100.0** |
 
-**v1.0 readout:** engine credit + MatVec + volumetric step + GPU fuse are in. **Not on this board:** `apps/octo` (sibling shell), `stub/*` (future), **NPU / Metal / QNN** (3rd-party C++; later `welvet.cpp`, not a Welvet Go score). Nested Sequential/Residual mixed children and Parallel `ResidualGraft` are in. FastProxy can match/beat StepBP **Acc** on sine/copy toys; Sparse wins Lucy **Score** via Avail. Do not write “Sparse is better backprop.”
+**v1.0 readout:** engine credit + MatVec + volumetric step + GPU fuse are in. **v1.0.1 patch:** `lucy.BuildLPD` (consciousness Q + Lucy density + gold/trap bands) so hosts do not copy tide; `TrainStackCE` (softmax−one-hot, then the same TrainStack walk as MSE). **Not on this board:** `apps/octo` (sibling shell), `stub/*` (future), **NPU / Metal / QNN** (3rd-party C++; later `welvet.cpp`, not a Welvet Go score). Nested Sequential/Residual mixed children and Parallel `ResidualGraft` are in. FastProxy can match/beat StepBP **Acc** on sine/copy toys; Sparse wins Lucy **Score** via Avail. Do not write “Sparse is better backprop.”
 
 Detail tables below still list per-feature ✅/🚧/⬜; they feed honesty, but **only this scorecard sets the version number**.
 
@@ -154,7 +155,7 @@ cd w2a && go test ./tests/parallel -run 'Credit|AllCredit|AllStack|Combine|HemiN
 4. **No QAT** — `DType` + `QuantFormat` are storage truth.
 5. **Train keeps storage truth** — `weights.ApplySGD` updates FormatNone in native lanes (or unpack→update→re-Pack for packed formats). No retained float32 master beside storage (`RetainsF32Master` only for FormatNone+float32).
 6. **One poly feature → one folder.**
-7. **v1.0 = scorecard 100/100** (this tag). Apps, stubs, and NPU are not scored.
+7. **v1.0 = scorecard 100/100** (this board). Patch tags (v1.0.1, …) add measuring/API without moving the board. Apps, stubs, and NPU are not scored.
 
 ---
 
@@ -327,11 +328,21 @@ Row **Wt** is the share of that package inside its scorecard section (not additi
 | `runtime/backward/` | Reverse tape; same layer set | 2 | ✅ |
 | `runtime/training/` | MSE + SGD; ApplyGradSGD → store ApplySGD for same layer set; storage-truth train | 1 | ✅ |
 | `runtime/step/` | Discrete-time volumetric step mesh — Forward/Backward/ApplyTween/StepMesh; Cross-Numeric Train (kinds × weight dtype × act host) | 1 | ✅ |
-| `lucy/` | Live Acc / SoftAcc / Avail / AdaptPct / Score (tide / test41 board) | — | ✅ |
+| `lucy/` | Live Acc / SoftAcc / Avail / Score + `BuildLPD` density board (consciousness radar, LPD, gold/trap) | — | ✅ |
+
+New hosts should import `github.com/openfluke/welvet/lucy` and call `Finalize` + `BuildLPD`. Tide dash/PDF only *display* that board. Score uses **hard Acc**, not SoftAcc.
+
+```
+Score = Throughput × Availability × Acc / 10_000
+Q     = geomean(RelAcc, RelThru, RelAvail) vs learner peaks
+LPD   = Q × shrink vs Acc-champ RAM   (0 unless RelAcc ≥ 70%)
+```
+
+Consciousness radar = Acc/Thru/Avail keep. Memory density radar = those × shrink (traps at origin). See `lucy/README.md`.
 
 ### Training credit — scorecard §9 (8 pts)
 
-Sandwich `TrainStackMSE` / `OpenSplitTape`. Step\* and non-Step of the same family share one update on Stack (no Grid). Mesh\* needs volumetric placement.
+Sandwich `TrainStackMSE` / `TrainStackCE` / `OpenSplitTape`. Step\* and non-Step of the same family share one update on Stack (no Grid). Mesh\* needs volumetric placement. Classification hosts call **CE** (softmax − one-hot); regression hosts keep MSE. Credit modes are the same walk.
 
 | Mode | Credit | Status |
 |------|--------|:------:|

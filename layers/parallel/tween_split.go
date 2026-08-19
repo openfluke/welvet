@@ -209,10 +209,17 @@ func OpenSplitTape[T core.Numeric](op any, input *core.Tensor[T]) (*SplitTape[T]
 }
 
 func (t *SplitTape[T]) Train(target *core.Tensor[T], mode TrainMode, lr float64) (float64, error) {
+	return t.TrainGap(target, mode, lr, mseGrad[T])
+}
+
+func (t *SplitTape[T]) TrainGap(target *core.Tensor[T], mode TrainMode, lr float64, gap outputGap[T]) (float64, error) {
 	if t == nil || t.host == nil || t.Post == nil {
 		return 0, fmt.Errorf("parallel: SplitTape.Train nil")
 	}
-	loss, gy, err := mseGrad(t.Post, target)
+	if gap == nil {
+		gap = mseGrad[T]
+	}
+	loss, gy, err := gap(t.Post, target)
 	if err != nil {
 		return 0, err
 	}

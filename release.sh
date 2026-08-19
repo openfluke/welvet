@@ -70,7 +70,7 @@ if m:
     earned = float(m.group(1))
 
 if earned is None and ver:
-    if ver == "v1.0":
+    if ver == "v1.0" or ver.startswith("v1.0."):
         earned = 100.0
     elif ver.startswith("v0."):
         # v0.95 / v0.95.1 → scorecard major from first component after v0.
