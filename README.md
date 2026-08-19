@@ -343,7 +343,7 @@ Consciousness radar = Acc/Thru/Avail keep. Memory density radar = those × shrin
 
 ### Training credit — scorecard §9 (8 pts)
 
-Sandwich `TrainStackMSE` / `TrainStackCE` / `OpenSplitTape`. Step\* and non-Step of the same family share one update on Stack (no Grid). Mesh\* needs volumetric placement. Classification hosts call **CE** (softmax − one-hot); regression hosts keep MSE. Credit modes are the same walk.
+Sandwich `TrainStackMSE` / `TrainStackCE` / `OpenSplitTape`. Step\* and non-Step of the same family share one update on Stack (no Grid). Step\* is the 1D systolic pipe (`IsLineStep` / `TrainLine`; fill ticks do not update). Mesh\* needs volumetric placement. Classification hosts call **CE** (softmax − one-hot); regression hosts keep MSE. Credit modes are the same walk. Tables use `ShortTrainMode` (`[T]` Tween, `[S]` Split, `[FP]` FastProxy, `[L]` Linear, `[HP]` HeadProxy); persistence still uses `String()`.
 
 | Mode | Credit | Status |
 |------|--------|:------:|
@@ -352,17 +352,17 @@ Sandwich `TrainStackMSE` / `TrainStackCE` / `OpenSplitTape`. Step\* and non-Step
 | `TweenChain` / `StepTweenChain` / `MeshTweenChain` | Chain rule (= BP on Stack) | ✅ |
 | `TweenSplit` / `StepTweenSplit` | \(g_i=\frac1N P(g_y)\) | ✅ |
 | `TweenAlt` / `StepTweenAlt` | Split then Tween, `AltTimes` | ✅ |
-| `TweenSplitHeadProxy` | Head \(J^\top g_y\); hidden `dW` only | ✅ |
-| `TweenSplitLinear` | Affine \(W^\top\) walk, skip act′ | ✅ |
-| `TweenSplitFastProxy` | \(g_{\mathrm{proxy}}=W_{\mathrm{head}}^\top g_y\) (no act′); hidden `dW` only | ✅ |
-| `TweenSplitHeadProxyAsync` | Hidden uses proxy from sample \(T-1\) | ✅ |
-| `TweenSplitSparse` | Head + one rotating hidden leaf | ✅ |
-| `TweenSplitLinearCache` | Cached Linear walk (dead on sine freq switch; kept for A/B) | ✅ |
+| `TweenSplitHeadProxy` / `StepTweenSplitHeadProxy` | Head \(J^\top g_y\); hidden `dW` only | ✅ |
+| `TweenSplitLinear` / `StepTweenSplitLinear` | Affine \(W^\top\) walk, skip act′ | ✅ |
+| `TweenSplitFastProxy` / `StepTweenSplitFastProxy` | \(g_{\mathrm{proxy}}=W_{\mathrm{head}}^\top g_y\) (no act′); hidden `dW` only | ✅ |
+| `TweenSplitHeadProxyAsync` / `StepTweenSplitHeadProxyAsync` | Hidden uses proxy from sample \(T-1\) | ✅ |
+| `TweenSplitSparse` / `StepTweenSplitSparse` | Head + one rotating hidden leaf | ✅ |
+| `TweenSplitLinearCache` / `StepTweenSplitLinearCache` | Cached Linear walk (dead on sine freq switch; kept for A/B) | ✅ |
 | `MeshTweenSplit` / `MeshTweenAlt` / `MeshTweenSplitFastProxy` / `MeshTweenSplitSparse` | Grid-scheduled Split/Alt (family collapse on Stack) | ✅ |
 | Cameral `BranchModes` / `HemispheresFrom` / `CombineAdd` | n=1 one mid Op; n=2/3 Bi/Tri | ✅ |
 | Dense `LinearGradIn` / `GradWOnly` | SIMD \(W^\top\) and `dW`-only kernels | ✅ |
 | Cameral `.entity` | `WriteCameralFile` / `LoadCameral` (modes + weights) | ✅ |
-| **test49** | All 23 named modes × 1³/2³/3³ origin smoke (one live cell; rest disabled) × Parallel + Bicameral + poly kinds (`w2a` `Test49AllTrainModesCubes`) | ✅ |
+| **test49** | All 29 named modes × 1³/2³/3³ origin smoke (one live cell; rest disabled) × Parallel + Bicameral + poly kinds (`w2a` `Test49AllTrainModesCubes`) | ✅ |
 
 Rivaling backprop = matched **hard Acc** vs StepBP, not Lucy Score. Sparse Score is Avail (skip-GEMV). FastProxy is the Acc rival on sine/copy toys.
 
