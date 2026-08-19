@@ -28,6 +28,9 @@ func trainStackGap[T core.Numeric](s *Stack, input, target *core.Tensor[T], mode
 	if s == nil || input == nil || target == nil {
 		return 0, fmt.Errorf("parallel: TrainStack nil")
 	}
+	if mode.IsLineStep() {
+		return trainStackLine(s, input, target, mode, lr, gap)
+	}
 	if mode.Resolve(ModeNormalBP).Family() == familyTweenAlt {
 		return alt(s, input, target, lr)
 	}

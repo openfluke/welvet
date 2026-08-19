@@ -26,6 +26,7 @@ type Stack struct {
 	ChildModes []TrainMode // optional per-child mode; empty ⇒ inherit parent
 	AltTimes   int         // TweenAlt: Split→Tween pairs per update (0 ⇒ 1)
 	accel      splitAccel  // LinearCache / HeadProxyAsync / Sparse
+	line       any         // *Line[T] for Step* systolic train
 }
 
 // NewStack builds a Stack from ordered Ops. Each child keeps its own

@@ -231,17 +231,17 @@ func trainTweenSplitLeaves[T core.Numeric](op any, leaves []tweenLeaf[T], gy *co
 		return nil
 	}
 	switch mode.Resolve(ModeNormalBP) {
-	case ModeTweenSplitHeadProxy:
+	case ModeTweenSplitHeadProxy, ModeStepTweenSplitHeadProxy:
 		return trainTweenSplitHeadProxyLeaves(op, leaves, gy, lr)
-	case ModeTweenSplitLinear:
+	case ModeTweenSplitLinear, ModeStepTweenSplitLinear:
 		return trainTweenSplitLinearLeaves(op, leaves, gy, lr, false)
-	case ModeTweenSplitFastProxy, ModeMeshTweenSplitFastProxy:
+	case ModeTweenSplitFastProxy, ModeMeshTweenSplitFastProxy, ModeStepTweenSplitFastProxy:
 		return trainTweenSplitFastProxyLeaves(op, leaves, gy, lr)
-	case ModeTweenSplitLinearCache:
+	case ModeTweenSplitLinearCache, ModeStepTweenSplitLinearCache:
 		return trainTweenSplitLinearLeaves(op, leaves, gy, lr, true)
-	case ModeTweenSplitHeadProxyAsync:
+	case ModeTweenSplitHeadProxyAsync, ModeStepTweenSplitHeadProxyAsync:
 		return trainTweenSplitHeadProxyAsyncLeaves(op, leaves, gy, lr)
-	case ModeTweenSplitSparse, ModeMeshTweenSplitSparse:
+	case ModeTweenSplitSparse, ModeMeshTweenSplitSparse, ModeStepTweenSplitSparse:
 		return trainTweenSplitSparseLeaves(op, leaves, gy, lr)
 	default:
 		return applySplitEven(leaves, gy, lr)
@@ -287,6 +287,9 @@ func collectTweenLeaves[T core.Numeric](op any, input *core.Tensor[T], leaves *[
 	switch v := op.(type) {
 	case *View:
 		_, post, err := ForwardView(v, input)
+		return post, err
+	case *Flatten:
+		_, post, err := ForwardFlatten(v, input)
 		return post, err
 	case *Stack:
 		if v == nil {

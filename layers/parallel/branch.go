@@ -37,6 +37,9 @@ func branchForward[T core.Numeric](op any, input, flat *core.Tensor[T]) (pre, po
 	if v, ok := op.(*View); ok {
 		return ForwardView(v, input)
 	}
+	if v, ok := op.(*Flatten); ok {
+		return ForwardFlatten(v, input)
+	}
 	switch v := op.(type) {
 	case *dense.Layer:
 		in := input
@@ -102,6 +105,9 @@ func branchBackward[T core.Numeric](op any, gradOut, input, flat, pre *core.Tens
 	if v, ok := op.(*View); ok {
 		return BackwardView(v, gradOut, input, pre)
 	}
+	if v, ok := op.(*Flatten); ok {
+		return BackwardFlatten(v, gradOut, input, pre)
+	}
 	switch v := op.(type) {
 	case *dense.Layer:
 		in := input
@@ -164,6 +170,9 @@ func branchPack(op any, format quant.Format) error {
 	if v, ok := op.(*View); ok {
 		return v.Pack(format)
 	}
+	if v, ok := op.(*Flatten); ok {
+		return v.Pack(format)
+	}
 	switch v := op.(type) {
 	case *dense.Layer:
 		return v.Pack(format)
@@ -220,6 +229,9 @@ func branchPack(op any, format quant.Format) error {
 
 func branchSetDType(op any, dt core.DType) error {
 	if v, ok := op.(*View); ok {
+		return v.SetDType(dt)
+	}
+	if v, ok := op.(*Flatten); ok {
 		return v.SetDType(dt)
 	}
 	switch v := op.(type) {
@@ -281,6 +293,9 @@ func branchGradWSize(op any) int {
 	if v, ok := op.(*View); ok {
 		return v.GradWSize()
 	}
+	if v, ok := op.(*Flatten); ok {
+		return v.GradWSize()
+	}
 	switch v := op.(type) {
 	case *dense.Layer:
 		return v.GradWSize()
@@ -339,6 +354,9 @@ func branchApplyGradSGD[T core.Numeric](op any, dW *core.Tensor[T], lr float64) 
 	if _, ok := op.(*View); ok {
 		return nil
 	}
+	if _, ok := op.(*Flatten); ok {
+		return nil
+	}
 	switch v := op.(type) {
 	case *dense.Layer:
 		return dense.ApplyGradSGD(v, dW, lr)
@@ -395,6 +413,9 @@ func branchApplyGradSGD[T core.Numeric](op any, dW *core.Tensor[T], lr float64) 
 
 func branchSyncExec(op any, exec core.ExecConfig) {
 	if _, ok := op.(*View); ok {
+		return
+	}
+	if _, ok := op.(*Flatten); ok {
 		return
 	}
 	switch v := op.(type) {

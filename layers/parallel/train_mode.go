@@ -15,17 +15,16 @@ import (
 //	Tween / StepTween / MeshTween  — local / gap tween, no chain rule (FamilyTween)
 //	TweenChain / StepTweenChain / MeshTweenChain — chain-rule updates (FamilyTweenChain)
 //	TweenSplit / StepTweenSplit    — one output gap, split across every trainable leaf (FamilyTweenSplit)
-//	TweenSplitHeadProxy            — head full J^T g_y, hidden 1/(N-1) P(gx_head)
-//	TweenSplitLinear               — 1/N P(W̃^T g_y), skip act' on the walk
-//	TweenSplitFastProxy            — SIMD W_head^T g_y (no act'), hidden 1/(N-1) Split, all dW-only
-//	TweenSplitLinearCache          — Linear walk cached every CacheEvery (default 20)
-//	TweenSplitHeadProxyAsync       — hidden use proxy from sample T-1; head computes T
-//	TweenSplitSparse               — head + one rotating hidden leaf per sample
+//	TweenSplitHeadProxy / StepTweenSplitHeadProxy — head full J^T g_y, hidden 1/(N-1) P(gx_head)
+//	TweenSplitLinear / StepTweenSplitLinear — 1/N P(W̃^T g_y), skip act' on the walk
+//	TweenSplitFastProxy / StepTweenSplitFastProxy / MeshTweenSplitFastProxy
+//	TweenSplitLinearCache / StepTweenSplitLinearCache
+//	TweenSplitHeadProxyAsync / StepTweenSplitHeadProxyAsync
+//	TweenSplitSparse / StepTweenSplitSparse / MeshTweenSplitSparse
 //	TweenAlt / StepTweenAlt        — Split then Tween, repeat AltTimes (FamilyTweenAlt)
 //	Inherit                        — use the parent mode (BranchModes / ChildModes only)
 //
-// Step* vs Normal* is scheduling (online vs batched); Mesh* is volumetric forward.
-// On Stack/Parallel BranchModes (no Grid), Step/Mesh collapse to their Family update.
+// On Stack, Step* is a 1D pipe (see Line / TrainLine). Mesh* still needs a Grid.
 type TrainMode uint8
 
 const (
@@ -53,6 +52,12 @@ const (
 	ModeMeshTweenAlt
 	ModeMeshTweenSplitFastProxy
 	ModeMeshTweenSplitSparse
+	ModeStepTweenSplitHeadProxy
+	ModeStepTweenSplitLinear
+	ModeStepTweenSplitFastProxy
+	ModeStepTweenSplitLinearCache
+	ModeStepTweenSplitHeadProxyAsync
+	ModeStepTweenSplitSparse
 )
 
 // ModeSGD is the legacy alias for ModeNormalBP.
@@ -94,6 +99,9 @@ func AllTrainModes() []TrainMode {
 		ModeTweenSplitHeadProxyAsync, ModeTweenSplitSparse,
 		ModeMeshTweenSplit, ModeMeshTweenAlt,
 		ModeMeshTweenSplitFastProxy, ModeMeshTweenSplitSparse,
+		ModeStepTweenSplitHeadProxy, ModeStepTweenSplitLinear,
+		ModeStepTweenSplitFastProxy, ModeStepTweenSplitLinearCache,
+		ModeStepTweenSplitHeadProxyAsync, ModeStepTweenSplitSparse,
 	}
 }
 
@@ -106,6 +114,9 @@ func AllCreditTrainModes() []TrainMode {
 		ModeTweenSplitHeadProxy, ModeTweenSplitLinear,
 		ModeTweenSplitFastProxy, ModeTweenSplitLinearCache,
 		ModeTweenSplitHeadProxyAsync, ModeTweenSplitSparse,
+		ModeStepTweenSplitHeadProxy, ModeStepTweenSplitLinear,
+		ModeStepTweenSplitFastProxy, ModeStepTweenSplitLinearCache,
+		ModeStepTweenSplitHeadProxyAsync, ModeStepTweenSplitSparse,
 	}
 }
 
@@ -183,6 +194,18 @@ func ParseTrainMode(s string) (TrainMode, error) {
 		return ModeMeshTweenSplitSparse, nil
 	case "meshalt":
 		return ModeMeshTweenAlt, nil
+	case "stepheadproxy", "steptweensplitheadproxy":
+		return ModeStepTweenSplitHeadProxy, nil
+	case "steplinear", "steptweensplitlinear":
+		return ModeStepTweenSplitLinear, nil
+	case "stepfastproxy", "stepfast", "steptweensplitfastproxy":
+		return ModeStepTweenSplitFastProxy, nil
+	case "steplinearcache", "steptweensplitlinearcache":
+		return ModeStepTweenSplitLinearCache, nil
+	case "stepheadproxyasync", "stepasyncproxy", "steptweensplitheadproxyasync":
+		return ModeStepTweenSplitHeadProxyAsync, nil
+	case "stepsparse", "steptweensplitsparse":
+		return ModeStepTweenSplitSparse, nil
 	default:
 		return ModeInherit, fmt.Errorf("parallel: unknown train mode %q", s)
 	}
@@ -238,6 +261,18 @@ func (m TrainMode) String() string {
 		return "MeshTweenSplitFastProxy"
 	case ModeMeshTweenSplitSparse:
 		return "MeshTweenSplitSparse"
+	case ModeStepTweenSplitHeadProxy:
+		return "StepTweenSplitHeadProxy"
+	case ModeStepTweenSplitLinear:
+		return "StepTweenSplitLinear"
+	case ModeStepTweenSplitFastProxy:
+		return "StepTweenSplitFastProxy"
+	case ModeStepTweenSplitLinearCache:
+		return "StepTweenSplitLinearCache"
+	case ModeStepTweenSplitHeadProxyAsync:
+		return "StepTweenSplitHeadProxyAsync"
+	case ModeStepTweenSplitSparse:
+		return "StepTweenSplitSparse"
 	default:
 		return fmt.Sprintf("TrainMode(%d)", m)
 	}
@@ -254,7 +289,10 @@ func (m TrainMode) Family() trainFamily {
 		ModeTweenSplitHeadProxy, ModeTweenSplitLinear,
 		ModeTweenSplitFastProxy, ModeTweenSplitLinearCache,
 		ModeTweenSplitHeadProxyAsync, ModeTweenSplitSparse,
-		ModeMeshTweenSplitFastProxy, ModeMeshTweenSplitSparse:
+		ModeMeshTweenSplitFastProxy, ModeMeshTweenSplitSparse,
+		ModeStepTweenSplitHeadProxy, ModeStepTweenSplitLinear,
+		ModeStepTweenSplitFastProxy, ModeStepTweenSplitLinearCache,
+		ModeStepTweenSplitHeadProxyAsync, ModeStepTweenSplitSparse:
 		return familyTweenSplit
 	case ModeTweenAlt, ModeStepTweenAlt, ModeMeshTweenAlt:
 		return familyTweenAlt
