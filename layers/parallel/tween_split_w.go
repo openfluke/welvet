@@ -38,6 +38,22 @@ func accelOf(op any) *splitAccel {
 	}
 }
 
+// ClearSplitAccel drops LinearCache / HeadProxy / Sparse scratch so a NaN
+// recovery (or weight reinject) does not keep feeding poison into the next step.
+func (s *Stack) ClearSplitAccel() {
+	if s == nil {
+		return
+	}
+	s.accel = splitAccel{CacheEvery: s.accel.CacheEvery}
+}
+
+func (l *Layer) ClearSplitAccel() {
+	if l == nil {
+		return
+	}
+	l.accel = splitAccel{CacheEvery: l.accel.CacheEvery}
+}
+
 func trainTweenSplitHeadProxyLeaves[T core.Numeric](_ any, leaves []tweenLeaf[T], gy *core.Tensor[T], lr float64) error {
 	n := len(leaves)
 	if n == 0 {
