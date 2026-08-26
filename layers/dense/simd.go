@@ -79,6 +79,7 @@ func ForwardSIMD[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 func forwardSIMDByWire[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
 	switch l.Weights.DType {
 	case core.DTypeInt4, core.DTypeInt2, core.DTypeTernary, core.DTypeBinary:
+		// Native int codes + act-quantize → DotI8Tile (exact for these storage schemes).
 		return forwardSIMDNarrowI8(l, x, y, batch, in, out)
 	case core.DTypeUint4, core.DTypeUint2, core.DTypeUint16, core.DTypeUint32, core.DTypeUint64,
 		core.DTypeUint, core.DTypeUintptr, core.DTypeUint3, core.DTypeUint5, core.DTypeUint6:
@@ -86,11 +87,12 @@ func forwardSIMDByWire[T core.Numeric](l *Layer, x, y []T, batch, in, out int) e
 	case core.DTypeFloat16, core.DTypeBFloat16, core.DTypeFP8E4M3, core.DTypeFP8E5M2,
 		core.DTypeFP4:
 		return forwardSIMDLowpPacked(l, x, y, batch, in, out)
-	case core.DTypeNF4, core.DTypeFP6,
-		core.DTypeInt3, core.DTypeInt5, core.DTypeInt6,
-		core.DTypeInt16, core.DTypeInt32, core.DTypeInt64, core.DTypeInt,
+	case core.DTypeNF4, core.DTypeFP6, core.DTypeInt3, core.DTypeInt5, core.DTypeInt6:
+		// Bit-packed signed ints: expand native→f32 once + DotTile (exact; no act-quantize).
+		return forwardSIMDExpandF32(l, x, y, batch, in, out)
+	case core.DTypeInt16, core.DTypeInt32, core.DTypeInt64, core.DTypeInt,
 		core.DTypeComplex64, core.DTypeComplex128, core.DTypeFloat64:
-		// Stream DecodeRow(F64) → DotTile(F64) — no WireF64 full-matrix cache.
+		// WireF64 cache + DotTileF64 AVX2 (Plan 9).
 		return forwardSIMDStreamF64(l, x, y, batch, in, out)
 	}
 	switch weights.SelectWire(l.Weights) {
@@ -99,7 +101,6 @@ func forwardSIMDByWire[T core.Numeric](l *Layer, x, y []T, batch, in, out int) e
 	case weights.WireU8:
 		return forwardSIMDUint8(l, x, y, batch, in, out)
 	case weights.WireF32:
-		// Float32 Master or DecodeRow stream — never GPUWireF32 cache.
 		if l.Weights.DType == core.DTypeFloat32 {
 			return forwardSIMDMasterF32(l, x, y, batch, in, out)
 		}
@@ -109,24 +110,54 @@ func forwardSIMDByWire[T core.Numeric](l *Layer, x, y []T, batch, in, out int) e
 	}
 }
 
-// forwardSIMDUintAffine — DecodeRow stream + DotTile for unsigned affine dtypes.
+// forwardSIMDUintAffine — expand native→f32 once, then DotTile per row (no per-batch DecodeRow).
 func forwardSIMDUintAffine[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
-	wRow := make([]float32, in)
+	wAll, err := expandStoreF32(l.Weights)
+	if err != nil {
+		return err
+	}
 	for b := 0; b < batch; b++ {
 		xRow := core.SliceAsFloat32(x[b*in : (b+1)*in])
-		yRow := make([]float32, out)
-		for o := 0; o < out; o++ {
-			if err := weights.DecodeRow(l.Weights, o, wRow); err != nil {
-				return err
+		writeGemvF32(y[b*out:(b+1)*out], out, func(dst []float32) {
+			for o := 0; o < out; o++ {
+				dst[o] = float32(simd.DotTile(xRow, wAll[o*in:(o+1)*in], 0, in, 0))
 			}
-			yRow[o] = float32(simd.DotTile(xRow, wRow, 0, in, 0))
-		}
-		core.SliceFromFloat32(yRow, y[b*out:(b+1)*out])
+		})
 	}
 	return nil
 }
 
-// forwardSIMDNarrowI8 expands Int4/Int2/Ternary/Binary FormatNone into int8 + DotI8Tile.
+// forwardSIMDExpandF32 — NF4/FP6/Int3/5/6: DecodeRow expand once → DotTile.
+func forwardSIMDExpandF32[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
+	wAll, err := expandStoreF32(l.Weights)
+	if err != nil {
+		return err
+	}
+	for b := 0; b < batch; b++ {
+		xRow := core.SliceAsFloat32(x[b*in : (b+1)*in])
+		writeGemvF32(y[b*out:(b+1)*out], out, func(dst []float32) {
+			for o := 0; o < out; o++ {
+				dst[o] = float32(simd.DotTile(xRow, wAll[o*in:(o+1)*in], 0, in, 0))
+			}
+		})
+	}
+	return nil
+}
+
+func expandStoreF32(s *weights.Store) ([]float32, error) {
+	n := s.Rows * s.Cols
+	out := make([]float32, n)
+	row := make([]float32, s.Cols)
+	for r := 0; r < s.Rows; r++ {
+		if err := weights.DecodeRow(s, r, row); err != nil {
+			return nil, err
+		}
+		copy(out[r*s.Cols:], row)
+	}
+	return out, nil
+}
+
+// forwardSIMDNarrowI8 expands Int4/2/Ternary/Binary into int8 + DotI8Tile.
 func forwardSIMDNarrowI8[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
 	wI8, scale, ok := expandNarrowToI8(l.Weights, out*in)
 	if !ok {
@@ -136,12 +167,12 @@ func forwardSIMDNarrowI8[T core.Numeric](l *Layer, x, y []T, batch, in, out int)
 	for b := 0; b < batch; b++ {
 		xF := core.SliceAsFloat32(x[b*in : (b+1)*in])
 		actScale := quantizeActsI8(xF, xq)
-		yF := make([]float32, out)
-		for o := 0; o < out; o++ {
-			acc := simd.DotI8Tile(xq, wI8, 0, o*in, in, 0)
-			yF[o] = float32(acc) * actScale * scale
-		}
-		core.SliceFromFloat32(yF, y[b*out:(b+1)*out])
+		writeGemvF32(y[b*out:(b+1)*out], out, func(dst []float32) {
+			for o := 0; o < out; o++ {
+				acc := simd.DotI8Tile(xq, wI8, 0, o*in, in, 0)
+				dst[o] = float32(acc) * actScale * scale
+			}
+		})
 	}
 	return nil
 }
@@ -205,11 +236,11 @@ func forwardSIMDMasterF32[T core.Numeric](l *Layer, x, y []T, batch, in, out int
 	}
 	for b := 0; b < batch; b++ {
 		xRow := core.SliceAsFloat32(x[b*in : (b+1)*in])
-		yRow := make([]float32, out)
-		for o := 0; o < out; o++ {
-			yRow[o] = float32(simd.DotTile(xRow, w[o*in:(o+1)*in], 0, in, 0))
-		}
-		core.SliceFromFloat32(yRow, y[b*out:(b+1)*out])
+		writeGemvF32(y[b*out:(b+1)*out], out, func(dst []float32) {
+			for o := 0; o < out; o++ {
+				dst[o] = float32(simd.DotTile(xRow, w[o*in:(o+1)*in], 0, in, 0))
+			}
+		})
 	}
 	return nil
 }
@@ -219,36 +250,46 @@ func forwardSIMDStreamF32[T core.Numeric](l *Layer, x, y []T, batch, in, out int
 	wRow := make([]float32, in)
 	for b := 0; b < batch; b++ {
 		xRow := core.SliceAsFloat32(x[b*in : (b+1)*in])
-		yRow := make([]float32, out)
-		for o := 0; o < out; o++ {
-			if err := weights.DecodeRow(l.Weights, o, wRow); err != nil {
-				return err
+		var rowErr error
+		writeGemvF32(y[b*out:(b+1)*out], out, func(dst []float32) {
+			for o := 0; o < out; o++ {
+				if rowErr = weights.DecodeRow(l.Weights, o, wRow); rowErr != nil {
+					return
+				}
+				dst[o] = float32(simd.DotTile(xRow, wRow, 0, in, 0))
 			}
-			yRow[o] = float32(simd.DotTile(xRow, wRow, 0, in, 0))
+		})
+		if rowErr != nil {
+			return rowErr
 		}
-		core.SliceFromFloat32(yRow, y[b*out:(b+1)*out])
 	}
 	return nil
 }
 
-// forwardSIMDStreamF64 — DecodeRowF64 per row (no WireF64 cache) + DotTileF64.
+// forwardSIMDStreamF64 — WireF64 cache + DotTileF64 (AVX2 Plan 9 on amd64).
 func forwardSIMDStreamF64[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
-	wRow := make([]float64, in)
+	wAll, err := l.Weights.WireF64()
+	if err != nil {
+		return err
+	}
 	for b := 0; b < batch; b++ {
 		xRow := core.SliceAsFloat64(x[b*in : (b+1)*in])
-		yRow := make([]float64, out)
-		for o := 0; o < out; o++ {
-			if err := weights.DecodeRowF64(l.Weights, o, wRow); err != nil {
-				return err
+		if yF64, ok := any(y[b*out : (b+1)*out]).([]float64); ok {
+			for o := 0; o < out; o++ {
+				yF64[o] = simd.DotTileF64(xRow, wAll[o*in:(o+1)*in], 0, in, 0)
 			}
-			yRow[o] = simd.DotTileF64(xRow, wRow, 0, in, 0)
+			continue
 		}
-		core.SliceFromFloat64(yRow, y[b*out:(b+1)*out])
+		tmp := make([]float64, out)
+		for o := 0; o < out; o++ {
+			tmp[o] = simd.DotTileF64(xRow, wAll[o*in:(o+1)*in], 0, in, 0)
+		}
+		core.SliceFromFloat64(tmp, y[b*out:(b+1)*out])
 	}
 	return nil
 }
 
-// forwardSIMDLowpPacked — Float16/BF16/FP8/FP4 from native bytes; HW DotTile MAC, no Wire cache.
+// forwardSIMDLowpPacked — Float16/BF16/FP8/FP4 from native bytes; HW DotTile MAC.
 func forwardSIMDLowpPacked[T core.Numeric](l *Layer, x, y []T, batch, in, out int) error {
 	raw := l.Weights.Native
 	if len(raw) == 0 {
@@ -257,27 +298,27 @@ func forwardSIMDLowpPacked[T core.Numeric](l *Layer, x, y []T, batch, in, out in
 	dt := l.Weights.DType
 	for b := 0; b < batch; b++ {
 		xRow := core.SliceAsFloat32(x[b*in : (b+1)*in])
-		yRow := make([]float32, out)
-		for o := 0; o < out; o++ {
-			i0 := o * in
-			var sum float64
-			switch dt {
-			case core.DTypeFloat16:
-				sum = simd.DotF16Packed(xRow, raw, i0, in, 0)
-			case core.DTypeBFloat16:
-				sum = simd.DotBF16Packed(xRow, raw, i0, in, 0)
-			case core.DTypeFP8E4M3:
-				sum = simd.DotFP8Packed(xRow, raw, i0, in, 0, 0)
-			case core.DTypeFP8E5M2:
-				sum = simd.DotFP8Packed(xRow, raw, i0, in, 1, 0)
-			case core.DTypeFP4:
-				sum = simd.DotFP4Packed(xRow, raw, i0, in, 0)
-			default:
-				return fmt.Errorf("dense: SIMD lowp unexpected %s", dt)
+		writeGemvF32(y[b*out:(b+1)*out], out, func(dst []float32) {
+			for o := 0; o < out; o++ {
+				i0 := o * in
+				var sum float64
+				switch dt {
+				case core.DTypeFloat16:
+					sum = simd.DotF16Packed(xRow, raw, i0, in, 0)
+				case core.DTypeBFloat16:
+					sum = simd.DotBF16Packed(xRow, raw, i0, in, 0)
+				case core.DTypeFP8E4M3:
+					sum = simd.DotFP8Packed(xRow, raw, i0, in, 0, 0)
+				case core.DTypeFP8E5M2:
+					sum = simd.DotFP8Packed(xRow, raw, i0, in, 1, 0)
+				case core.DTypeFP4:
+					sum = simd.DotFP4Packed(xRow, raw, i0, in, 0)
+				default:
+					sum = 0
+				}
+				dst[o] = float32(sum)
 			}
-			yRow[o] = float32(sum)
-		}
-		core.SliceFromFloat32(yRow, y[b*out:(b+1)*out])
+		})
 	}
 	return nil
 }
@@ -313,12 +354,12 @@ func forwardSIMDInt8[T core.Numeric](l *Layer, x, y []T, batch, in, out int) err
 	for b := 0; b < batch; b++ {
 		xF := core.SliceAsFloat32(x[b*in : (b+1)*in])
 		actScale := quantizeActsI8(xF, xq)
-		yF := make([]float32, out)
-		for o := 0; o < out; o++ {
-			acc := simd.DotI8Tile(xq, wI8, 0, o*in, in, 0)
-			yF[o] = float32(acc) * actScale * scale
-		}
-		core.SliceFromFloat32(yF, y[b*out:(b+1)*out])
+		writeGemvF32(y[b*out:(b+1)*out], out, func(dst []float32) {
+			for o := 0; o < out; o++ {
+				acc := simd.DotI8Tile(xq, wI8, 0, o*in, in, 0)
+				dst[o] = float32(acc) * actScale * scale
+			}
+		})
 	}
 	return nil
 }
@@ -337,15 +378,15 @@ func forwardSIMDUint8[T core.Numeric](l *Layer, x, y []T, batch, in, out int) er
 		for _, v := range xRow {
 			sumX += float64(v)
 		}
-		yF := make([]float32, out)
-		for o := 0; o < out; o++ {
-			off := o * in
-			for i := 0; i < in; i++ {
-				scratch[i] = float32(body[off+i]) * scale
+		writeGemvF32(y[b*out:(b+1)*out], out, func(dst []float32) {
+			for o := 0; o < out; o++ {
+				off := o * in
+				for i := 0; i < in; i++ {
+					scratch[i] = float32(body[off+i]) * scale
+				}
+				dst[o] = float32(simd.DotTile(xRow, scratch, 0, in, 0) + float64(minV)*sumX)
 			}
-			yF[o] = float32(simd.DotTile(xRow, scratch, 0, in, 0) + float64(minV)*sumX)
-		}
-		core.SliceFromFloat32(yF, y[b*out:(b+1)*out])
+		})
 	}
 	return nil
 }

@@ -54,6 +54,13 @@ func DotBF16Packed(x []float32, w []byte, i0, n int, prev float64) float64 {
 	if len(w) < (i0+n)*2 {
 		return prev
 	}
+	if simdEnabled() {
+		return dotBF16PackedSimd(x, w, i0, n, prev)
+	}
+	return dotBF16PackedGo(x, w, i0, n, prev)
+}
+
+func dotBF16PackedGo(x []float32, w []byte, i0, n int, prev float64) float64 {
 	sum := prev
 	const tile = 8
 	var buf [tile]float32
