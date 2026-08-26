@@ -4,7 +4,7 @@
 
 | | |
 |--|--|
-| **Version** | **v1.0.2** |
+| **Version** | **v1.0.3** |
 | **Scorecard** | **100 / 100** pts (see [Version scorecard](#version-scorecard)) |
 
 Engine is v1. Apps (`octo`), stubs, and NPU/C++ accel sit **outside** this board — they are sibling / later trees (`welvet.cpp`), not missing Welvet.
@@ -50,9 +50,11 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v1.0.2.** Scorecard still **100/100** (v1.0 board). This patch ships the real
-Step\* 1D line pipe (`IsLineStep` / `TrainLine`), Step\* credit twins, and compact
-`ShortTrainMode` titles. NPU/Metal/QNN are not scored here.
+**Status: v1.0.3.** Scorecard still **100/100** (v1.0 board). This patch finishes Dense
+FormatNone SIMD **forward** kernels (`WireF64`/`DotTileF64`, expand-once→`DotTile`,
+BF16 convert, alloc cleanup) — ~4–5× geo-mean on the 34-dtype deep suite vs prior Go;
+composite Dense projs inherit it. Forward only; arm64 still scalar on the f64 wire.
+NPU/Metal/QNN are not scored here.
 
 | Legend | Meaning | Pts credit |
 |--------|---------|------------|
@@ -66,7 +68,7 @@ Step\* 1D line pipe (`IsLineStep` / `TrainLine`), Step\* credit twins, and compa
 
 **Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. Patch tags
 (e.g. **v0.95.1**) shipped engine deltas without moving the board. Weights sum to **100**.
-This tag is **v1.0.2** (patch on the full v1.0 board).
+This tag is **v1.0.3** (patch on the full v1.0 board).
 
 | # | Section | Wt | How scored today | Earned |
 |--:|---------|---:|------------------|-------:|
@@ -82,7 +84,7 @@ This tag is **v1.0.2** (patch on the full v1.0 board).
 | 10 | **Peak fused / no host ALU** — fused k/IQ Dot*, MHA attn/RoPE GPU fwd+bwd, LN/SwiGLU/Softmax/Embedding/RNN/LSTM/CNN tiled GPU, Softmax SIMD; `fusedgpu` decoder fuse | 14 | all ✅ | **14.0** |
 | | **Total → v1.0** | **100** | | **100.0** |
 
-**v1.0 readout:** engine credit + MatVec + volumetric step + GPU fuse are in. **v1.0.1 patch:** `lucy.BuildLPD` (consciousness Q + Lucy density + gold/trap bands) so hosts do not copy tide; `TrainStackCE` (softmax−one-hot, then the same TrainStack walk as MSE). **v1.0.2 patch:** Step\* is a 1D systolic pipe (`TrainLine`, fill ticks do not update); Step\* HeadProxy / Linear / FastProxy / Sparse / Async credit; `ShortTrainMode` display (`[T]` Tween, `[S]` Split, `[FP]` FastProxy, `[L]` Linear, `[HP]` HeadProxy). **Not on this board:** `apps/octo` (sibling shell), `stub/*` (future), **NPU / Metal / QNN** (3rd-party C++; later `welvet.cpp`, not a Welvet Go score). Nested Sequential/Residual mixed children and Parallel `ResidualGraft` are in. FastProxy can match/beat StepBP **Acc** on sine/copy toys; Sparse wins Lucy **Score** via Avail. Do not write “Sparse is better backprop.”
+**v1.0 readout:** engine credit + MatVec + volumetric step + GPU fuse are in. **v1.0.1 patch:** `lucy.BuildLPD` (consciousness Q + Lucy density + gold/trap bands) so hosts do not copy tide; `TrainStackCE` (softmax−one-hot, then the same TrainStack walk as MSE). **v1.0.2 patch:** Step\* is a 1D systolic pipe (`TrainLine`, fill ticks do not update); Step\* HeadProxy / Linear / FastProxy / Sparse / Async credit; `ShortTrainMode` display (`[T]` Tween, `[S]` Split, `[FP]` FastProxy, `[L]` Linear, `[HP]` HeadProxy). **v1.0.3 patch:** Dense FormatNone SIMD forward — `WireF64` + AVX2 `DotTileF64`, expand-once→`DotTile` (uint*/nf4/fp6/int3–5–6), BF16 Plan 9 convert, `writeGemvF32` alloc cleanup; Deep SIMD suite ~4.3× geo-mean vs prior Go (wins flipped 2→24 vs C++/Rust ports); Dense-backed layers inherit; backward unchanged; arm64 f64 wire still scalar. **Not on this board:** `apps/octo` (sibling shell), `stub/*` (future), **NPU / Metal / QNN** (3rd-party C++; later `welvet.cpp`, not a Welvet Go score). Nested Sequential/Residual mixed children and Parallel `ResidualGraft` are in. FastProxy can match/beat StepBP **Acc** on sine/copy toys; Sparse wins Lucy **Score** via Avail. Do not write “Sparse is better backprop.”
 
 Detail tables below still list per-feature ✅/🚧/⬜; they feed honesty, but **only this scorecard sets the version number**.
 
@@ -156,7 +158,7 @@ cd w2a && go test ./tests/parallel -run 'Credit|AllCredit|AllStack|Combine|HemiN
 4. **No QAT** — `DType` + `QuantFormat` are storage truth.
 5. **Train keeps storage truth** — `weights.ApplySGD` updates FormatNone in native lanes (or unpack→update→re-Pack for packed formats). No retained float32 master beside storage (`RetainsF32Master` only for FormatNone+float32).
 6. **One poly feature → one folder.**
-7. **v1.0 = scorecard 100/100** (this board). Patch tags (v1.0.1, v1.0.2, …) add measuring/API without moving the board. Apps, stubs, and NPU are not scored.
+7. **v1.0 = scorecard 100/100** (this board). Patch tags (v1.0.1, v1.0.2, v1.0.3, …) add measuring/API without moving the board. Apps, stubs, and NPU are not scored.
 
 ---
 

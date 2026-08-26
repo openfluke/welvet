@@ -165,6 +165,12 @@ go get github.com/openfluke/welvet@${tag}
 - **GPU fuse** — `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan)
 - **lucy** — shared SoftAcc / Availability / AdaptPct / Score measuring harness
 
+### What's new in v1.0.3
+- **Dense FormatNone SIMD forward** — `WireF64` + AVX2 `DotTileF64`, expand-once → \`DotTile\` (uint*/nf4/fp6/int3–5–6), BF16 Plan 9 convert, alloc cleanup
+- Deep 34-dtype SIMD suite: ~**4.3×** geo-mean vs prior Go; wins **Go 24 / C++ 9 / Rust 1** (bit-identical)
+- MHA / SwiGLU / LSTM / RNN / Mamba / CNN proj / residual·sequential·parallel inherit via \`dense.Forward\`
+- Forward only; backward unchanged; arm64 f64 wire still scalar
+
 ### What's in this tree
 - Layers, 34 dtypes, 20 quant formats
 - Backends: CPU tiled · Plan 9 SIMD · WebGPU
