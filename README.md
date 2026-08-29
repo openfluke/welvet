@@ -345,6 +345,8 @@ Consciousness radar = Acc/Thru/Avail keep. Memory density radar = those × shrin
 
 ### Training credit — scorecard §9 (8 pts)
 
+Full mode list + equations: **[`training_modes.md`](training_modes.md)**.
+
 Sandwich `TrainStackMSE` / `TrainStackCE` / `OpenSplitTape`. Step\* and non-Step of the same family share one update on Stack (no Grid). Step\* is the 1D systolic pipe (`IsLineStep` / `TrainLine`; fill ticks do not update). Mesh\* needs volumetric placement. Classification hosts call **CE** (softmax − one-hot); regression hosts keep MSE. Credit modes are the same walk. Tables use `ShortTrainMode` (`[T]` Tween, `[S]` Split, `[FP]` FastProxy, `[L]` Linear, `[HP]` HeadProxy); persistence still uses `String()`.
 
 | Mode | Credit | Status |
