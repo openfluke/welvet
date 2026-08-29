@@ -12,6 +12,7 @@ import (
 const (
 	LPDKeepFloor = 0.70
 	LPDGoldKeep  = 0.80
+	LPDLeanKeep  = 0.95 // Acc keep floor for "lean" champs (sacrifice peak Acc for RAM/Thru/Avail)
 	LPDGoldRAM   = 0.20
 	LPDNearRAM   = 0.50
 	LPDShrinkCap = 32.0
@@ -138,17 +139,21 @@ type LPD struct {
 	Gold          []LPDRow  `json:"gold,omitempty"`
 	Near          []LPDRow  `json:"near,omitempty"`
 	Top           []LPDRow  `json:"top,omitempty"`
+	Pool          []LPDRow  `json:"-"`                  // full ranked rows for radars/scatters (not JSON)
+	Lean          []LPDRow  `json:"lean,omitempty"`      // Acc keep ≥95%, then smallest RAM / fastest / avail
+	LeanChamp     LPDRow    `json:"lean_champ,omitempty"`
 	Trap          []LPDRow  `json:"trap,omitempty"`
 	TopSpeed      []LPDRow  `json:"top_speed,omitempty"`
 	TopAvail      []LPDRow  `json:"top_avail,omitempty"`
 	TopMix        []LPDRow  `json:"top_mix,omitempty"`
 	GoldStd       LPDRow    `json:"gold_std,omitempty"`
 	GoldModes     []LPDMode `json:"gold_modes,omitempty"`
+	LeanByArch    []LPDMode `json:"lean_by_arch,omitempty"` // cam / arch lean winners
 }
 
 // DensityFormula is the board legend (JSON + PDFs).
 func DensityFormula() string {
-	return "Synthetic organism / Lucy density: can the net run and train at the same time in a small box. Lucy Score = Throughput x Availability x Acc / 10,000 (hard Acc; SoftAcc is serve-confidence only). SGD that blocks serve dies on Availability. Q = geomean Acc/Thru/Avail vs learner peaks (traps do not set Thru/Avail). LPD = Q x shrink vs Acc-champ RAM; 0 unless Acc keep >=70%. Gold = all 3 pillars >=80% at <=20% Acc-champ RAM. Gold-std = Acc >=80% plus Thru or Avail, then smallest then fastest. Score/MiB is the binary trap."
+	return "Synthetic organism / Lucy density: run+train in a small box. Hard Acc = argmax accuracy. Acc keep % = this Acc / Acc-champ Acc (1.0 = matches the best Acc). SoftAcc = serve-confidence (not Score). Score = Thru x Avail x HardAcc / 10,000. Q = geomean Acc-keep/Thru-keep/Avail-keep vs learner peaks. LPD = Q x shrink vs Acc-champ RAM; 0 unless Acc keep >=70%. Gold = all 3 pillars >=80% at <=20% Acc-champ RAM. Gold-std = Acc keep >=80% plus Thru or Avail, then smallest then fastest. Lean = Acc keep >=95% of Acc champ, then smallest RAM / fastest Thru / best Avail — sacrifice peak Acc only within that band."
 }
 
 // BuildLPD ranks samples for consciousness (Acc/Thru/Avail) then memory density.
@@ -248,6 +253,7 @@ func BuildLPD(pts []Sample) LPD {
 	if len(out.Trap) > 12 {
 		out.Trap = out.Trap[:12]
 	}
+	out.Pool = rows // full set for radars/scatters (json:"-" — not shipped on /api/live)
 	out.Top = rows
 	if len(out.Top) > 40 {
 		out.Top = out.Top[:40]
@@ -256,6 +262,7 @@ func BuildLPD(pts []Sample) LPD {
 	out.TopAvail = rankLPD(rows, func(r LPDRow) float64 { return r.MAvail }, 12)
 	out.TopMix = rankLPD(rows, func(r LPDRow) float64 { return r.Mix }, 12)
 	out.GoldStd, out.GoldModes = goldStandard(rows)
+	out.LeanChamp, out.Lean, out.LeanByArch = leanStandard(rows)
 	return out
 }
 
@@ -350,6 +357,65 @@ func goldStandard(rows []LPDRow) (LPDRow, []LPDMode) {
 		modes = modes[:12]
 	}
 	return std, modes
+}
+
+// leanStandard: Acc keep ≥95% of Acc champ, then smallest RAM, fastest Thru, best Avail.
+// This is the "sacrifice a little Acc for footprint/speed" board — below 95% keep is out.
+func leanStandard(rows []LPDRow) (LPDRow, []LPDRow, []LPDMode) {
+	var keep []LPDRow
+	for _, r := range rows {
+		if r.RelAcc >= LPDLeanKeep {
+			keep = append(keep, r)
+		}
+	}
+	if len(keep) == 0 {
+		return LPDRow{}, nil, nil
+	}
+	sort.SliceStable(keep, func(i, j int) bool {
+		a, b := keep[i], keep[j]
+		if a.RAMKiB != b.RAMKiB {
+			return a.RAMKiB < b.RAMKiB
+		}
+		if a.Thru != b.Thru {
+			return a.Thru > b.Thru
+		}
+		if a.Avail != b.Avail {
+			return a.Avail > b.Avail
+		}
+		return a.Acc > b.Acc
+	})
+	champ := keep[0]
+	list := keep
+	if len(list) > 24 {
+		list = list[:24]
+	}
+	// Per-arch lean winner (cam differences).
+	byArch := map[string]LPDRow{}
+	order := []string{}
+	for _, r := range keep {
+		prev, ok := byArch[r.Arch]
+		if !ok {
+			byArch[r.Arch] = r
+			order = append(order, r.Arch)
+			continue
+		}
+		better := r.RAMKiB < prev.RAMKiB ||
+			(r.RAMKiB == prev.RAMKiB && r.Thru > prev.Thru) ||
+			(r.RAMKiB == prev.RAMKiB && r.Thru == prev.Thru && r.Avail > prev.Avail)
+		if better {
+			byArch[r.Arch] = r
+		}
+	}
+	sort.Strings(order)
+	archModes := make([]LPDMode, 0, len(order))
+	for _, arch := range order {
+		r := byArch[arch]
+		archModes = append(archModes, LPDMode{
+			Mode: arch, N: 1, BestAcc: r.Acc, MinRAM: r.RAMKiB, MaxThru: r.Thru,
+			BestQ: r.Q, Smallest: r.ID, Fastest: r.ID,
+		})
+	}
+	return champ, list, archModes
 }
 
 func rankLPD(rows []LPDRow, val func(LPDRow) float64, max int) []LPDRow {
