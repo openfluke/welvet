@@ -11,4 +11,7 @@
 // volumetric mesh clock. Mesh* still needs a Grid.
 // Contract: CPU tiled + SIMD + WebGPU via children Exec; dtype × k-quant on
 // branches/gate. No QAT. Tests live in github.com/openfluke/w2a — not here.
+//
+// CamSync (CamSyncConfig) optionally averages cameral branch weights after
+// sample / step / pulse (alpha 1%→100%, within-layer groups + cross-layer pairs).
 package parallel

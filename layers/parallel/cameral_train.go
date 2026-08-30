@@ -28,6 +28,13 @@ func trainStackGap[T core.Numeric](s *Stack, input, target *core.Tensor[T], mode
 	if s == nil || input == nil || target == nil {
 		return 0, fmt.Errorf("parallel: TrainStack nil")
 	}
+	defer func() {
+		if err != nil || s == nil {
+			return
+		}
+		_ = s.MaybeSync(SyncAfterStep)
+		_ = s.MaybeSync(SyncAfterSample)
+	}()
 	if mode.IsLineStep() {
 		return trainStackLine(s, input, target, mode, lr, gap)
 	}
@@ -35,22 +42,22 @@ func trainStackGap[T core.Numeric](s *Stack, input, target *core.Tensor[T], mode
 		return alt(s, input, target, lr)
 	}
 	if mode.Resolve(ModeNormalBP).Family() == familyTweenSplit {
-		tape, err := OpenSplitTape(s, input)
-		if err != nil {
-			return 0, err
+		tape, errOpen := OpenSplitTape(s, input)
+		if errOpen != nil {
+			return 0, errOpen
 		}
 		return tape.TrainGap(target, mode, lr, gap)
 	}
-	pre, post, err := ForwardStack(s, input)
-	if err != nil {
-		return 0, err
+	pre, post, errFwd := ForwardStack(s, input)
+	if errFwd != nil {
+		return 0, errFwd
 	}
-	loss, gy, err := gap(post, target)
-	if err != nil {
-		return 0, err
+	loss, gy, errGap := gap(post, target)
+	if errGap != nil {
+		return 0, errGap
 	}
-	if err := TrainStack(s, gy, input, pre, mode, lr); err != nil {
-		return loss, err
+	if errTrain := TrainStack(s, gy, input, pre, mode, lr); errTrain != nil {
+		return loss, errTrain
 	}
 	return loss, nil
 }
@@ -81,6 +88,8 @@ func TrainMSE[T core.Numeric](l *Layer, input, target *core.Tensor[T], mode Trai
 	if err := Train(l, gy, input, pre, mode, lr); err != nil {
 		return loss, err
 	}
+	_ = l.MaybeSync(SyncAfterStep)
+	_ = l.MaybeSync(SyncAfterSample)
 	return loss, nil
 }
 

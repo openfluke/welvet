@@ -19,6 +19,7 @@ type Layer struct {
 	Gate        *dense.Layer // Rows=Branches, Cols=Dim; used when CombineFilter
 	BranchModes []TrainMode  // optional per-hemisphere mode; empty ⇒ inherit parent
 	AltTimes    int          // TweenAlt: Split→Tween pairs per update (0 ⇒ 1)
+	CamSync     *CamSyncConfig // optional inter-cameral weight averaging
 	accel       splitAccel   // LinearCache / HeadProxyAsync / Sparse
 }
 

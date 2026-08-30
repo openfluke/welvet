@@ -25,6 +25,7 @@ type Stack struct {
 	Children   []any
 	ChildModes []TrainMode // optional per-child mode; empty ⇒ inherit parent
 	AltTimes   int         // TweenAlt: Split→Tween pairs per update (0 ⇒ 1)
+	CamSync    *CamSyncConfig // optional inter-cameral / cross-layer weight averaging
 	accel      splitAccel  // LinearCache / HeadProxyAsync / Sparse
 	line       any         // *Line[T] for Step* systolic train
 }
