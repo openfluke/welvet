@@ -113,6 +113,7 @@ Status rollup — version points live in the [scorecard](#version-scorecard) onl
 | Model IO / transformer / entity / tokenizer / hf | ✅ |
 | Training credit (StepBP / TweenSplit / FastProxy / Sparse / …) | ✅ |
 | Cameral `.entity` (`WriteCameralFile` / `LoadCameral`) | ✅ |
+| CamSync — soft/hard cam weight avg + cross-layer same-shape pairs | ✅ |
 | `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan) | ✅ |
 | `apps/octo/` interactive model shell (download / convert / chat) | 🚧 off-board |
 | `stub/` seed · serialization · hardware · memory · fountain · donate | 🚧 off-board |
@@ -364,11 +365,27 @@ Sandwich `TrainStackMSE` / `TrainStackCE` / `OpenSplitTape`. Step\* and non-Step
 | `TweenSplitLinearCache` / `StepTweenSplitLinearCache` | Cached Linear walk (dead on sine freq switch; kept for A/B) | ✅ |
 | `MeshTweenSplit` / `MeshTweenAlt` / `MeshTweenSplitFastProxy` / `MeshTweenSplitSparse` | Grid-scheduled Split/Alt (family collapse on Stack) | ✅ |
 | Cameral `BranchModes` / `HemispheresFrom` / `CombineAdd` | n=1 one mid Op; n=2/3 Bi/Tri | ✅ |
+| **CamSync** (`CamSyncConfig` / `BlendStores`) | Soft/hard inter-cameral weight avg (α 1%→100%); groups; cross-layer same-shape pairs; after sample/step/pulse | ✅ |
 | Dense `LinearGradIn` / `GradWOnly` | SIMD \(W^\top\) and `dW`-only kernels | ✅ |
 | Cameral `.entity` | `WriteCameralFile` / `LoadCameral` (modes + weights) | ✅ |
 | **test49** | All 29 named modes × 1³/2³/3³ origin smoke (one live cell; rest disabled) × Parallel + Bicameral + poly kinds (`w2a` `Test49AllTrainModesCubes`) | ✅ |
 
 Rivaling backprop = matched **hard Acc** vs StepBP, not Lucy Score. Sparse Score is Avail (skip-GEMV). FastProxy is the Acc rival on sine/copy toys.
+
+### CamSync — inter-cameral / cross-layer weight blend
+
+Cams can diverge (Mix `BranchModes`, different inits). **CamSync** optionally pulls matching weight stores back together without collapsing the graph into one Dense:
+
+| Knob | What it does |
+|------|----------------|
+| `Alpha` | Soft pull \(w_i ← (1-α)·w_i + α·\mathrm{mean}\) — `0.01` = 1%, `1.0` = hard average |
+| `Groups` | Within one Parallel: all cams, or cliques e.g. `{{0,1},{2,3}}` |
+| `Cross` | Explicit pairs via `SyncEndpoint{StackIdx, Branch, Store}` — same layer across cams, or **same-shaped** stores on different Stack children |
+| `When` | `SyncAfterSample` / `SyncAfterStep` / `SyncAfterPulse` / `SyncManual` (+ `SyncNow`) |
+
+**Shape rule:** blend only when `Rows×Cols` match. Mesh size does **not** matter — a cam on layer 1 of a `1×2×1` cell can sync to the same-shaped layer on cam 3 of a `2×4×5` (or any other layout) if both stores resolve and match. Today every link is **bidirectional** mean-blend; one-way teacher→student is not in yet. Separate Stack instances need a host-side `weights.BlendStores` call.
+
+API: `parallel.CamSyncConfig`, `SetCamSync`, `SyncNow` / `Pulse` / `MaybeSync` · `weights.BlendStores` / `StoreCosine`. Hosts: `ok/cam_sync`.
 
 ### Layers (full w2a timed matrix + train grids; peak fused ALU in §10)
 
@@ -397,7 +414,7 @@ Rivaling backprop = matched **hard Acc** vs StepBP, not Lucy Score. Sparse Score
 | `layers/convt2/` | Transposed conv2d; host scatter+Proj; full timed matrix + train grids | 0.7 | §5 | ✅ |
 | `layers/convt3/` | Transposed conv3d; host scatter+Proj; full timed matrix + train grids | 0.6 | §5 | ✅ |
 | `layers/kmeans/` | Soft k-means; Centers via Dense; full timed matrix + train grids | 0.5 | §5 | ✅ |
-| `layers/parallel/` | MoE concat/add/avg/filter; Dense branches; Split/FastProxy/Sparse credit; full timed matrix + train grids | 1 | §5 | ✅ |
+| `layers/parallel/` | MoE concat/add/avg/filter; Dense branches; Split/FastProxy/Sparse credit; **CamSync** inter-cameral / cross-layer weight blend; full timed matrix + train grids | 1 | §5 | ✅ |
 | `layers/metacognition/` | Observed Dense + rules; full timed matrix + train grids | 1 | §5 | ✅ |
 
 ### Dense detail
