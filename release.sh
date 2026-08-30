@@ -70,7 +70,7 @@ if m:
     earned = float(m.group(1))
 
 if earned is None and ver:
-    if ver == "v1.0" or ver.startswith("v1.0."):
+    if ver.startswith("v1."):
         earned = 100.0
     elif ver.startswith("v0."):
         # v0.95 / v0.95.1 → scorecard major from first component after v0.
@@ -165,11 +165,11 @@ go get github.com/openfluke/welvet@${tag}
 - **GPU fuse** — `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan)
 - **lucy** — shared SoftAcc / Availability / AdaptPct / Score measuring harness
 
-### What's new in v1.0.3
-- **Dense FormatNone SIMD forward** — `WireF64` + AVX2 `DotTileF64`, expand-once → \`DotTile\` (uint*/nf4/fp6/int3–5–6), BF16 Plan 9 convert, alloc cleanup
-- Deep 34-dtype SIMD suite: ~**4.3×** geo-mean vs prior Go; wins **Go 24 / C++ 9 / Rust 1** (bit-identical)
-- MHA / SwiGLU / LSTM / RNN / Mamba / CNN proj / residual·sequential·parallel inherit via \`dense.Forward\`
-- Forward only; backward unchanged; arm64 f64 wire still scalar
+### What's new in v1.1.0
+- **CamSync** — soft/hard inter-cameral weight blend (`CamSyncConfig` / `weights.BlendStores`); α 1%→100%; Groups; Cross same-shape pairs across Stack children / meshes; after sample / step / pulse / manual
+- **`training_modes.md`** — all 29 named credit modes with equations + ShortTrainMode legend
+- **Lucy Lean density** — Acc keep ≥95% then smallest RAM / fastest Thru / best Avail (`LeanChamp`, `LeanByArch`)
+- DotF64 generic wire fix; feature book **§70 CamSync** (1×2×1 ↔ 2×4×5 same-shape callout)
 
 ### What's in this tree
 - Layers, 34 dtypes, 20 quant formats
