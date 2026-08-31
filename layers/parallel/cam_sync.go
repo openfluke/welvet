@@ -212,14 +212,33 @@ func syncParallelLayer(l *Layer, force bool) error {
 		groups = [][]int{all}
 	}
 	for gi, g := range groups {
-		if len(g) < 2 {
+		live := filterTrainableBranchIdxs(l, g)
+		if len(live) < 2 {
 			continue
 		}
-		if err := blendBranchGroup(l, g, alpha); err != nil {
+		if err := blendBranchGroup(l, live, alpha); err != nil {
 			return fmt.Errorf("parallel: CamSync group %d: %w", gi, err)
 		}
 	}
 	return nil
+}
+
+// filterTrainableBranchIdxs drops Freeze BranchModes so CamSync cannot overwrite idle cams.
+func filterTrainableBranchIdxs(l *Layer, idxs []int) []int {
+	if l == nil {
+		return idxs
+	}
+	out := make([]int, 0, len(idxs))
+	for _, bi := range idxs {
+		if bi < 0 || bi >= len(l.Branches) {
+			continue
+		}
+		if l.EffectiveBranchMode(bi, ModeNormalBP).IsFrozen() {
+			continue
+		}
+		out = append(out, bi)
+	}
+	return out
 }
 
 func syncStack(s *Stack, force bool) error {

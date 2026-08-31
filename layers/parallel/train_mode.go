@@ -22,6 +22,7 @@ import (
 //	TweenSplitHeadProxyAsync / StepTweenSplitHeadProxyAsync
 //	TweenSplitSparse / StepTweenSplitSparse / MeshTweenSplitSparse
 //	TweenAlt / StepTweenAlt        — Split then Tween, repeat AltTimes (FamilyTweenAlt)
+//	Freeze                         — forward/combine only; no weight update (BranchModes / ChildModes)
 //	Inherit                        — use the parent mode (BranchModes / ChildModes only)
 //
 // On Stack, Step* is a 1D pipe (see Line / TrainLine). Mesh* still needs a Grid.
@@ -58,6 +59,7 @@ const (
 	ModeStepTweenSplitLinearCache
 	ModeStepTweenSplitHeadProxyAsync
 	ModeStepTweenSplitSparse
+	ModeFreeze // appended: keep prior iota stable for any numeric persistence
 )
 
 // ModeSGD is the legacy alias for ModeNormalBP.
@@ -72,6 +74,7 @@ const (
 	familyTweenChain
 	familyTweenSplit
 	familyTweenAlt
+	familyFreeze
 )
 
 // AllConcreteTrainModes is the test41 set (no Inherit).
@@ -102,6 +105,7 @@ func AllTrainModes() []TrainMode {
 		ModeStepTweenSplitHeadProxy, ModeStepTweenSplitLinear,
 		ModeStepTweenSplitFastProxy, ModeStepTweenSplitLinearCache,
 		ModeStepTweenSplitHeadProxyAsync, ModeStepTweenSplitSparse,
+		ModeFreeze,
 	}
 }
 
@@ -129,11 +133,11 @@ func AllMeshCreditTrainModes() []TrainMode {
 }
 
 // AllStackLocalTrainModes is every named mode TrainStackMSE can run without a Grid
-// (no Inherit, no Mesh*).
+// (no Inherit, no Freeze, no Mesh*).
 func AllStackLocalTrainModes() []TrainMode {
 	var out []TrainMode
 	for _, m := range AllTrainModes() {
-		if m == ModeInherit || m.RequiresGrid() {
+		if m == ModeInherit || m == ModeFreeze || m.RequiresGrid() {
 			continue
 		}
 		out = append(out, m)
@@ -142,11 +146,11 @@ func AllStackLocalTrainModes() []TrainMode {
 }
 
 // AllNamedTrainModes is every concrete update: test41 nine + Split/Alt credit + Mesh*
-// credit. Inherit is omitted (it is not an update). This is the test49 set.
+// credit. Inherit and Freeze are omitted (not weight updates). This is the test49 set.
 func AllNamedTrainModes() []TrainMode {
 	var out []TrainMode
 	for _, m := range AllTrainModes() {
-		if m == ModeInherit {
+		if m == ModeInherit || m == ModeFreeze {
 			continue
 		}
 		out = append(out, m)
@@ -206,6 +210,8 @@ func ParseTrainMode(s string) (TrainMode, error) {
 		return ModeStepTweenSplitHeadProxyAsync, nil
 	case "stepsparse", "steptweensplitsparse":
 		return ModeStepTweenSplitSparse, nil
+	case "freeze", "frozen", "notrain", "eval":
+		return ModeFreeze, nil
 	default:
 		return ModeInherit, fmt.Errorf("parallel: unknown train mode %q", s)
 	}
@@ -273,14 +279,23 @@ func (m TrainMode) String() string {
 		return "StepTweenSplitHeadProxyAsync"
 	case ModeStepTweenSplitSparse:
 		return "StepTweenSplitSparse"
+	case ModeFreeze:
+		return "Freeze"
 	default:
 		return fmt.Sprintf("TrainMode(%d)", m)
 	}
 }
 
+// IsFrozen is forward/combine only — no weight update.
+func (m TrainMode) IsFrozen() bool {
+	return m == ModeFreeze
+}
+
 // Family collapses Step/Mesh scheduling variants to the Op update class.
 func (m TrainMode) Family() trainFamily {
 	switch m {
+	case ModeFreeze:
+		return familyFreeze
 	case ModeTween, ModeStepTween, ModeMeshTween:
 		return familyTween
 	case ModeTweenChain, ModeStepTweenChain, ModeMeshTweenChain:
@@ -379,12 +394,16 @@ func (s *Stack) SetChildModes(modes ...TrainMode) {
 
 // Train applies one update to a Parallel cell under parentMode.
 // gradOut is ∂L/∂y (or a tween gap); input/pre match Forward.
-// When BranchModes are set, hemispheres may mix any concrete TrainModes.
+// When BranchModes are set, hemispheres may mix any concrete TrainModes
+// (including Freeze: that cam still forwards/combines, but skips ApplyGrad).
 func Train[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T], parentMode TrainMode, lr float64) error {
 	if l == nil {
 		return fmt.Errorf("parallel: Train nil")
 	}
 	mode := parentMode.Resolve(ModeNormalBP)
+	if mode.IsFrozen() {
+		return nil
+	}
 	fam := mode.Family()
 	if fam == familyTweenSplit {
 		return trainTweenSplitFamily(l, gradOut, input, lr, mode)
@@ -437,6 +456,9 @@ func trainParallelMixed[T core.Numeric](l *Layer, gradOut, input, pre *core.Tens
 	}
 	for i, ch := range l.Branches {
 		bm := l.EffectiveBranchMode(i, parentMode)
+		if bm.IsFrozen() {
+			continue
+		}
 		if err := trainOp(ch, branchGrads[i], input, branchPres[i], branchOuts[i], bm, lr); err != nil {
 			return fmt.Errorf("train branch %d (%s): %w", i, bm, err)
 		}
@@ -542,6 +564,9 @@ func TrainStack[T core.Numeric](s *Stack, gradOut, input, pre *core.Tensor[T], p
 		return fmt.Errorf("parallel: TrainStack nil")
 	}
 	mode := parentMode.Resolve(ModeNormalBP)
+	if mode.IsFrozen() {
+		return nil
+	}
 	fam := mode.Family()
 	if fam == familyTweenSplit {
 		return trainTweenSplitFamily(s, gradOut, input, lr, mode)
@@ -635,6 +660,9 @@ func trainOp[T core.Numeric](op any, gradOut, input, pre, post *core.Tensor[T], 
 
 func trainOpReturnGradIn[T core.Numeric](op any, gradOut, input, pre, post *core.Tensor[T], mode TrainMode, lr float64) (*core.Tensor[T], error) {
 	mode = mode.Resolve(ModeNormalBP)
+	if mode.IsFrozen() {
+		return frozenGradIn(op, gradOut, input, pre, post)
+	}
 	switch mode.Family() {
 	case familyTween:
 		return trainTweenLocal(op, gradOut, input, post, lr)
@@ -721,6 +749,29 @@ func trainOpReturnGradIn[T core.Numeric](op any, gradOut, input, pre, post *core
 	}
 }
 
+// frozenGradIn passes ∂L/∂x through without ApplyGrad (Freeze BranchMode / ChildMode).
+func frozenGradIn[T core.Numeric](op any, gradOut, input, pre, post *core.Tensor[T]) (*core.Tensor[T], error) {
+	_ = post
+	switch v := op.(type) {
+	case *Layer:
+		gIn, _, err := Backward(v, gradOut, input, pre)
+		return gIn, err
+	case *Stack:
+		gIn, _, err := BackwardStack(v, gradOut, input, pre)
+		return gIn, err
+	default:
+		if pre == nil {
+			var err error
+			pre, _, err = branchForward(op, input, nil)
+			if err != nil {
+				return nil, err
+			}
+		}
+		gIn, _, err := branchBackward(op, gradOut, input, nil, pre)
+		return gIn, err
+	}
+}
+
 // trainTweenLocal: no chain rule. Project the output gap onto every trainable
 // leaf's real post shape (CNN/LSTM/MHA included) using that leaf's forward input.
 func trainTweenLocal[T core.Numeric](op any, gradOut, input, post *core.Tensor[T], lr float64) (*core.Tensor[T], error) {
@@ -755,6 +806,9 @@ func trainTweenParallel[T core.Numeric](l *Layer, gradOut, input *core.Tensor[T]
 	}
 	for i, ch := range l.Branches {
 		bm := l.EffectiveBranchMode(i, ModeTween)
+		if bm.IsFrozen() {
+			continue
+		}
 		if _, err := trainOpReturnGradIn(ch, branchGrads[i], input, pres[i], outs[i], bm, lr*2); err != nil {
 			return nil, err
 		}
