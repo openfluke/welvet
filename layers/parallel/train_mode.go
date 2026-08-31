@@ -23,6 +23,9 @@ import (
 //	TweenSplitSparse / StepTweenSplitSparse / MeshTweenSplitSparse
 //	TweenAlt / StepTweenAlt        — Split then Tween, repeat AltTimes (FamilyTweenAlt)
 //	Freeze                         — forward/combine only; no weight update (BranchModes / ChildModes)
+//	Shadow                         — frozen teacher; other cams get KD toward its post
+//	Adversarial                    — train with negated LR (maximize local gap)
+//	Memory                         — train only when CamKit.LastLoss ≥ SurpriseThresh
 //	Inherit                        — use the parent mode (BranchModes / ChildModes only)
 //
 // On Stack, Step* is a 1D pipe (see Line / TrainLine). Mesh* still needs a Grid.
@@ -59,7 +62,10 @@ const (
 	ModeStepTweenSplitLinearCache
 	ModeStepTweenSplitHeadProxyAsync
 	ModeStepTweenSplitSparse
-	ModeFreeze // appended: keep prior iota stable for any numeric persistence
+	ModeFreeze      // appended: keep prior iota stable for any numeric persistence
+	ModeShadow      // frozen teacher + KD source
+	ModeAdversarial // negated LR
+	ModeMemory      // surprise-gated updates
 )
 
 // ModeSGD is the legacy alias for ModeNormalBP.
@@ -105,7 +111,7 @@ func AllTrainModes() []TrainMode {
 		ModeStepTweenSplitHeadProxy, ModeStepTweenSplitLinear,
 		ModeStepTweenSplitFastProxy, ModeStepTweenSplitLinearCache,
 		ModeStepTweenSplitHeadProxyAsync, ModeStepTweenSplitSparse,
-		ModeFreeze,
+		ModeFreeze, ModeShadow, ModeAdversarial, ModeMemory,
 	}
 }
 
@@ -133,11 +139,11 @@ func AllMeshCreditTrainModes() []TrainMode {
 }
 
 // AllStackLocalTrainModes is every named mode TrainStackMSE can run without a Grid
-// (no Inherit, no Freeze, no Mesh*).
+// (no Inherit, no Freeze/Shadow, no Mesh*).
 func AllStackLocalTrainModes() []TrainMode {
 	var out []TrainMode
 	for _, m := range AllTrainModes() {
-		if m == ModeInherit || m == ModeFreeze || m.RequiresGrid() {
+		if m == ModeInherit || m.IsFrozen() || m.RequiresGrid() {
 			continue
 		}
 		out = append(out, m)
@@ -146,11 +152,11 @@ func AllStackLocalTrainModes() []TrainMode {
 }
 
 // AllNamedTrainModes is every concrete update: test41 nine + Split/Alt credit + Mesh*
-// credit. Inherit and Freeze are omitted (not weight updates). This is the test49 set.
+// credit. Inherit / Freeze / Shadow are omitted (not plain weight updates).
 func AllNamedTrainModes() []TrainMode {
 	var out []TrainMode
 	for _, m := range AllTrainModes() {
-		if m == ModeInherit || m == ModeFreeze {
+		if m == ModeInherit || m.IsFrozen() {
 			continue
 		}
 		out = append(out, m)
@@ -212,6 +218,12 @@ func ParseTrainMode(s string) (TrainMode, error) {
 		return ModeStepTweenSplitSparse, nil
 	case "freeze", "frozen", "notrain", "eval":
 		return ModeFreeze, nil
+	case "shadow", "teacher", "kd":
+		return ModeShadow, nil
+	case "adversarial", "adv", "enemy":
+		return ModeAdversarial, nil
+	case "memory", "surprise", "hippo":
+		return ModeMemory, nil
 	default:
 		return ModeInherit, fmt.Errorf("parallel: unknown train mode %q", s)
 	}
@@ -281,21 +293,34 @@ func (m TrainMode) String() string {
 		return "StepTweenSplitSparse"
 	case ModeFreeze:
 		return "Freeze"
+	case ModeShadow:
+		return "Shadow"
+	case ModeAdversarial:
+		return "Adversarial"
+	case ModeMemory:
+		return "Memory"
 	default:
 		return fmt.Sprintf("TrainMode(%d)", m)
 	}
 }
 
-// IsFrozen is forward/combine only — no weight update.
+// IsFrozen is forward/combine only — no weight update (Freeze or Shadow teacher).
 func (m TrainMode) IsFrozen() bool {
-	return m == ModeFreeze
+	return m == ModeFreeze || m == ModeShadow
+}
+
+// IsShadow marks a frozen KD teacher cam.
+func (m TrainMode) IsShadow() bool {
+	return m == ModeShadow
 }
 
 // Family collapses Step/Mesh scheduling variants to the Op update class.
 func (m TrainMode) Family() trainFamily {
 	switch m {
-	case ModeFreeze:
+	case ModeFreeze, ModeShadow:
 		return familyFreeze
+	case ModeAdversarial, ModeMemory:
+		return familyBP // update path still BP-shaped; signs/gates applied in mixed train
 	case ModeTween, ModeStepTween, ModeMeshTween:
 		return familyTween
 	case ModeTweenChain, ModeStepTweenChain, ModeMeshTweenChain:
@@ -440,6 +465,7 @@ func trainParallelMixed[T core.Numeric](l *Layer, gradOut, input, pre *core.Tens
 	if nb == 0 {
 		return nil
 	}
+	before := snapshotBranchNorms(l)
 	// Recompute branch posts (same as Backward).
 	branchPres := make([]*core.Tensor[T], nb)
 	branchOuts := make([]*core.Tensor[T], nb)
@@ -454,18 +480,64 @@ func trainParallelMixed[T core.Numeric](l *Layer, gradOut, input, pre *core.Tens
 	if err != nil {
 		return err
 	}
+	// Shadow KD: pull trainable cams toward teacher post.
+	var teacher *core.Tensor[T]
+	for i := 0; i < nb; i++ {
+		if l.EffectiveBranchMode(i, parentMode).IsShadow() {
+			teacher = branchOuts[i]
+			break
+		}
+	}
+	if teacher != nil {
+		coef := 1.0
+		if l.CamKit != nil {
+			coef = l.CamKit.shadowCoef()
+		}
+		n := float64(teacher.Len())
+		if n < 1 {
+			n = 1
+		}
+		for i := 0; i < nb; i++ {
+			bm := l.EffectiveBranchMode(i, parentMode)
+			if bm.IsFrozen() || branchGrads[i] == nil || branchOuts[i] == nil {
+				continue
+			}
+			if branchOuts[i].Len() != teacher.Len() {
+				continue
+			}
+			for j := range branchGrads[i].Data {
+				diff := core.AsFloat64(branchOuts[i].Data[j]) - core.AsFloat64(teacher.Data[j])
+				branchGrads[i].Data[j] += core.FromFloat64[T](coef * 2 * diff / n)
+			}
+		}
+	}
+	memOK := l.memoryAllowsTrain()
 	for i, ch := range l.Branches {
 		bm := l.EffectiveBranchMode(i, parentMode)
 		if bm.IsFrozen() {
 			continue
 		}
-		if err := trainOp(ch, branchGrads[i], input, branchPres[i], branchOuts[i], bm, lr); err != nil {
+		if bm == ModeMemory && !memOK {
+			continue
+		}
+		blr := l.EffectiveBranchLR(i, lr)
+		if blr == 0 {
+			continue
+		}
+		if bm == ModeAdversarial {
+			blr = -blr
+		}
+		updateMode := bm
+		switch bm {
+		case ModeAdversarial, ModeMemory:
+			updateMode = parentMode.Resolve(ModeNormalBP)
+		}
+		if err := trainOp(ch, branchGrads[i], input, branchPres[i], branchOuts[i], updateMode, blr); err != nil {
 			return fmt.Errorf("train branch %d (%s): %w", i, bm, err)
 		}
 	}
 	if l.Gate != nil {
 		pf := parentMode.Resolve(ModeNormalBP).Family()
-		// Gate follows BP/TweenChain parents; soft-skip on pure tween parent.
 		if pf != familyTween {
 			_, dWg, err := dense.Backward(l.Gate, approxGateGrad(l, gradOut, branchOuts), input, nil)
 			if err == nil && dWg != nil {
@@ -473,6 +545,8 @@ func trainParallelMixed[T core.Numeric](l *Layer, gradOut, input, pre *core.Tens
 			}
 		}
 	}
+	recordPlasticity(l, before)
+	_ = l.applyDNAReg()
 	return nil
 }
 
@@ -501,6 +575,59 @@ func splitCombineGrad[T core.Numeric](l *Layer, gradOut *core.Tensor[T], branchO
 				g.Data[j] = gradOut.Data[j] * inv
 			}
 			out[i] = g
+		}
+	case CombineMax:
+		// Straight-through: route gy only to argmax branch per element.
+		for i := range out {
+			out[i] = core.NewTensor[T](gradOut.Shape...)
+		}
+		n := gradOut.Len()
+		for j := 0; j < n; j++ {
+			bestI := 0
+			best := core.AsFloat64(branchOuts[0].Data[j])
+			for i := 1; i < nb; i++ {
+				v := core.AsFloat64(branchOuts[i].Data[j])
+				if v > best {
+					best, bestI = v, i
+				}
+			}
+			out[bestI].Data[j] = gradOut.Data[j]
+		}
+	case CombineSparseK:
+		sel := sparseKSelected(branchOuts, l.Cfg.sparseK())
+		inv := core.FromFloat64[T](1.0 / float64(len(sel)))
+		for i := range out {
+			out[i] = core.NewTensor[T](gradOut.Shape...)
+		}
+		for _, i := range sel {
+			for j := range out[i].Data {
+				out[i].Data[j] = gradOut.Data[j] * inv
+			}
+		}
+	case CombineDisagree:
+		beta := l.Cfg.disagreeBeta()
+		inv := 1.0 / float64(nb)
+		for i := range out {
+			out[i] = core.NewTensor[T](gradOut.Shape...)
+		}
+		if nb == 2 {
+			// y = mean + β(a−b); ∂y/∂a = 0.5+β, ∂y/∂b = 0.5−β
+			ca := core.FromFloat64[T](inv + beta)
+			cb := core.FromFloat64[T](inv - beta)
+			for j := range gradOut.Data {
+				out[0].Data[j] = gradOut.Data[j] * ca
+				out[1].Data[j] = gradOut.Data[j] * cb
+			}
+		} else {
+			// y = mean + β(cam0−mean) = (1−β)·mean + β·cam0
+			c0 := core.FromFloat64[T](beta + (1-beta)*inv)
+			co := core.FromFloat64[T]((1 - beta) * inv)
+			for j := range gradOut.Data {
+				out[0].Data[j] = gradOut.Data[j] * c0
+				for i := 1; i < nb; i++ {
+					out[i].Data[j] = gradOut.Data[j] * co
+				}
+			}
 		}
 	case CombineConcat:
 		// Slice gradOut along feature axis per branch width.

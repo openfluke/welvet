@@ -61,10 +61,16 @@ type SyncPair struct {
 //	w_i ← (1-α)·w_i + α·mean(group)
 //
 // 0.01 = 1% pull, 1.0 = hard sync (all cams share the mean).
+//
+// BranchAlpha[i] overrides Alpha when writing cam i. α_i≤0 ⇒ one-way (contribute
+// to mean, do not write) — asymmetric / teacher sync.
 type CamSyncConfig struct {
 	Enabled bool
 	Alpha   float64  // default 1.0 when Enabled and Alpha≤0
 	When    SyncWhen // default SyncManual
+
+	// BranchAlpha optional per-cam write strength (len 0 ⇒ use Alpha for all).
+	BranchAlpha []float64
 
 	// Groups lists within-Parallel cam index cliques (into Layer.Branches).
 	// Empty ⇒ one group of every branch when syncing a Parallel layer.
@@ -297,10 +303,17 @@ func blendBranchGroup(l *Layer, idxs []int, alpha float64) error {
 	// Group by store index: sync slot 0 across cams, slot 1 across cams, …
 	maxSlots := 0
 	perBranch := make([][]*weights.Store, len(idxs))
+	writeA := make([]float64, len(idxs))
+	baseA := alpha
 	for i, bi := range idxs {
 		if bi < 0 || bi >= len(l.Branches) {
 			return fmt.Errorf("branch index %d out of range", bi)
 		}
+		a := baseA
+		if l.CamSync != nil && bi < len(l.CamSync.BranchAlpha) {
+			a = l.CamSync.BranchAlpha[bi]
+		}
+		writeA[i] = a
 		sts := opWeightStores(l.Branches[bi])
 		perBranch[i] = sts
 		if len(sts) > maxSlots {
@@ -309,8 +322,9 @@ func blendBranchGroup(l *Layer, idxs []int, alpha float64) error {
 	}
 	for slot := 0; slot < maxSlots; slot++ {
 		var clique []*weights.Store
+		var alphas []float64
 		var shapeR, shapeC int
-		for _, sts := range perBranch {
+		for i, sts := range perBranch {
 			if slot >= len(sts) || sts[slot] == nil {
 				continue
 			}
@@ -318,14 +332,15 @@ func blendBranchGroup(l *Layer, idxs []int, alpha float64) error {
 			if len(clique) == 0 {
 				shapeR, shapeC = s.Rows, s.Cols
 			} else if s.Rows != shapeR || s.Cols != shapeC {
-				// Skip mismatched slot across cams (cross-size not in this group).
 				clique = nil
+				alphas = nil
 				break
 			}
 			clique = append(clique, s)
+			alphas = append(alphas, writeA[i])
 		}
 		if len(clique) >= 2 {
-			if err := weights.BlendStores(clique, alpha); err != nil {
+			if err := weights.BlendStoresWeighted(clique, alphas); err != nil {
 				return err
 			}
 		}

@@ -12,14 +12,22 @@ import (
 // alpha is clamped to (0,1]: 0.01 = gentle 1% pull, 1.0 = hard average.
 // All stores must share the same Rows×Cols. Matching Bias lengths are blended too.
 func BlendStores(stores []*Store, alpha float64) error {
+	alphas := make([]float64, len(stores))
+	for i := range alphas {
+		alphas[i] = alpha
+	}
+	return BlendStoresWeighted(stores, alphas)
+}
+
+// BlendStoresWeighted is asymmetric CamSync: each store i is written with its own α_i.
+// α_i ≤ 0 skips writing that store (one-way: it still contributes to the mean).
+// α_i > 1 is clamped to 1.
+func BlendStoresWeighted(stores []*Store, alphas []float64) error {
 	if len(stores) < 2 {
 		return nil
 	}
-	if alpha <= 0 {
-		return nil
-	}
-	if alpha > 1 {
-		alpha = 1
+	if len(alphas) != len(stores) {
+		return fmt.Errorf("weights: BlendStoresWeighted len alphas %d vs stores %d", len(alphas), len(stores))
 	}
 	var ref *Store
 	for _, s := range stores {
@@ -60,19 +68,30 @@ func BlendStores(stores []*Store, alpha float64) error {
 		}
 	}
 
-	a := float32(alpha)
-	oma := float32(1 - alpha)
+	anyWrite := false
 	for i, s := range stores {
+		a := alphas[i]
+		if a <= 0 {
+			continue
+		}
+		if a > 1 {
+			a = 1
+		}
+		anyWrite = true
+		af := float32(a)
+		oma := float32(1 - a)
 		out := make([]float32, n)
 		for j := 0; j < n; j++ {
-			out[j] = oma*flats[i][j] + a*mean[j]
+			out[j] = oma*flats[i][j] + af*mean[j]
 		}
 		if err := s.SetFromF32(out); err != nil {
 			return fmt.Errorf("weights: BlendStores set %d: %w", i, err)
 		}
 	}
+	if !anyWrite {
+		return nil
+	}
 
-	// Bias (optional, same length across clique).
 	biasLen := -1
 	for _, s := range stores {
 		if s.Bias == nil {
@@ -94,9 +113,16 @@ func BlendStores(stores []*Store, alpha float64) error {
 				bMean[j] += x * invB
 			}
 		}
-		for _, s := range stores {
+		for i, s := range stores {
+			a := alphas[i]
+			if a <= 0 {
+				continue
+			}
+			if a > 1 {
+				a = 1
+			}
 			for j := range s.Bias {
-				s.Bias[j] = (1-alpha)*s.Bias[j] + alpha*bMean[j]
+				s.Bias[j] = (1-a)*s.Bias[j] + a*bMean[j]
 			}
 		}
 	}
@@ -131,4 +157,21 @@ func StoreCosine(a, b *Store) (float64, error) {
 		return 0, nil
 	}
 	return dot / (math.Sqrt(na) * math.Sqrt(nb)), nil
+}
+
+// StoreFrobenius is √Σ w² of a flattened store (plasticity / ΔW meters).
+func StoreFrobenius(s *Store) (float64, error) {
+	if s == nil {
+		return 0, fmt.Errorf("weights: StoreFrobenius nil")
+	}
+	v, err := s.FlattenF32()
+	if err != nil {
+		return 0, err
+	}
+	var sum float64
+	for _, x := range v {
+		f := float64(x)
+		sum += f * f
+	}
+	return math.Sqrt(sum), nil
 }

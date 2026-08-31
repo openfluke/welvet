@@ -85,11 +85,14 @@ func TrainMSE[T core.Numeric](l *Layer, input, target *core.Tensor[T], mode Trai
 	if err != nil {
 		return 0, err
 	}
+	l.NoteLoss(loss)
 	if err := Train(l, gy, input, pre, mode, lr); err != nil {
 		return loss, err
 	}
 	_ = l.MaybeSync(SyncAfterStep)
 	_ = l.MaybeSync(SyncAfterSample)
+	l.AdvanceRotate()
+	l.RefreshMetrics()
 	return loss, nil
 }
 

@@ -3,7 +3,7 @@ package parallel
 import "strings"
 
 // ShortTrainModeLegend is the display key for compact train-mode names.
-const ShortTrainModeLegend = "[T]=Tween  [S]=Split  [FP]=FastProxy  [L]=Linear  [HP]=HeadProxy  [F]=Freeze"
+const ShortTrainModeLegend = "[T]=Tween  [S]=Split  [FP]=FastProxy  [L]=Linear  [HP]=HeadProxy  [F]=Freeze  [Sh]=Shadow  [A]=Adv  [M]=Memory"
 
 // ShortTrainMode is display-only. Persistence / ParseTrainMode still use String().
 func ShortTrainMode(name string) string {
@@ -11,8 +11,15 @@ func ShortTrainMode(name string) string {
 	if s == "" {
 		return s
 	}
-	if strings.EqualFold(s, "Freeze") {
+	switch {
+	case strings.EqualFold(s, "Freeze"):
 		return "[F]"
+	case strings.EqualFold(s, "Shadow"):
+		return "[Sh]"
+	case strings.EqualFold(s, "Adversarial"):
+		return "[A]"
+	case strings.EqualFold(s, "Memory"):
+		return "[M]"
 	}
 	repls := [][2]string{
 		{"FastProxy", "[FP]"},

@@ -452,7 +452,10 @@ func combineCollected[T core.Numeric](l *Layer, branchOut []*core.Tensor[T]) (*c
 			}
 		}
 		return out, nil
+	case CombineAdd, CombineAvg, CombineMax, CombineSparseK, CombineDisagree:
+		return combineEqualWidth(l, branchOut)
 	default:
+		// filter / legacy: sum (avg if CombineAvg already handled)
 		out := core.NewTensor[T](branchOut[0].Shape...)
 		nb := 0
 		for _, o := range branchOut {

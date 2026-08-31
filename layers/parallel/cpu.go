@@ -178,22 +178,16 @@ func forwardHost[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *co
 
 	combined := core.NewTensor[T](n, outDim)
 	switch l.Cfg.Combine {
-	case CombineAdd:
-		for _, o := range branchOut {
-			for j := range combined.Data {
-				combined.Data[j] += o.Data[j]
-			}
+	case CombineAdd, CombineAvg, CombineMax, CombineSparseK, CombineDisagree:
+		posts := make([]*core.Tensor[T], nb)
+		for i := range branchOut {
+			posts[i] = branchOut[i]
 		}
-	case CombineAvg:
-		inv := core.FromFloat64[T](1.0 / float64(nb))
-		for _, o := range branchOut {
-			for j := range combined.Data {
-				combined.Data[j] += o.Data[j]
-			}
+		merged, err := combineEqualWidth(l, posts)
+		if err != nil {
+			return nil, nil, err
 		}
-		for j := range combined.Data {
-			combined.Data[j] *= inv
-		}
+		copy(combined.Data, merged.Data)
 	case CombineFilter:
 		if l.Gate == nil {
 			return nil, nil, fmt.Errorf("parallel: filter mode requires Gate")
@@ -355,6 +349,16 @@ func backwardHost[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T])
 		}
 		for i := 0; i < nb; i++ {
 			if err := bwdOne(i, scaled); err != nil {
+				return nil, nil, fmt.Errorf("parallel bwd branch %d: %w", i, err)
+			}
+		}
+	case CombineMax, CombineSparseK, CombineDisagree:
+		branchGys, err := splitCombineGrad(l, gyFlat, branchOuts)
+		if err != nil {
+			return nil, nil, err
+		}
+		for i := 0; i < nb; i++ {
+			if err := bwdOne(i, branchGys[i]); err != nil {
 				return nil, nil, fmt.Errorf("parallel bwd branch %d: %w", i, err)
 			}
 		}
