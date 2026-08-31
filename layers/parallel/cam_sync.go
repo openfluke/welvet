@@ -3,7 +3,25 @@ package parallel
 import (
 	"fmt"
 
+	"github.com/openfluke/welvet/layers/cnn1"
+	"github.com/openfluke/welvet/layers/cnn2"
+	"github.com/openfluke/welvet/layers/cnn3"
+	"github.com/openfluke/welvet/layers/convt1"
+	"github.com/openfluke/welvet/layers/convt2"
+	"github.com/openfluke/welvet/layers/convt3"
 	"github.com/openfluke/welvet/layers/dense"
+	"github.com/openfluke/welvet/layers/embedding"
+	"github.com/openfluke/welvet/layers/kmeans"
+	"github.com/openfluke/welvet/layers/layernorm"
+	"github.com/openfluke/welvet/layers/lstm"
+	"github.com/openfluke/welvet/layers/mamba"
+	"github.com/openfluke/welvet/layers/metacognition"
+	"github.com/openfluke/welvet/layers/mha"
+	"github.com/openfluke/welvet/layers/residual"
+	"github.com/openfluke/welvet/layers/rmsnorm"
+	"github.com/openfluke/welvet/layers/rnn"
+	"github.com/openfluke/welvet/layers/sequential"
+	"github.com/openfluke/welvet/layers/swiglu"
 	"github.com/openfluke/welvet/weights"
 )
 
@@ -332,23 +350,101 @@ func resolveEndpoint(s *Stack, e SyncEndpoint) (*weights.Store, error) {
 }
 
 // opWeightStores lists weight matrices for a branch Op (no dna import — avoid cycles).
+// Must stay in sync with dna.CollectStores for every Parallel-legal Op that owns Stores.
+// Softmax/GDN/View/Flatten: no *weights.Store (GDN uses quant.Blob — not blendable here).
 func opWeightStores(op any) []*weights.Store {
 	if op == nil {
 		return nil
 	}
 	switch v := op.(type) {
 	case *dense.Layer:
-		if v != nil && v.Weights != nil {
+		return storesFromDense(v)
+	case *mha.Layer:
+		var out []*weights.Store
+		out = append(out, storesFromDense(v.Q)...)
+		out = append(out, storesFromDense(v.K)...)
+		out = append(out, storesFromDense(v.V)...)
+		out = append(out, storesFromDense(v.O)...)
+		return out
+	case *swiglu.Layer:
+		var out []*weights.Store
+		out = append(out, storesFromDense(v.Gate)...)
+		out = append(out, storesFromDense(v.Up)...)
+		out = append(out, storesFromDense(v.Down)...)
+		return out
+	case *rmsnorm.Layer:
+		if v.Gamma != nil {
+			return []*weights.Store{v.Gamma}
+		}
+	case *layernorm.Layer:
+		var out []*weights.Store
+		if v.Gamma != nil {
+			out = append(out, v.Gamma)
+		}
+		if v.Beta != nil {
+			out = append(out, v.Beta)
+		}
+		return out
+	case *cnn1.Layer:
+		return storesFromDense(v.Proj)
+	case *cnn2.Layer:
+		return storesFromDense(v.Proj)
+	case *cnn3.Layer:
+		return storesFromDense(v.Proj)
+	case *convt1.Layer:
+		return storesFromDense(v.Proj)
+	case *convt2.Layer:
+		return storesFromDense(v.Proj)
+	case *convt3.Layer:
+		return storesFromDense(v.Proj)
+	case *rnn.Layer:
+		var out []*weights.Store
+		out = append(out, storesFromDense(v.IH)...)
+		out = append(out, storesFromDense(v.HH)...)
+		return out
+	case *lstm.Layer:
+		var out []*weights.Store
+		for _, g := range []*lstm.Gate{v.I, v.F, v.G, v.O} {
+			if g == nil {
+				continue
+			}
+			out = append(out, storesFromDense(g.IH)...)
+			out = append(out, storesFromDense(g.HH)...)
+		}
+		return out
+	case *embedding.Layer:
+		if v.Weights != nil {
 			return []*weights.Store{v.Weights}
 		}
+	case *sequential.Layer:
+		var out []*weights.Store
+		for _, ch := range v.ChildOps() {
+			out = append(out, opWeightStores(ch)...)
+		}
+		return out
+	case *residual.Layer:
+		var out []*weights.Store
+		for _, ch := range v.ChildOps() {
+			out = append(out, opWeightStores(ch)...)
+		}
+		return out
+	case *ResidualSkip:
+		return opWeightStores(v.F)
+	case *kmeans.Layer:
+		return storesFromDense(v.Centers)
+	case *mamba.Layer:
+		var out []*weights.Store
+		out = append(out, storesFromDense(v.InProj)...)
+		out = append(out, storesFromDense(v.OutProj)...)
+		return out
+	case *metacognition.Layer:
+		return storesFromDense(v.Observed)
 	case *Layer:
 		var out []*weights.Store
 		for _, ch := range v.Branches {
 			out = append(out, opWeightStores(ch)...)
 		}
-		if v.Gate != nil && v.Gate.Weights != nil {
-			out = append(out, v.Gate.Weights)
-		}
+		out = append(out, storesFromDense(v.Gate)...)
 		return out
 	case *Stack:
 		var out []*weights.Store
@@ -358,4 +454,11 @@ func opWeightStores(op any) []*weights.Store {
 		return out
 	}
 	return nil
+}
+
+func storesFromDense(d *dense.Layer) []*weights.Store {
+	if d == nil || d.Weights == nil {
+		return nil
+	}
+	return []*weights.Store{d.Weights}
 }
