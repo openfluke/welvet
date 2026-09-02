@@ -539,9 +539,12 @@ func trainParallelMixed[T core.Numeric](l *Layer, gradOut, input, pre *core.Tens
 	if l.Gate != nil {
 		pf := parentMode.Resolve(ModeNormalBP).Family()
 		if pf != familyTween {
-			_, dWg, err := dense.Backward(l.Gate, approxGateGrad(l, gradOut, branchOuts), input, nil)
-			if err == nil && dWg != nil {
-				_ = dense.ApplyGradSGD(l.Gate, dWg, lr)
+			gatePre, _, gErr := dense.Forward(l.Gate, input)
+			if gErr == nil {
+				_, dWg, err := dense.Backward(l.Gate, approxGateGrad(l, gradOut, branchOuts), input, gatePre)
+				if err == nil && dWg != nil {
+					_ = dense.ApplyGradSGD(l.Gate, dWg, lr)
+				}
 			}
 		}
 	}

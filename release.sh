@@ -165,6 +165,9 @@ go get github.com/openfluke/welvet@${tag}
 - **GPU fuse** — `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan)
 - **lucy** — shared SoftAcc / Availability / AdaptPct / Score measuring harness
 
+### What's new in v1.1.1
+- **Cam adjusting fixed** — CamSync / inter-cameral weight blend now works on **all layers** (Dense, CNN, Parallel branches, Stack-resolved stores), not just a subset of paths
+
 ### What's new in v1.1.0
 - **CamSync** — soft/hard inter-cameral weight blend (`CamSyncConfig` / `weights.BlendStores`); α 1%→100%; Groups; Cross same-shape pairs across Stack children / meshes; after sample / step / pulse / manual
 - **`training_modes.md`** — all 29 named credit modes with equations + ShortTrainMode legend
