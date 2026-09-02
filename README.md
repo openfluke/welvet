@@ -643,7 +643,7 @@ Non-attention mixers (Mamba/SSM, linear attn, Hyena) are **not** forks of `layer
 | `systems/dna/` | Topology DNA — all implemented Ops + GDN blobs; FlattenF32 across dtype×quant | 1 | ✅ |
 | `systems/evolution/` | DNA splice + NEAT — clones all implemented Ops; dtype/quant preserved via SetFromF32 | 1 | ✅ |
 | `systems/tween/` | Target prop — BackendSIMD DotTile/Saxpy chain-rule; Hebbian Saxpy + DotTile budgets; all weighted Ops | 1 | ✅ |
-| `systems/tanhi/` | UDP HUD telemetry — all implemented Ops × dtype/quant via FlattenOp | 1 | ✅ |
+| `systems/tanhi/` | **TANHI** (Tensor Activation Network Holographic Interface) — UDP HUD telemetry; all implemented Ops × dtype/quant via FlattenOp | 1 | ✅ |
 | `systems/telemetry/` | Structural blueprint — all implemented Ops (+ meta estimates) | 1 | ✅ |
 
 ### Off-board (not v1 pts) — apps, stubs, NPU

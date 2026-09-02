@@ -1,5 +1,6 @@
-// Package tanhi streams sparse non-blocking JSON-line UDP events for HUD visualization
-// (loom/poly TANHI rebuild). Best-effort queue — overflow drops so training never blocks.
+// Package tanhi implements TANHI (Tensor Activation Network Holographic Interface):
+// sparse non-blocking JSON-line UDP events for HUD visualization (loom/poly rebuild).
+// Best-effort queue — overflow drops so training never blocks.
 //
 // Tests live in github.com/openfluke/w2a — not here.
 package tanhi
@@ -14,7 +15,6 @@ import (
 
 	"github.com/openfluke/welvet/architecture"
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/systems/dna"
 )
 
 // DefaultUDPPort is the default client destination (IANA unassigned range).
@@ -135,14 +135,10 @@ func resolveUDPAddr(cfg *UDPConfig) *net.UDPAddr {
 }
 
 func connectionCount(cell *architecture.Cell) int {
-	if cell == nil {
+	if cell == nil || cell.Op == nil || connCounter == nil {
 		return 0
 	}
-	flat, err := dna.FlattenOp(cell.Op)
-	if err != nil {
-		return 0
-	}
-	return len(flat)
+	return connCounter(cell.Op)
 }
 
 func routingLinks(cell *architecture.Cell) []coordWire {
@@ -229,6 +225,17 @@ func GPULayerShapeHint(meta core.Layer, numTokens int) []int {
 			return []int{numTokens, meta.OutputHeight}
 		}
 		return []int{numTokens, meta.InputHeight}
+	case core.LayerCNN1, core.LayerCNN2, core.LayerCNN3,
+		core.LayerConvTransposed1D, core.LayerConvTransposed2D, core.LayerConvTransposed3D:
+		if meta.OutputHeight > 0 {
+			return []int{numTokens, meta.OutputHeight}
+		}
+		return []int{numTokens, meta.InputHeight}
+	case core.LayerParallel, core.LayerStack, core.LayerSequential:
+		if meta.OutputHeight > 0 {
+			return []int{numTokens, meta.OutputHeight}
+		}
+		return []int{numTokens, meta.InputHeight}
 	default:
 		if meta.OutputHeight > 0 {
 			return []int{numTokens, meta.OutputHeight}
@@ -267,20 +274,30 @@ func EmitSweep(cfg *UDPConfig, label string) {
 // TanhiEmitSweep is the loom-compatible alias.
 func TanhiEmitSweep(cfg *UDPConfig, label string) { EmitSweep(cfg, label) }
 
-// ConfigFromGrid extracts *UDPConfig from grid.Tanhi (any).
-func ConfigFromGrid(g *architecture.Grid) *UDPConfig {
-	if g == nil || g.Tanhi == nil {
+// ConfigFromAny extracts *UDPConfig from grid.Tanhi or a parallel/stack host field.
+func ConfigFromAny(v any) *UDPConfig {
+	if v == nil {
 		return nil
 	}
-	switch v := g.Tanhi.(type) {
+	switch c := v.(type) {
 	case *UDPConfig:
-		return v
+		return c
 	case UDPConfig:
-		cp := v
+		cp := c
 		return &cp
+	case *architecture.Grid:
+		return ConfigFromGrid(c)
 	default:
 		return nil
 	}
+}
+
+// ConfigFromGrid extracts *UDPConfig from grid.Tanhi (any).
+func ConfigFromGrid(g *architecture.Grid) *UDPConfig {
+	if g == nil {
+		return nil
+	}
+	return ConfigFromAny(g.Tanhi)
 }
 
 // Emit records one layer boundary event (non-blocking; drops if queue full).
@@ -293,6 +310,7 @@ func EmitWithConn(cfg *UDPConfig, phase string, idx int, cell *architecture.Cell
 	if cfg == nil || !cfg.Enabled || cell == nil {
 		return
 	}
+	enrichCellTopology(cell)
 	addr := resolveUDPAddr(cfg)
 	if addr == nil {
 		return

@@ -2,6 +2,7 @@ package sequential
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/dense"
@@ -17,6 +18,7 @@ type Layer struct {
 	Exec     core.ExecConfig
 	Children []*dense.Layer
 	Ops      []any // heterogeneous children; when set, ChildOps prefers this
+	Tanhi    any   // optional *tanhi.UDPConfig; synced from grid on Place
 }
 
 // New creates Sequential with Depth square Dense children (FormatNone Float32).
@@ -120,14 +122,19 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 		return nil, nil, fmt.Errorf("sequential: nil layer/input")
 	}
 	l.syncChildExec()
+	t0 := time.Now()
 	switch l.Exec.Backend {
 	case core.BackendSIMD:
-		return ForwardSIMD(l, input)
+		pre, post, err = ForwardSIMD(l, input)
 	case core.BackendWebGPU:
-		return ForwardWebGPU(l, input)
+		pre, post, err = ForwardWebGPU(l, input)
 	default:
-		return ForwardCPUTiled(l, input)
+		pre, post, err = ForwardCPUTiled(l, input)
 	}
+	if err == nil {
+		emitSequentialTanhi(l, "fwd", 0, t0, time.Now(), post)
+	}
+	return pre, post, err
 }
 
 // Backward chains child Dense backwards; gradW is concat of child dWs.
@@ -137,14 +144,19 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 		return nil, nil, fmt.Errorf("sequential: nil layer")
 	}
 	l.syncChildExec()
+	t0 := time.Now()
 	switch l.Exec.Backend {
 	case core.BackendSIMD:
-		return BackwardSIMD(l, gradOut, input, pre)
+		gradIn, gradW, err = BackwardSIMD(l, gradOut, input, pre)
 	case core.BackendWebGPU:
-		return BackwardWebGPU(l, gradOut, input, pre)
+		gradIn, gradW, err = BackwardWebGPU(l, gradOut, input, pre)
 	default:
-		return BackwardCPUTiled(l, gradOut, input, pre)
+		gradIn, gradW, err = BackwardCPUTiled(l, gradOut, input, pre)
 	}
+	if err == nil {
+		emitSequentialTanhi(l, "bwd", 0, t0, time.Now(), gradIn)
+	}
+	return gradIn, gradW, err
 }
 
 // GradWSize is sum of child weight matrix lengths.

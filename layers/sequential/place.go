@@ -16,5 +16,9 @@ func Place(g *architecture.Grid, z, y, x, lidx int, layer *Layer) error {
 	layer.Core.Z, layer.Core.Y, layer.Core.X, layer.Core.L = z, y, x, lidx
 	layer.Exec = g.Exec
 	layer.syncChildExec()
-	return g.BindOp(z, y, x, lidx, layer.Core, layer)
+	if err := g.BindOp(z, y, x, lidx, layer.Core, layer); err != nil {
+		return err
+	}
+	layer.Tanhi = g.Tanhi
+	return nil
 }

@@ -3,6 +3,7 @@ package parallel
 import (
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/dense"
@@ -23,6 +24,7 @@ type Layer struct {
 	CamSync     *CamSyncConfig // optional inter-cameral weight averaging
 	CamKit      *CamKit        // Shadow / DNA / Memory / Dream / plasticity
 	Rotate      *RotateSchedule
+	Tanhi       any            // optional *tanhi.UDPConfig; synced from grid on Place
 	accel       splitAccel // LinearCache / HeadProxyAsync / Sparse
 }
 
@@ -187,14 +189,19 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 		return nil, nil, fmt.Errorf("parallel: nil layer/input")
 	}
 	l.SyncBranchExec()
+	t0 := time.Now()
 	switch l.Exec.Backend {
 	case core.BackendSIMD:
-		return ForwardSIMD(l, input)
+		pre, post, err = ForwardSIMD(l, input)
 	case core.BackendWebGPU:
-		return ForwardWebGPU(l, input)
+		pre, post, err = ForwardWebGPU(l, input)
 	default:
-		return ForwardCPUTiled(l, input)
+		pre, post, err = ForwardCPUTiled(l, input)
 	}
+	if err == nil {
+		emitLayerTanhi(l, "fwd", 0, t0, time.Now(), post)
+	}
+	return pre, post, err
 }
 
 // Backward distributes grads; gradW is concat of branch dWs (+ gate dW for filter).
@@ -203,14 +210,19 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 		return nil, nil, fmt.Errorf("parallel: nil layer")
 	}
 	l.SyncBranchExec()
+	t0 := time.Now()
 	switch l.Exec.Backend {
 	case core.BackendSIMD:
-		return BackwardSIMD(l, gradOut, input, pre)
+		gradIn, gradW, err = BackwardSIMD(l, gradOut, input, pre)
 	case core.BackendWebGPU:
-		return BackwardWebGPU(l, gradOut, input, pre)
+		gradIn, gradW, err = BackwardWebGPU(l, gradOut, input, pre)
 	default:
-		return BackwardCPUTiled(l, gradOut, input, pre)
+		gradIn, gradW, err = BackwardCPUTiled(l, gradOut, input, pre)
 	}
+	if err == nil {
+		emitLayerTanhi(l, "bwd", 0, t0, time.Now(), gradIn)
+	}
+	return gradIn, gradW, err
 }
 
 // GradWSize is sum of branch (+ gate) GradWSize.

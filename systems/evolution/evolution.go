@@ -13,6 +13,7 @@ import (
 	"github.com/openfluke/welvet/architecture"
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/systems/dna"
+	"github.com/openfluke/welvet/systems/tanhi"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/layers/embedding"
 	"github.com/openfluke/welvet/layers/layernorm"
@@ -421,6 +422,7 @@ func CloneGrid(src *architecture.Grid) (*architecture.Grid, error) {
 		}
 		dc.Op = op
 	}
+	tanhi.SyncGridTanhi(dst)
 	return dst, nil
 }
 

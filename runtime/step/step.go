@@ -18,6 +18,7 @@ import (
 	"github.com/openfluke/welvet/runtime/backward"
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/runtime/forward"
+	"github.com/openfluke/welvet/systems/tanhi"
 	"github.com/openfluke/welvet/systems/tween"
 )
 
@@ -135,10 +136,19 @@ func Forward[T core.Numeric](g *architecture.Grid, s *State[T], captureHistory b
 									if input == nil {
 										continue
 									}
+									t0 := time.Now()
 									pre, post, err := forward.Cell(cell, input)
+									t1 := time.Now()
 									if err != nil {
 										firstErr.Store(fmt.Errorf("step fwd (%d,%d,%d,%d): %w", z, y, x, lIdx, err))
 										continue
+									}
+									tanhiCfg := tanhi.ConfigFromGrid(g)
+									if tanhiCfg != nil && tanhiCfg.SendShape && post != nil {
+										shape := append([]int(nil), post.Shape...)
+										tanhi.Emit(tanhiCfg, "fwd", idx, cell, t0, t1, shape)
+									} else {
+										tanhi.Emit(tanhiCfg, "fwd", idx, cell, t0, t1, nil)
 									}
 									s.NextBuffer[idx] = post
 									if captureHistory {
@@ -212,10 +222,18 @@ func Backward[T core.Numeric](g *architecture.Grid, s *State[T], gradOutput *cor
 			if input == nil || pre == nil || currentGrad == nil {
 				continue
 			}
+			t0 := time.Now()
 			gIn, gW, err := backward.Cell(cell, currentGrad, input, pre)
+			t1 := time.Now()
 			if err != nil {
 				return nil, nil, fmt.Errorf("step bwd idx=%d: %w", idx, err)
 			}
+			tanhiCfg := tanhi.ConfigFromGrid(g)
+			var shape []int
+			if tanhiCfg != nil && tanhiCfg.SendShape && gIn != nil {
+				shape = append([]int(nil), gIn.Shape...)
+			}
+			tanhi.Emit(tanhiCfg, "bwd", idx, cell, t0, t1, shape)
 			if layerGradients[idx][1] == nil {
 				layerGradients[idx] = [2]*core.Tensor[T]{gIn, gW}
 			} else if gW != nil && layerGradients[idx][1] != nil {

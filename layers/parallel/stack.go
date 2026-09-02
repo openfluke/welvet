@@ -2,6 +2,7 @@ package parallel
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/cnn1"
@@ -26,6 +27,7 @@ type Stack struct {
 	ChildModes []TrainMode // optional per-child mode; empty ⇒ inherit parent
 	AltTimes   int         // TweenAlt: Split→Tween pairs per update (0 ⇒ 1)
 	CamSync    *CamSyncConfig // optional inter-cameral / cross-layer weight averaging
+	Tanhi      any            // optional *tanhi.UDPConfig; synced from grid on PlaceStack
 	accel      splitAccel  // LinearCache / HeadProxyAsync / Sparse
 	line       any         // *Line[T] for Step* systolic train
 }
@@ -170,14 +172,18 @@ func ForwardStack[T core.Numeric](s *Stack, input *core.Tensor[T]) (pre, post *c
 	}
 	current := input
 	var lastPre *core.Tensor[T]
+	stackT0 := time.Now()
 	for i, ch := range s.Children {
-		p, o, err := branchForward(ch, current, nil)
-		if err != nil {
-			return nil, nil, fmt.Errorf("stack fwd child %d: %w", i, err)
+		t0 := time.Now()
+		p, o, errFwd := branchForward(ch, current, nil)
+		if errFwd != nil {
+			return nil, nil, fmt.Errorf("stack fwd child %d: %w", i, errFwd)
 		}
+		emitOpTanhi(s.Tanhi, "fwd", i, ch, t0, time.Now(), o)
 		lastPre = p
 		current = o
 	}
+	emitStackTanhi(s, "fwd", len(s.Children), stackT0, time.Now(), current)
 	return lastPre, current, nil
 }
 
@@ -210,14 +216,18 @@ func BackwardStack[T core.Numeric](s *Stack, gradOut, input, pre *core.Tensor[T]
 	}
 	gy := gradOut
 	dWs := make([]*core.Tensor[T], n)
+	stackT0 := time.Now()
 	for i := n - 1; i >= 0; i-- {
-		gx, dw, err := branchBackward(s.Children[i], gy, ins[i], nil, pres[i])
-		if err != nil {
-			return nil, nil, fmt.Errorf("stack bwd child %d: %w", i, err)
+		t0 := time.Now()
+		gx, dw, errBwd := branchBackward(s.Children[i], gy, ins[i], nil, pres[i])
+		if errBwd != nil {
+			return nil, nil, fmt.Errorf("stack bwd child %d: %w", i, errBwd)
 		}
+		emitOpTanhi(s.Tanhi, "bwd", i, s.Children[i], t0, time.Now(), gx)
 		dWs[i] = dw
 		gy = gx
 	}
+	emitStackTanhi(s, "bwd", n, stackT0, time.Now(), gy)
 	need := s.GradWSize()
 	if need == 0 {
 		return gy, nil, nil

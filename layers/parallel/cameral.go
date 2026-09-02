@@ -95,5 +95,11 @@ func PlaceStack(g *architecture.Grid, z, y, x, lidx int, layer *Stack) error {
 	layer.Core.Z, layer.Core.Y, layer.Core.X, layer.Core.L = z, y, x, lidx
 	layer.Exec = g.Exec
 	layer.SyncChildExec()
-	return g.BindOp(z, y, x, lidx, layer.Core, layer)
+	if err := g.BindOp(z, y, x, lidx, layer.Core, layer); err != nil {
+		return err
+	}
+	layer.Tanhi = g.Tanhi
+	syncTanhiIntoOp(layer, g.Tanhi)
+	stampCellFromOp(g.At(z, y, x, lidx))
+	return nil
 }
