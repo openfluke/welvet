@@ -11,8 +11,8 @@ import (
 	"os"
 	"unicode"
 
-	"github.com/eliben/go-sentencepiece"
-	"github.com/eliben/go-sentencepiece/internal/model"
+	"github.com/openfluke/go-sentencepiece"
+	"github.com/openfluke/go-sentencepiece/internal/model"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 )

@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	sentencepiece "github.com/eliben/go-sentencepiece"
+	sentencepiece "github.com/openfluke/go-sentencepiece"
 )
 
 // SentencePiece wraps a BPE SentencePiece processor (tokenizer.model).

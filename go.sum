@@ -1,4 +1,8 @@
 github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
+github.com/openfluke/go-sentencepiece v0.8.0 h1:TflWOPxkDYARiXgDuIU8YIh0napYF6J98Xg+exEyEAA=
+github.com/openfluke/go-sentencepiece v0.8.0/go.mod h1:Kk1KEozdlYxmkF0FauXsrpNaLhJpTz9XwErMzfo6bdY=
+github.com/openfluke/webgpu v1.0.5 h1:6DmDi/24H2jOAC/zpHDHwoWOl29bqmyJXmGLf5k5Hew=
+github.com/openfluke/webgpu v1.0.5/go.mod h1:072J6eEkBj9KgFzMY1RMgscUnu3EfTZsQABObSMZy1c=
 google.golang.org/protobuf v1.34.2 h1:6xV6lTsCfpGD21XK49h7MhtcApnLqkfYgPcdHftf6hg=
 google.golang.org/protobuf v1.34.2/go.mod h1:qYOHts0dSfpeUzUFpOMr/WGzszTmLH+DiWniOlNbLDw=

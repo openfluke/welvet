@@ -117,7 +117,7 @@ need_publish_tools() {
 smoke_build() {
   echo "→ go build (engine packages smoke)…"
   # Explicit roots — apps/w2a/book may exist on disk but are gitignored / not engine.
-  # replace directives need sibling webgpu checkout.
+  # Module deps resolve from the proxy (webgpu / go-sentencepiece) — no local replaces.
   local roots=(
     ./core/... ./weights/... ./quant/... ./simd/... ./webgpu/... ./tiling/...
     ./architecture/... ./layers/... ./runtime/... ./systems/... ./model/...
@@ -164,6 +164,9 @@ go get github.com/openfluke/welvet@${tag}
 - **FastProxy** — DFA-shaped \(B:=W_{\mathrm{head}}^\top\) rivaling StepBP Acc on sine/copy toys
 - **GPU fuse** — `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan)
 - **lucy** — shared SoftAcc / Availability / AdaptPct / Score measuring harness
+
+### What's new in v1.1.2
+- **Consumable module** — removed local \`replace\` for webgpu / go-sentencepiece; \`go get github.com/openfluke/welvet@v1.1.2\` works without sibling checkouts
 
 ### What's new in v1.1.1
 - **Cam adjusting fixed** — CamSync / inter-cameral weight blend now works on **all layers** (Dense, CNN, Parallel branches, Stack-resolved stores), not just a subset of paths

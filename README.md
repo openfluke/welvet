@@ -4,7 +4,7 @@
 
 | | |
 |--|--|
-| **Version** | **v1.1.1** |
+| **Version** | **v1.1.2** |
 | **Scorecard** | **100 / 100** pts (see [Version scorecard](#version-scorecard)) |
 
 Engine is v1. Apps (`octo`), stubs, and NPU/C++ accel sit **outside** this board — they are sibling / later trees (`welvet.cpp`), not missing Welvet.
@@ -50,9 +50,11 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v1.1.1.** Scorecard still **100/100** (v1.0 board complete). This patch fixes
-**CamSync / cam adjusting on all layer types** (Dense, CNN, Parallel, Stack children — not just
-selected paths). Prior **v1.1.0** packed CamSync, [`training_modes.md`](training_modes.md),
+**Status: v1.1.2.** Scorecard still **100/100** (v1.0 board complete). This patch drops
+local `replace` directives so `go get github.com/openfluke/welvet@v1.1.2` resolves
+**[openfluke/webgpu](https://github.com/openfluke/webgpu)** and go-sentencepiece from the
+module proxy (no sibling `../webgpu` or `third_party` checkout). Prior **v1.1.1** fixed
+CamSync on all layer types; **v1.1.0** packed CamSync, [`training_modes.md`](training_modes.md),
 Lucy **Lean** density, and feature-book §70.
 NPU/Metal/QNN are not scored here.
 
@@ -68,7 +70,7 @@ NPU/Metal/QNN are not scored here.
 
 **Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. Patch tags
 (v1.0.1–v1.0.3) and minor/patch tags (**v1.1.0**, **v1.1.1**, …) ship engine deltas without moving the
-board. Weights sum to **100**. This tag is **v1.1.1** (CamSync all-layer fix on the full v1.0 board).
+board. Weights sum to **100**. This tag is **v1.1.2** (remote module deps — no local `replace` for webgpu / go-sentencepiece).
 
 | # | Section | Wt | How scored today | Earned |
 |--:|---------|---:|------------------|-------:|

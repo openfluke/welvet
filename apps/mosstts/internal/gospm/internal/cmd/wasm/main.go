@@ -13,7 +13,7 @@ import (
 	"sync"
 	"syscall/js"
 
-	"github.com/eliben/go-sentencepiece"
+	"github.com/openfluke/go-sentencepiece"
 )
 
 //go:embed embed_data/tokenizer.model
