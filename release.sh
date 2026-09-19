@@ -165,6 +165,10 @@ go get github.com/openfluke/welvet@${tag}
 - **GPU fuse** — `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan)
 - **lucy** — shared SoftAcc / Availability / AdaptPct / Score measuring harness
 
+### What's new in v1.1.3
+- **FlightRole on Step\* Line** — \`RoleTrain\` / \`RoleAction\`, \`TickLine\` / \`TickStackLine\`; train applies credit on pop, action pops as throughput only (no credit)
+- Helpers: \`StackLineDepth\`, \`StackInFlight\`
+
 ### What's new in v1.1.2
 - **Consumable module** — removed local \`replace\` for webgpu / go-sentencepiece; \`go get github.com/openfluke/welvet@v1.1.2\` works without sibling checkouts
 

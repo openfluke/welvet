@@ -11,7 +11,7 @@ Sandwich update via `TrainStackMSE` / `TrainStackCE` / `OpenSplitTape`.
 - **Output gap** \(g_y\): regression uses MSE residual; classification uses softmax − one-hot (CE).
 - **\(P(\cdot)\)**: project / reshape the gap onto a leaf’s activation shape.
 - **\(N\)**: number of trainable leaves on the sandwich (layers / cam branches).
-- **Step\***: 1D systolic pipe (`TrainLine`) — one sample enters layer 0 per tick; fill ticks do not update. Same credit family as the non-Step twin on Stack.
+- **Step\***: 1D systolic pipe (`TrainLine` / `TickLine`) — one sample enters layer 0 per tick; fill ticks do not update. Same credit family as the non-Step twin on Stack. **`FlightRole`**: `RoleTrain` applies credit on pop; `RoleAction` pops as actionable throughput only (no credit) via `TickStackLine`.
 - **Mesh\***: needs volumetric / grid placement; on a plain Stack it often collapses to the family update.
 - Rivaling backprop = matched **hard Acc** vs `StepBP`, not Lucy Score. Sparse wins Score via Availability (skip-GEMV). FastProxy is the Acc rival on sine/copy toys.
 
