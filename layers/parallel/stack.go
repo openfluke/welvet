@@ -9,6 +9,7 @@ import (
 	"github.com/openfluke/welvet/layers/cnn2"
 	"github.com/openfluke/welvet/layers/cnn3"
 	"github.com/openfluke/welvet/layers/dense"
+	"github.com/openfluke/welvet/layers/kmeans"
 	"github.com/openfluke/welvet/layers/residual"
 	"github.com/openfluke/welvet/layers/sequential"
 	"github.com/openfluke/welvet/quant"
@@ -89,6 +90,8 @@ func opInputHeight(op any) int {
 		return v.Core.InputHeight
 	case *cnn3.Layer:
 		return v.Core.InputHeight
+	case *kmeans.Layer:
+		return v.Core.InputHeight
 	default:
 		return 0
 	}
@@ -116,6 +119,8 @@ func opOutputHeight(op any) int {
 	case *cnn2.Layer:
 		return v.Core.OutputHeight
 	case *cnn3.Layer:
+		return v.Core.OutputHeight
+	case *kmeans.Layer:
 		return v.Core.OutputHeight
 	default:
 		return 0
