@@ -637,6 +637,51 @@ func StackStepBPDenseF32(nChildren, nTicks, batch int32, lr float64, dtype int32
 	return float64(closs), checkStatus(st, "stack_stepbp_dense")
 }
 
+func StackTrainMSE(mode, batch, seq, dim, nChildren, childAct, dtype, backend int32, packed, x, target []float32, lr float64, wAfter []float32) (loss float64, err error) {
+	var closs C.double
+	st := C.welvet_stack_train_mse(
+		C.int32_t(mode), C.int32_t(batch), C.int32_t(seq), C.int32_t(dim), C.int32_t(nChildren),
+		C.int32_t(childAct), C.int32_t(dtype), C.int32_t(backend),
+		f32Ptr(packed), f32Ptr(x), f32Ptr(target), C.double(lr), f32Ptr(wAfter), &closs,
+	)
+	return float64(closs), checkStatus(st, "stack_train_mse")
+}
+
+func ParallelTrainMSE(mode, batch, seq, dim, outFeat, branches, combine, sparseK, dtype, backend int32, disagreeBeta float64, packed, x, target []float32, lr float64, wAfter []float32) (loss float64, err error) {
+	var closs C.double
+	st := C.welvet_parallel_train_mse(
+		C.int32_t(mode), C.int32_t(batch), C.int32_t(seq), C.int32_t(dim), C.int32_t(outFeat),
+		C.int32_t(branches), C.int32_t(combine), C.int32_t(sparseK), C.int32_t(dtype), C.int32_t(backend),
+		C.double(disagreeBeta), f32Ptr(packed), f32Ptr(x), f32Ptr(target), C.double(lr),
+		f32Ptr(wAfter), &closs,
+	)
+	return float64(closs), checkStatus(st, "parallel_train_mse")
+}
+
+// GridTrainMSE runs mesh-clock TrainMSE (welvet_grid_train_mse).
+// cellKind: 1=Dense, 19=Stack, 23=Parallel (OpKind). nSub = NestedStack children or Parallel branches.
+func GridTrainMSE(mode, depth, rows, cols, lpc, batch, ticks, dim, cellKind, nSub, childAct, dtype, backend int32, packed, x, target []float32, lr float64, wAfter []float32) (loss float64, err error) {
+	var closs C.double
+	st := C.welvet_grid_train_mse(
+		C.int32_t(mode), C.int32_t(depth), C.int32_t(rows), C.int32_t(cols), C.int32_t(lpc),
+		C.int32_t(batch), C.int32_t(ticks), C.int32_t(dim), C.int32_t(cellKind), C.int32_t(nSub),
+		C.int32_t(childAct), C.int32_t(dtype), C.int32_t(backend),
+		f32Ptr(packed), f32Ptr(x), f32Ptr(target), C.double(lr), f32Ptr(wAfter), &closs,
+	)
+	return float64(closs), checkStatus(st, "grid_train_mse")
+}
+
+// StackLineTrainMSE runs systolic Line TrainMSE by TrainMode (welvet_stack_line_train_mse).
+func StackLineTrainMSE(mode, nChildren, nTicks, batch int32, lr float64, dtype int32, inH, outH, act []int32, packedW, xTicks, targetTicks, wAfter []float32) (loss float64, err error) {
+	var closs C.double
+	st := C.welvet_stack_line_train_mse(
+		C.int32_t(mode), C.int32_t(nChildren), C.int32_t(nTicks), C.int32_t(batch), C.double(lr),
+		C.int32_t(dtype), i32Ptr(inH), i32Ptr(outH), i32Ptr(act), f32Ptr(packedW),
+		f32Ptr(xTicks), f32Ptr(targetTicks), f32Ptr(wAfter), &closs,
+	)
+	return float64(closs), checkStatus(st, "stack_line_train_mse")
+}
+
 func SeqMixKindName(kind int32) (string, error) {
 	buf := make([]byte, 64)
 	st := C.welvet_seqmix_kind_name(C.int32_t(kind), (*C.char)(unsafe.Pointer(&buf[0])), C.int32_t(len(buf)))

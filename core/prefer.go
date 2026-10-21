@@ -15,8 +15,8 @@ func SetNativeCPUAvailableChecker(fn func() bool) {
 }
 
 // PreferNativeCPU returns BackendNativeCPU when libwelvet is loaded, else BackendCPUTiled.
-// Layers that call this for New() defaults get C ABI acceleration without manual config;
-// when the platform lib is missing, execution stays pure Go.
+// Opt-in helper for callers that want C ABI when available; New() defaults stay
+// BackendCPUTiled via DefaultBackend (set BackendNativeCPU explicitly to train natively).
 func PreferNativeCPU() Backend {
 	if nativeCPUAvailable() {
 		return BackendNativeCPU
@@ -24,5 +24,6 @@ func PreferNativeCPU() Backend {
 	return BackendCPUTiled
 }
 
-// DefaultBackend is an alias of PreferNativeCPU for ExecConfig defaults.
-func DefaultBackend() Backend { return PreferNativeCPU() }
+// DefaultBackend is always BackendCPUTiled. NativeCPU is opt-in (PreferNativeCPU /
+// Exec.Backend = BackendNativeCPU).
+func DefaultBackend() Backend { return BackendCPUTiled }

@@ -17,6 +17,8 @@ type Layer struct {
 
 	// Reusable forward buffers (float32 LM path) — avoids NewTensor per GEMV.
 	fwdOut []float32
+
+	nativeMir *nativecpp.Mirror // pending C++ W_after until SyncWeightsFromNative
 }
 
 // New creates a Dense layer with zero weights in the given dtype (FormatNone).

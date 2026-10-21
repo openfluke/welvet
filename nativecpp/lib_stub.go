@@ -163,6 +163,18 @@ func ParallelNormalBPF32(batch, seq, dim, outFeat, branches, combine, sparseK, d
 func StackStepBPDenseF32(nChildren, nTicks, batch int32, lr float64, dtype int32, inH, outH, act []int32, packedW, xTicks, targetTicks, wAfter []float32) (float64, error) {
 	return 0, errNoNative
 }
+func StackTrainMSE(mode, batch, seq, dim, nChildren, childAct, dtype, backend int32, packed, x, target []float32, lr float64, wAfter []float32) (float64, error) {
+	return 0, errNoNative
+}
+func ParallelTrainMSE(mode, batch, seq, dim, outFeat, branches, combine, sparseK, dtype, backend int32, disagreeBeta float64, packed, x, target []float32, lr float64, wAfter []float32) (float64, error) {
+	return 0, errNoNative
+}
+func GridTrainMSE(mode, depth, rows, cols, lpc, batch, ticks, dim, cellKind, nSub, childAct, dtype, backend int32, packed, x, target []float32, lr float64, wAfter []float32) (float64, error) {
+	return 0, errNoNative
+}
+func StackLineTrainMSE(mode, nChildren, nTicks, batch int32, lr float64, dtype int32, inH, outH, act []int32, packedW, xTicks, targetTicks, wAfter []float32) (float64, error) {
+	return 0, errNoNative
+}
 func SeqMixKindName(kind int32) (string, error) { return "", errNoNative }
 func SeqMixMHAKind() int32                       { return 0 }
 func SeqMixMambaKind() int32                     { return 0 }

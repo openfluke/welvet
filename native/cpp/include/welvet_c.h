@@ -442,6 +442,48 @@ WELVET_API welvet_status welvet_stack_stepbp_dense_f32(
     const int32_t* in_h, const int32_t* out_h, const int32_t* act, const float* packed_W,
     const float* x_ticks, const float* target_ticks, float* W_after, double* loss);
 
+/* Stack TrainMSE dispatcher by TrainMode (Go parallel.TrainMode iota).
+ * Packing matches welvet_stack_normalbp_f32 (NestedStack Dense Dim→Dim).
+ * target: [batch*seq*dim]. Step/Mesh modes use same family credit as non-Step leaf.
+ * Shadow==Freeze; Adversarial/Memory==FamilyBP. Exports W_after + loss.
+ */
+WELVET_API welvet_status welvet_stack_train_mse(
+    int32_t mode, int32_t batch, int32_t seq, int32_t dim, int32_t n_children, int32_t child_act,
+    int32_t dtype, int32_t backend, const float* packed, const float* x, const float* target,
+    double lr, float* W_after, double* loss);
+
+/* Parallel TrainMSE dispatcher by TrainMode. Packing matches welvet_parallel_forward_f32 /
+ * welvet_parallel_normalbp_f32. target: [batch*seq*OutDim]. Exports W_after + loss.
+ */
+WELVET_API welvet_status welvet_parallel_train_mse(
+    int32_t mode, int32_t batch, int32_t seq, int32_t dim, int32_t out_feat, int32_t branches,
+    int32_t combine, int32_t sparse_k, int32_t dtype, int32_t backend, double disagree_beta,
+    const float* packed, const float* x, const float* target, double lr, float* W_after,
+    double* loss);
+
+/* Mesh-clock TrainMSE (runtime/step) by TrainMode.
+ * Places the same OpKind in every hop-order cell:
+ *   cell_kind 1  = Dense Dim→Dim (n_sub ignored)
+ *   cell_kind 19 = NestedStack of n_sub Dense Dim→Dim
+ *   cell_kind 23 = Parallel (n_sub branches, Combine=Add, out_feat=dim)
+ * packed: concat per cell of that cell's pack (Dense/Stack/Parallel layout).
+ * x/target: [batch*dim]. Mesh* → step Credit; non-Mesh → FamilyBP.
+ */
+WELVET_API welvet_status welvet_grid_train_mse(
+    int32_t mode, int32_t depth, int32_t rows, int32_t cols, int32_t lpc, int32_t batch,
+    int32_t ticks, int32_t dim, int32_t cell_kind, int32_t n_sub, int32_t child_act, int32_t dtype,
+    int32_t backend, const float* packed, const float* x, const float* target, double lr,
+    float* W_after, double* loss);
+
+/* Line (systolic) TrainMSE by TrainMode over a thin Stack of Dense children.
+ * Packing matches welvet_stack_stepbp_dense_f32. Step* modes map to line Credit;
+ * non-Step → FamilyBP. n_ticks RoleTrain samples; loss = last pop MSE.
+ */
+WELVET_API welvet_status welvet_stack_line_train_mse(
+    int32_t mode, int32_t n_children, int32_t n_ticks, int32_t batch, double lr, int32_t dtype,
+    const int32_t* in_h, const int32_t* out_h, const int32_t* act, const float* packed_W,
+    const float* x_ticks, const float* target_ticks, float* W_after, double* loss);
+
 WELVET_API const char* welvet_version(void);
 WELVET_API int32_t welvet_gap_count(void);
 WELVET_API void welvet_print_gaps(void);

@@ -32,6 +32,7 @@ type Stack struct {
 	Tanhi      any            // optional *tanhi.UDPConfig; synced from grid on PlaceStack
 	accel      splitAccel  // LinearCache / HeadProxyAsync / Sparse
 	line       any         // *Line[T] for Step* systolic train
+	nativeMir  *nativecpp.Mirror // pending packed Dense W until SyncWeightsFromNative
 }
 
 // NewStack builds a Stack from ordered Ops. Each child keeps its own

@@ -104,3 +104,13 @@ func (l *Layer) SetBackend(b core.Backend) {
 	l.Exec.Backend = b
 	l.SyncBranchExec()
 }
+
+// SetBackend sets Exec.Backend and syncs stack children.
+func (s *Stack) SetBackend(b core.Backend) {
+	if s == nil {
+		return
+	}
+	s.Exec.Backend = b
+	s.SyncChildExec()
+}
+
