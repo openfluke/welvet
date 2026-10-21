@@ -165,6 +165,21 @@ go get github.com/openfluke/welvet@${tag}
 - **GPU fuse** — `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan)
 - **lucy** — shared SoftAcc / Availability / AdaptPct / Score measuring harness
 
+### What's new in v1.1.7
+- **Full NativeCPU TrainMode** — C ABI \`welvet_stack_train_mse\` / \`welvet_parallel_train_mse\` / \`welvet_grid_train_mse\` / \`welvet_stack_line_train_mse\` (engine **0.1.85**)
+- \`TrainStackMSE\` / \`TrainMSE\` intercept when \`BackendNativeCPU\`; Mirror Capture + \`SyncWeightsFromNative\` for \`.entity\`
+- Single shipped \`linux_amd64/libwelvet.so\` (unversioned SONAME). **Default stays BackendCPUTiled**
+
+### What's new in v1.1.6
+- Parallel NormalBP C ABI + \`TrainNativeMSE\`; \`ApplyExecConfig\` on all layers; FormatNone dtype train tests
+- Engine pin **0.1.83** era NativeCPU gap close
+
+### What's new in v1.1.5
+- **Opt-in NativeCPU** — \`BackendNativeCPU\` → welvet.cpp C ABI; JSON ExecConfig Network→Volume→Sector→Layer
+
+### What's new in v1.1.4
+- linux/amd64 \`libwelvet.so\` ship + \`nativecpp\` bindings; \`--all-train\` platform sign-off table
+
 ### What's new in v1.1.3
 - **FlightRole on Step\* Line** — \`RoleTrain\` / \`RoleAction\`, \`TickLine\` / \`TickStackLine\`; train applies credit on pop, action pops as throughput only (no credit)
 - Helpers: \`StackLineDepth\`, \`StackInFlight\`

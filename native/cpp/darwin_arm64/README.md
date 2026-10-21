@@ -1,6 +1,6 @@
 # darwin_arm64
 
-Drop the stripped `libwelvet` (or `.dll` / `.dylib`) for this platform here after cross/native build from welvet.cpp `0.1.82`.
+Drop the stripped `libwelvet` (or `.dll` / `.dylib`) for this platform here after cross/native build from welvet.cpp `0.1.85`.
 
 Expected names:
 - linux_*: `libwelvet.so`
