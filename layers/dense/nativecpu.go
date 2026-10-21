@@ -4,6 +4,7 @@ import (
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/quant"
+	"github.com/openfluke/welvet/weights"
 )
 
 // useNativeCPU reports whether this Dense can take the C ABI path (FormatNone).
@@ -23,7 +24,7 @@ func ForwardNativeCPU[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, pos
 	if err != nil {
 		return nil, nil, err
 	}
-	w, err := l.NativeMatrixF32()
+	w, err := weights.MatrixF32(l.Weights)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -54,7 +55,7 @@ func BackwardNativeCPU[T core.Numeric](l *Layer, gradOut, input, pre *core.Tenso
 	if err != nil {
 		return nil, nil, err
 	}
-	w, err := l.NativeMatrixF32()
+	w, err := weights.MatrixF32(l.Weights)
 	if err != nil {
 		return nil, nil, err
 	}

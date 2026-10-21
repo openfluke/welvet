@@ -17,9 +17,6 @@ type Layer struct {
 
 	// Reusable forward buffers (float32 LM path) — avoids NewTensor per GEMV.
 	fwdOut []float32
-
-	// nativeMir: pending C++ W_after until SyncWeightsFromNative (.entity pull).
-	nativeMir *nativecpp.Mirror
 }
 
 // New creates a Dense layer with zero weights in the given dtype (FormatNone).
@@ -40,7 +37,7 @@ func New(in, out int, act core.ActivationType, dt core.DType) (*Layer, error) {
 		},
 		Weights: ws,
 		Exec: core.ExecConfig{
-			Backend:   core.BackendCPUTiled,
+			Backend:   core.PreferNativeCPU(),
 			MultiCore: true,
 			TileSize:  32,
 		},
@@ -65,7 +62,7 @@ func NewConfigured[T core.Numeric](in, out int, act core.ActivationType, dt core
 		},
 		Weights: ws,
 		Exec: core.ExecConfig{
-			Backend:   core.BackendCPUTiled,
+			Backend:   core.PreferNativeCPU(),
 			MultiCore: true,
 			TileSize:  32,
 		},

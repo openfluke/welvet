@@ -14,3 +14,13 @@ func BackwardNativeCPU[T core.Numeric](l *Layer, gradOut, input, pre *core.Tenso
 	_ = nativecpp.NativeCPUAvailable
 	return BackwardSIMD(l, gradOut, input, pre)
 }
+
+
+// ApplyExecConfig resolves a nativecpp.ExecConfig onto this layer's Exec.Backend.
+func (l *Layer) ApplyExecConfig(cfg nativecpp.ExecConfig, volume, sector, layerKey string) {
+	if l == nil {
+		return
+	}
+	nativecpp.ApplyExecConfig(cfg, volume, sector, layerKey, &l.Exec)
+}
+

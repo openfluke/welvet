@@ -1,8 +1,11 @@
 // Package nativecpp binds welvet.cpp via the C ABI for optional native acceleration.
 //
-// Default layer Exec.Backend remains BackendCPUTiled (pure Go). Set BackendNativeCPU
-// to route FormatNone f32 work through libwelvet. After native train, call
-// SyncWeightsFromNative() to pull W_after into Go stores for .entity save.
+// On linux/amd64 with cgo, all WELVET_API symbols in welvet_c.h are wrapped
+// (forward + NormalBP for signed kinds, Parallel forward, Stack StepBP, version/gaps).
+// Other platforms build stubs that return an unavailable error.
 //
-// JSON/Go ExecConfig resolves Network→Volume→Sector→Layer; empty default is go_cpu.
+// Configuration (JSON or Go) resolves Network → Volume → Sector → Layer backends.
+// When libwelvet is loaded, Resolve() defaults to native_cpu and core.PreferNativeCPU()
+// selects BackendNativeCPU so layers dispatch through the C ABI without manual config.
+// Missing platform libs fall back to pure Go (go_cpu / BackendCPUTiled).
 package nativecpp

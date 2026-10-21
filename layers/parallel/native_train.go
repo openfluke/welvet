@@ -6,19 +6,190 @@ import (
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/nativecpp"
+	"github.com/openfluke/welvet/quant"
+	"github.com/openfluke/welvet/weights"
 )
 
-// TrainNativeMSE is unavailable: C ABI has Parallel forward only (no NormalBP pack).
-// Use Dense branch TrainNativeMSE or Go Backward+ApplyGradSGD instead.
+// TrainNativeMSE runs C++ Parallel NormalBP (Dense NewConfigured pack) with lr>0.
+// Branch (+ gate) W_after stays pending until SyncWeightsFromNative.
 func TrainNativeMSE[T core.Numeric](l *Layer, input, target *core.Tensor[T], lr float64) (loss float64, err error) {
-	_ = nativecpp.NativeCPUAvailable
-	return 0, fmt.Errorf("parallel: TrainNativeMSE not available (no ParallelNormalBPF32 C ABI)")
+	if l == nil || input == nil || target == nil {
+		return 0, fmt.Errorf("parallel: TrainNativeMSE nil")
+	}
+	if lr == 0 {
+		return 0, fmt.Errorf("parallel: TrainNativeMSE lr must be > 0")
+	}
+	pack, meta, err := packDenseParallel(l)
+	if err != nil {
+		return 0, err
+	}
+	batch, seq, err := parallelLayout(l, input)
+	if err != nil {
+		return 0, err
+	}
+	outDim := l.Cfg.OutDim()
+	if outDim <= 0 {
+		return 0, fmt.Errorf("parallel: TrainNativeMSE need OutFeat>0")
+	}
+	nx := batch * seq * l.Cfg.Dim
+	ny := batch * seq * outDim
+	nw := len(pack)
+	xF := core.SliceAsFloat32(input.Data)
+	tF := core.SliceAsFloat32(target.Data)
+	if len(xF) < nx || len(tF) < ny {
+		return 0, fmt.Errorf("parallel: TrainNativeMSE buffer short")
+	}
+	preF := make([]float32, nx)
+	postF := make([]float32, ny)
+	dX := make([]float32, nx)
+	dW := make([]float32, nw)
+	wAfter := make([]float32, nw)
+	loss, err = nativecpp.ParallelNormalBPF32(
+		int32(batch), int32(seq), int32(l.Cfg.Dim), int32(l.Cfg.OutFeat), int32(l.Cfg.Branches),
+		meta.combine, int32(l.Cfg.SparseK), meta.dtype, nativecpp.CABBackendCPU, l.Cfg.disagreeBeta(),
+		pack, xF, tF, true, lr,
+		preF, postF, dX, dW, wAfter,
+	)
+	if err != nil {
+		return 0, err
+	}
+	off := 0
+	for _, ch := range meta.dense {
+		nW := ch.Weights.Rows * ch.Weights.Cols
+		ch.EnsureNativeMirror().Capture(wAfter[off:off+nW], ch.Weights)
+		off += nW
+	}
+	if l.Gate != nil {
+		nW := l.Gate.Weights.Rows * l.Gate.Weights.Cols
+		l.Gate.EnsureNativeMirror().Capture(wAfter[off:off+nW], l.Gate.Weights)
+		off += nW
+	}
+	l.ensureMirror().Capture(wAfter, meta.stores...)
+	return loss, nil
 }
 
-// SyncWeightsFromNative pulls pending native weights from Dense branches / Gate.
+type parallelPackMeta struct {
+	combine int32
+	dtype   int32
+	dense   []*dense.Layer
+	stores  []*weights.Store
+}
+
+func packDenseParallel(l *Layer) ([]float32, parallelPackMeta, error) {
+	var meta parallelPackMeta
+	if l == nil {
+		return nil, meta, fmt.Errorf("parallel: nil")
+	}
+	if l.Cfg.OutFeat <= 0 {
+		return nil, meta, fmt.Errorf("parallel: packed NormalBP needs OutFeat > 0 (NewConfigured Dense)")
+	}
+	combine, ok := combineABI(l.Cfg.Combine)
+	if !ok {
+		return nil, meta, fmt.Errorf("parallel: bad combine %q", l.Cfg.Combine)
+	}
+	meta.combine = combine
+	if !nativecpp.NativeCPUAvailable() {
+		return nil, meta, fmt.Errorf("parallel: TrainNativeMSE needs libwelvet")
+	}
+	var parts [][]float32
+	total := 0
+	for i, b := range l.Branches {
+		dl, ok := b.(*dense.Layer)
+		if !ok || dl == nil || dl.Weights == nil {
+			return nil, meta, fmt.Errorf("parallel: branch %d not Dense FormatNone", i)
+		}
+		if dl.Weights.Format != quant.FormatNone {
+			return nil, meta, fmt.Errorf("parallel: branch %d need FormatNone", i)
+		}
+		w, err := dl.NativeMatrixF32()
+		if err != nil {
+			return nil, meta, err
+		}
+		want := l.Cfg.OutFeat * l.Cfg.Dim
+		if len(w) != want {
+			return nil, meta, fmt.Errorf("parallel: branch %d weight len %d want %d", i, len(w), want)
+		}
+		parts = append(parts, w)
+		meta.dense = append(meta.dense, dl)
+		meta.stores = append(meta.stores, dl.Weights)
+		total += len(w)
+		if i == 0 {
+			meta.dtype = int32(dl.Weights.DType)
+		}
+	}
+	if l.Cfg.Combine == CombineFilter {
+		if l.Gate == nil || l.Gate.Weights == nil || l.Gate.Weights.Format != quant.FormatNone {
+			return nil, meta, fmt.Errorf("parallel: filter needs FormatNone Gate")
+		}
+		w, err := l.Gate.NativeMatrixF32()
+		if err != nil {
+			return nil, meta, err
+		}
+		want := l.Cfg.Branches * l.Cfg.Dim
+		if len(w) != want {
+			return nil, meta, fmt.Errorf("parallel: gate weight len %d want %d", len(w), want)
+		}
+		parts = append(parts, w)
+		meta.stores = append(meta.stores, l.Gate.Weights)
+		total += len(w)
+	}
+	out := make([]float32, total)
+	off := 0
+	for _, p := range parts {
+		copy(out[off:], p)
+		off += len(p)
+	}
+	return out, meta, nil
+}
+
+func combineABI(m CombineMode) (int32, bool) {
+	switch m {
+	case CombineConcat:
+		return 0, true
+	case CombineAdd:
+		return 1, true
+	case CombineAvg:
+		return 2, true
+	case CombineFilter:
+		return 3, true
+	case CombineMax:
+		return 4, true
+	case CombineSparseK:
+		return 5, true
+	case CombineDisagree:
+		return 6, true
+	default:
+		return 0, false
+	}
+}
+
+func parallelLayout[T core.Numeric](l *Layer, input *core.Tensor[T]) (batch, seq int, err error) {
+	if input == nil || len(input.Shape) < 2 {
+		return 0, 0, fmt.Errorf("parallel: bad input shape")
+	}
+	batch = input.Shape[0]
+	if l.Cfg.SeqLen > 0 {
+		if len(input.Shape) < 3 || input.Shape[1] != l.Cfg.SeqLen || input.Shape[2] != l.Cfg.Dim {
+			return 0, 0, fmt.Errorf("parallel: want [B,%d,%d]", l.Cfg.SeqLen, l.Cfg.Dim)
+		}
+		return batch, l.Cfg.SeqLen, nil
+	}
+	if input.Shape[1] != l.Cfg.Dim {
+		return 0, 0, fmt.Errorf("parallel: want [B,%d]", l.Cfg.Dim)
+	}
+	return batch, 1, nil
+}
+
+// SyncWeightsFromNative pulls pending native weights from Dense branches / Gate
+// and any packed layer mirror (CommitStores).
 func (l *Layer) SyncWeightsFromNative() error {
 	if l == nil {
 		return nil
+	}
+	if l.nativeMir != nil {
+		if err := l.nativeMir.SyncToGo(); err != nil {
+			return err
+		}
 	}
 	for i, b := range l.Branches {
 		if err := syncBranch(b); err != nil {
@@ -44,10 +215,13 @@ func syncBranch(b any) error {
 	}
 }
 
-// NativeWeightsPending reports whether any Dense child / Gate has pending native weights.
+// NativeWeightsPending reports whether SyncWeightsFromNative would write.
 func (l *Layer) NativeWeightsPending() bool {
 	if l == nil {
 		return false
+	}
+	if l.nativeMir != nil && l.nativeMir.Dirty() {
+		return true
 	}
 	for _, b := range l.Branches {
 		if pendingBranch(b) {
@@ -66,4 +240,11 @@ func pendingBranch(b any) bool {
 	default:
 		return false
 	}
+}
+
+func (l *Layer) ensureMirror() *nativecpp.Mirror {
+	if l.nativeMir == nil {
+		l.nativeMir = &nativecpp.Mirror{}
+	}
+	return l.nativeMir
 }

@@ -41,7 +41,11 @@ type LayerBackend struct {
 func (c ExecConfig) Resolve(volume, sector, layer string) (backend string, device int) {
 	backend = c.Default
 	if backend == "" {
-		backend = BackendGoCPU
+		if NativeCPUAvailable() {
+			backend = BackendNativeCPU
+		} else {
+			backend = BackendGoCPU
+		}
 	}
 	device = -1
 	if c.Volumes == nil {

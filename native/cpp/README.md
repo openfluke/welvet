@@ -22,19 +22,3 @@ Composite layers without a packed C call still inherit NativeCPU onto Dense chil
 Pinned engine: see `MANIFEST.txt` (must match `welvet_version()`).
 
 Go binding: package `github.com/openfluke/welvet/nativecpp`.
-
-## Sync weights C++ → Go (outside training)
-
-Native train **does not** write Go stores until you pull:
-
-```go
-layer.Exec.Backend = core.BackendNativeCPU
-loss, _ := dense.TrainNativeMSE(layer, x, target, lr) // C++ SGD; pending mirror
-// … more native steps …
-_ = layer.SyncWeightsFromNative() // pull W_after into Go weights.Store
-// now safe to save .entity from Go stores
-```
-
-Layers with `TrainNativeMSE` + `SyncWeightsFromNative` (pending Mirror / child Dense until pull):
-
-Dense · RMSNorm · LayerNorm · SwiGLU · MHA · CNN1/2/3 · ConvT1/2/3 · RNN · LSTM · Embedding · Softmax (weightless Sync no-op) · KMeans · Sequential · Residual · Mamba · Metacognition · GDN · Parallel (Sync children only; no packed NormalBP C ABI).

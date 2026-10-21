@@ -157,6 +157,9 @@ func StackNormalBPF32(batch, seq, dim, nChildren, childAct, dtype, backend int32
 func ParallelForwardF32(batch, seq, dim, outFeat, branches, combine, sparseK, dtype, backend int32, disagreeBeta float64, packed, x, pre, post []float32) error {
 	return errNoNative
 }
+func ParallelNormalBPF32(batch, seq, dim, outFeat, branches, combine, sparseK, dtype, backend int32, disagreeBeta float64, packed, x, gradOrTarget []float32, useTarget bool, lr float64, pre, post, dX, dW, wAfter []float32) (float64, error) {
+	return 0, errNoNative
+}
 func StackStepBPDenseF32(nChildren, nTicks, batch int32, lr float64, dtype int32, inH, outH, act []int32, packedW, xTicks, targetTicks, wAfter []float32) (float64, error) {
 	return 0, errNoNative
 }

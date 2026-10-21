@@ -1,27 +1,28 @@
 package core
 
 // nativeCPUAvailable reports whether welvet.cpp is loaded for NativeCPU dispatch.
-var nativeCPUAvailable func() bool
+// nativecpp registers the real checker from init(); default is false (pure Go).
+var nativeCPUAvailable = func() bool { return false }
 
 // SetNativeCPUAvailableChecker lets nativecpp register libwelvet availability.
+// Pass nil to reset to "unavailable".
 func SetNativeCPUAvailableChecker(fn func() bool) {
+	if fn == nil {
+		nativeCPUAvailable = func() bool { return false }
+		return
+	}
 	nativeCPUAvailable = fn
 }
 
-// NativeLibLoaded reports whether the welvet.cpp shared library is available.
-func NativeLibLoaded() bool {
-	return nativeCPUAvailable != nil && nativeCPUAvailable()
-}
-
 // PreferNativeCPU returns BackendNativeCPU when libwelvet is loaded, else BackendCPUTiled.
-// Opt-in helper — not used as the layer New() default.
+// Layers that call this for New() defaults get C ABI acceleration without manual config;
+// when the platform lib is missing, execution stays pure Go.
 func PreferNativeCPU() Backend {
-	if NativeLibLoaded() {
+	if nativeCPUAvailable() {
 		return BackendNativeCPU
 	}
 	return BackendCPUTiled
 }
 
-// DefaultBackend is always Go CPU tiled. Set Exec.Backend = BackendNativeCPU explicitly
-// (or PreferNativeCPU()) to route through welvet.cpp.
-func DefaultBackend() Backend { return BackendCPUTiled }
+// DefaultBackend is an alias of PreferNativeCPU for ExecConfig defaults.
+func DefaultBackend() Backend { return PreferNativeCPU() }

@@ -36,7 +36,7 @@ func NewNetwork() *Network {
 	return &Network{
 		NativeExact: true,
 		Exec: ExecConfig{
-			Backend:   BackendCPUTiled,
+			Backend:   PreferNativeCPU(),
 			MultiCore: true,
 			TileSize:  32,
 		},

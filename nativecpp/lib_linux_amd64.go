@@ -612,6 +612,21 @@ func ParallelForwardF32(batch, seq, dim, outFeat, branches, combine, sparseK, dt
 	return checkStatus(st, "parallel_forward")
 }
 
+func ParallelNormalBPF32(batch, seq, dim, outFeat, branches, combine, sparseK, dtype, backend int32, disagreeBeta float64, packed, x, gradOrTarget []float32, useTarget bool, lr float64, pre, post, dX, dW, wAfter []float32) (loss float64, err error) {
+	ut := C.int32_t(0)
+	if useTarget {
+		ut = 1
+	}
+	var closs C.double
+	st := C.welvet_parallel_normalbp_f32(
+		C.int32_t(batch), C.int32_t(seq), C.int32_t(dim), C.int32_t(outFeat), C.int32_t(branches),
+		C.int32_t(combine), C.int32_t(sparseK), C.int32_t(dtype), C.int32_t(backend), C.double(disagreeBeta),
+		f32Ptr(packed), f32Ptr(x), f32Ptr(gradOrTarget), ut, C.double(lr),
+		f32Ptr(pre), f32Ptr(post), f32Ptr(dX), f32Ptr(dW), f32Ptr(wAfter), &closs,
+	)
+	return float64(closs), checkStatus(st, "parallel_normalbp")
+}
+
 func StackStepBPDenseF32(nChildren, nTicks, batch int32, lr float64, dtype int32, inH, outH, act []int32, packedW, xTicks, targetTicks, wAfter []float32) (loss float64, err error) {
 	var closs C.double
 	st := C.welvet_stack_stepbp_dense_f32(

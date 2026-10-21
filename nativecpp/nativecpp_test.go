@@ -9,6 +9,7 @@ import (
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/layers/embedding"
+	"github.com/openfluke/welvet/layers/parallel"
 	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/quant"
 )
@@ -276,4 +277,123 @@ func TestEmbeddingNativeTrainSyncsWeights(t *testing.T) {
 		t.Fatal("pending should clear after Sync")
 	}
 	t.Logf("Embedding TrainNativeMSE loss=%g; SyncWeightsFromNative pulled into Go", loss)
+}
+
+func TestDenseTrainNativeMSEDtypes(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" || !nativecpp.NativeCPUAvailable() {
+		t.Skip("needs linux/amd64 libwelvet")
+	}
+	const batch, in, out = 2, 4, 3
+	init := make([]float32, out*in)
+	for i := range init {
+		init[i] = float32(i+1) * 0.05
+	}
+	dtypes := []core.DType{
+		core.DTypeFloat32, core.DTypeFloat16, core.DTypeBFloat16,
+		core.DTypeInt8, core.DTypeUint8, core.DTypeInt16, core.DTypeFloat64,
+	}
+	for _, dt := range dtypes {
+		dt := dt
+		t.Run(dt.String(), func(t *testing.T) {
+			l, err := dense.NewConfigured(in, out, core.ActivationLinear, dt, quant.FormatNone, init)
+			if err != nil {
+				t.Fatal(err)
+			}
+			l.Exec.Backend = core.BackendNativeCPU
+			before, err := l.Weights.FlattenF32()
+			if err != nil {
+				t.Fatal(err)
+			}
+			x := core.NewTensor[float32](batch, in)
+			for i := range x.Data {
+				x.Data[i] = float32(i+1) * 0.1
+			}
+			tgt := core.NewTensor[float32](batch, out)
+			for i := range tgt.Data {
+				tgt.Data[i] = 0.5
+			}
+			loss, err := dense.TrainNativeMSE(l, x, tgt, 0.1)
+			if err != nil {
+				t.Fatalf("TrainNativeMSE: %v", err)
+			}
+			if !l.NativeWeightsPending() {
+				t.Fatal("expected pending before Sync")
+			}
+			if err := l.SyncWeightsFromNative(); err != nil {
+				t.Fatal(err)
+			}
+			after, err := l.Weights.FlattenF32()
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed := false
+			for i := range before {
+				if before[i] != after[i] {
+					changed = true
+					break
+				}
+			}
+			if !changed {
+				t.Fatalf("expected W change after Sync loss=%v", loss)
+			}
+		})
+	}
+}
+
+func TestParallelTrainNativeMSE(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" || !nativecpp.NativeCPUAvailable() {
+		t.Skip("needs linux/amd64 libwelvet")
+	}
+	cfg := parallel.Config{Dim: 4, OutFeat: 3, Branches: 2, Combine: parallel.CombineAdd}
+	init := make([]float32, cfg.Branches*cfg.OutFeat*cfg.Dim)
+	for i := range init {
+		init[i] = float32(i+1) * 0.03
+	}
+	l, err := parallel.NewConfigured(cfg, core.DTypeFloat32, quant.FormatNone, init, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Exec.Backend = core.BackendNativeCPU
+	l.SyncBranchExec()
+	x := core.NewTensor[float32](2, 4)
+	for i := range x.Data {
+		x.Data[i] = float32(i+1) * 0.1
+	}
+	tgt := core.NewTensor[float32](2, 3)
+	for i := range tgt.Data {
+		tgt.Data[i] = 0.4
+	}
+	d0, ok := l.DenseBranch(0)
+	if !ok {
+		t.Fatal("expected dense branch")
+	}
+	b0, err := d0.Weights.FlattenF32()
+	if err != nil {
+		t.Fatal(err)
+	}
+	loss, err := parallel.TrainNativeMSE(l, x, tgt, 0.1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !l.NativeWeightsPending() {
+		t.Fatal("expected pending")
+	}
+	if err := l.SyncWeightsFromNative(); err != nil {
+		t.Fatal(err)
+	}
+	a0, err := d0.Weights.FlattenF32()
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := false
+	for i := range b0 {
+		if b0[i] != a0[i] {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		t.Fatalf("expected branch W change loss=%v", loss)
+	}
+	t.Logf("Parallel TrainNativeMSE loss=%g", loss)
 }

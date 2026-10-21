@@ -80,3 +80,13 @@ func BackwardNativeCPU[T core.Numeric](l *Layer, gradOut, input, pre *core.Tenso
 	core.SliceFromFloat32(dW, gradW.Data)
 	return gradInT, gradW, nil
 }
+
+
+// ApplyExecConfig resolves a nativecpp.ExecConfig onto this layer's Exec.Backend.
+func (l *Layer) ApplyExecConfig(cfg nativecpp.ExecConfig, volume, sector, layerKey string) {
+	if l == nil {
+		return
+	}
+	nativecpp.ApplyExecConfig(cfg, volume, sector, layerKey, &l.Exec)
+}
+

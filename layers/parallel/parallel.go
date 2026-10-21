@@ -27,6 +27,7 @@ type Layer struct {
 	Rotate      *RotateSchedule
 	Tanhi       any            // optional *tanhi.UDPConfig; synced from grid on Place
 	accel       splitAccel // LinearCache / HeadProxyAsync / Sparse
+	nativeMir   *nativecpp.Mirror // pending packed W until SyncWeightsFromNative
 }
 
 // New creates Parallel with FormatNone Float32 zeros (Dense branches).

@@ -4,7 +4,7 @@
 
 | | |
 |--|--|
-| **Version** | **v1.1.5** |
+| **Version** | **v1.1.6** |
 | **Scorecard** | **100 / 100** pts (see [Version scorecard](#version-scorecard)) |
 
 Engine is v1. Apps (`octo`), stubs, and NPU/C++ accel sit **outside** this board — they are sibling / later trees (`welvet.cpp`), not missing Welvet.
@@ -50,7 +50,7 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v1.1.5.** Scorecard still **100/100** (v1.0 board complete). This patch finishes **opt-in NativeCPU** (`BackendNativeCPU` → welvet.cpp C ABI; **default stays BackendCPUTiled**). Ships linux_amd64 `libwelvet.so` (0.1.82) under `native/cpp/` + `nativecpp` bindings for the full C ABI surface. Prior **v1.1.3** added
+**Status: v1.1.6.** Scorecard still **100/100** (v1.0 board complete). This patch closes remaining NativeCPU gaps (Parallel NormalBP C ABI + `TrainNativeMSE`, `ApplyExecConfig` on all layers, FormatNone dtype train tests). Prior **v1.1.5** finished **opt-in NativeCPU** (`BackendNativeCPU` → welvet.cpp C ABI; **default stays BackendCPUTiled**). Ships linux_amd64 `libwelvet.so` (0.1.83) under `native/cpp/` + `nativecpp` bindings (Parallel NormalBP + ApplyExecConfig on all layers). Prior **v1.1.3** added
 **FlightRole** on the Step\* systolic line (`RoleTrain` / `RoleAction`, `TickLine` /
 `TickStackLine`) so hosts can queue train vs action and only act on action throughput.
 Prior **v1.1.2** dropped local `replace` for consumable `go get`; **v1.1.1** fixed CamSync
@@ -70,7 +70,7 @@ NPU/Metal/QNN are not scored here.
 
 **Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. Patch tags
 (v1.0.1–v1.0.3) and minor/patch tags (**v1.1.0**, **v1.1.1**, …) ship engine deltas without moving the
-board. Weights sum to **100**. This tag is **v1.1.5** (Step\* train/action FlightRole on the systolic Line).
+board. Weights sum to **100**. This tag is **v1.1.6** (NativeCPU Parallel NormalBP + ApplyExecConfig + dtype train tests).
 
 | # | Section | Wt | How scored today | Earned |
 |--:|---------|---:|------------------|-------:|

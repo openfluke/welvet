@@ -422,6 +422,16 @@ WELVET_API welvet_status welvet_parallel_forward_f32(
     int32_t sparse_k, int32_t dtype, int32_t backend, double disagree_beta, const float* packed,
     const float* x, float* pre, float* post);
 
+/* Parallel Dense NormalBP leaf. Same packing as welvet_parallel_forward_f32.
+ * use_target: 0=gradOut on post, 1=MSE target. lr==0 skips SGD.
+ * dW/W_after: same packed layout as input. Prefer WPLB/WPLO for multi-kind.
+ */
+WELVET_API welvet_status welvet_parallel_normalbp_f32(
+    int32_t batch, int32_t seq, int32_t dim, int32_t out_feat, int32_t branches, int32_t combine,
+    int32_t sparse_k, int32_t dtype, int32_t backend, double disagree_beta, const float* packed,
+    const float* x, const float* grad_or_target, int32_t use_target, double lr, float* pre,
+    float* post, float* dX, float* dW, float* W_after, double* loss);
+
 /* Line StepBP (FamilyBP on pop) over a thin Stack of Dense children.
  * packed_W / W_after: concat of child [out×in] matrices. Bias omitted (empty).
  * x_ticks: n_ticks × [batch × in_h[0]]; target_ticks: n_ticks × [batch × out_h[last]].
