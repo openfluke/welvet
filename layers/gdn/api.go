@@ -5,6 +5,7 @@ import (
 
 	"github.com/openfluke/welvet/architecture"
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/layers/seqmix"
 	"github.com/openfluke/welvet/quant"
 )
@@ -199,6 +200,11 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 		return ForwardSIMD(l, input)
 	case core.BackendWebGPU:
 		return ForwardWebGPU(l, input)
+	case core.BackendNativeCPU:
+		if nativecpp.NativeCPUAvailable() {
+			return ForwardNativeCPU(l, input)
+		}
+		return forwardHost(l, input)
 	default:
 		return forwardHost(l, input)
 	}

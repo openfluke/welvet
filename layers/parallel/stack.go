@@ -12,6 +12,7 @@ import (
 	"github.com/openfluke/welvet/layers/kmeans"
 	"github.com/openfluke/welvet/layers/residual"
 	"github.com/openfluke/welvet/layers/sequential"
+	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/quant"
 )
 
@@ -135,6 +136,15 @@ func (s *Stack) SyncChildExec() {
 	for _, ch := range s.Children {
 		branchSyncExec(ch, s.Exec)
 	}
+}
+
+// ApplyExecConfig resolves a nativecpp.ExecConfig onto this Stack's Exec and syncs children.
+func (s *Stack) ApplyExecConfig(cfg nativecpp.ExecConfig, volume, sector, layerKey string) {
+	if s == nil {
+		return
+	}
+	nativecpp.ApplyExecConfig(cfg, volume, sector, layerKey, &s.Exec)
+	s.SyncChildExec()
 }
 
 // SetDType sets dtype on every child Op.

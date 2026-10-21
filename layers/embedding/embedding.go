@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/weights"
@@ -15,6 +16,8 @@ type Layer struct {
 	Cfg     Config
 	Exec    core.ExecConfig
 	Weights *weights.Store // shape VocabSize × EmbeddingDim
+
+	nativeMir *nativecpp.Mirror // pending C++ W_after until SyncWeightsFromNative
 }
 
 // New creates Embedding with small deterministic init, FormatNone Float32.
@@ -85,6 +88,11 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 		return ForwardSIMD(l, input)
 	case core.BackendWebGPU:
 		return ForwardWebGPU(l, input)
+	case core.BackendNativeCPU:
+		if nativecpp.NativeCPUAvailable() {
+			return ForwardNativeCPU(l, input)
+		}
+		return ForwardCPUTiled(l, input)
 	default:
 		return ForwardCPUTiled(l, input)
 	}
@@ -100,6 +108,11 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 		return BackwardSIMD(l, gradOut, input, pre)
 	case core.BackendWebGPU:
 		return BackwardWebGPU(l, gradOut, input, pre)
+	case core.BackendNativeCPU:
+		if nativecpp.NativeCPUAvailable() {
+			return BackwardNativeCPU(l, gradOut, input, pre)
+		}
+		return BackwardCPUTiled(l, gradOut, input, pre)
 	default:
 		return BackwardCPUTiled(l, gradOut, input, pre)
 	}

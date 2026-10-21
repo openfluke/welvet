@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/quant"
 )
@@ -17,6 +18,8 @@ type Layer struct {
 	Exec     core.ExecConfig
 	Children []*dense.Layer
 	Ops      []any // heterogeneous F; when set, ChildOps prefers this
+
+	nativeMir *nativecpp.Mirror // pending packed F W until SyncWeightsFromNative
 }
 
 // New creates Residual with Depth square Dense children (FormatNone Float32).
@@ -124,6 +127,11 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 		return ForwardSIMD(l, input)
 	case core.BackendWebGPU:
 		return ForwardWebGPU(l, input)
+	case core.BackendNativeCPU:
+		if nativecpp.NativeCPUAvailable() {
+			return ForwardNativeCPU(l, input)
+		}
+		return ForwardCPUTiled(l, input)
 	default:
 		return ForwardCPUTiled(l, input)
 	}
@@ -140,6 +148,11 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 		return BackwardSIMD(l, gradOut, input, pre)
 	case core.BackendWebGPU:
 		return BackwardWebGPU(l, gradOut, input, pre)
+	case core.BackendNativeCPU:
+		if nativecpp.NativeCPUAvailable() {
+			return BackwardNativeCPU(l, gradOut, input, pre)
+		}
+		return BackwardCPUTiled(l, gradOut, input, pre)
 	default:
 		return BackwardCPUTiled(l, gradOut, input, pre)
 	}

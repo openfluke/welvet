@@ -125,9 +125,10 @@ func (a ActivationType) String() string {
 type Backend int
 
 const (
-	BackendCPUTiled Backend = 0
-	BackendSIMD     Backend = 1
-	BackendWebGPU   Backend = 2
+	BackendCPUTiled  Backend = 0
+	BackendSIMD      Backend = 1
+	BackendWebGPU    Backend = 2
+	BackendNativeCPU Backend = 3 // welvet.cpp via C ABI (linux/amd64 cgo)
 )
 
 func (b Backend) String() string {
@@ -138,6 +139,8 @@ func (b Backend) String() string {
 		return "simd"
 	case BackendWebGPU:
 		return "webgpu"
+	case BackendNativeCPU:
+		return "native_cpu"
 	default:
 		return fmt.Sprintf("Backend(%d)", int(b))
 	}

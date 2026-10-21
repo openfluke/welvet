@@ -121,7 +121,7 @@ func PermutationOK(dt core.DType, format quant.Format, backend core.Backend) boo
 		return false
 	}
 	switch backend {
-	case core.BackendCPUTiled, core.BackendSIMD, core.BackendWebGPU:
+	case core.BackendCPUTiled, core.BackendSIMD, core.BackendWebGPU, core.BackendNativeCPU:
 		return true
 	default:
 		return false
@@ -134,7 +134,7 @@ func AllPermutations() (out []struct {
 	Format  quant.Format
 	Backend core.Backend
 }) {
-	backends := []core.Backend{core.BackendCPUTiled, core.BackendSIMD, core.BackendWebGPU}
+	backends := []core.Backend{core.BackendCPUTiled, core.BackendSIMD, core.BackendWebGPU, core.BackendNativeCPU}
 	for _, dt := range core.AllDTypes {
 		for _, f := range quant.AllFormats {
 			for _, b := range backends {
