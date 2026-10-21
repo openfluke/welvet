@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/quant"
 )
@@ -26,6 +27,7 @@ type Layer struct {
 	Rotate      *RotateSchedule
 	Tanhi       any            // optional *tanhi.UDPConfig; synced from grid on Place
 	accel       splitAccel // LinearCache / HeadProxyAsync / Sparse
+	nativeMir   *nativecpp.Mirror // pending packed W until SyncWeightsFromNative
 }
 
 // New creates Parallel with FormatNone Float32 zeros (Dense branches).
@@ -195,6 +197,12 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 		pre, post, err = ForwardSIMD(l, input)
 	case core.BackendWebGPU:
 		pre, post, err = ForwardWebGPU(l, input)
+	case core.BackendNativeCPU:
+		if nativecpp.NativeCPUAvailable() {
+			pre, post, err = ForwardNativeCPU(l, input)
+		} else {
+			pre, post, err = ForwardCPUTiled(l, input)
+		}
 	default:
 		pre, post, err = ForwardCPUTiled(l, input)
 	}
@@ -216,6 +224,12 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 		gradIn, gradW, err = BackwardSIMD(l, gradOut, input, pre)
 	case core.BackendWebGPU:
 		gradIn, gradW, err = BackwardWebGPU(l, gradOut, input, pre)
+	case core.BackendNativeCPU:
+		if nativecpp.NativeCPUAvailable() {
+			gradIn, gradW, err = BackwardNativeCPU(l, gradOut, input, pre)
+		} else {
+			gradIn, gradW, err = BackwardCPUTiled(l, gradOut, input, pre)
+		}
 	default:
 		gradIn, gradW, err = BackwardCPUTiled(l, gradOut, input, pre)
 	}

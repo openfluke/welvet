@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/weights"
 )
@@ -16,6 +17,8 @@ type Layer struct {
 
 	// Reusable forward buffers (float32 LM path) — avoids NewTensor per GEMV.
 	fwdOut []float32
+
+	nativeMir *nativecpp.Mirror // pending C++ W_after until SyncWeightsFromNative
 }
 
 // New creates a Dense layer with zero weights in the given dtype (FormatNone).
@@ -36,7 +39,7 @@ func New(in, out int, act core.ActivationType, dt core.DType) (*Layer, error) {
 		},
 		Weights: ws,
 		Exec: core.ExecConfig{
-			Backend:   core.BackendCPUTiled,
+			Backend:   core.PreferNativeCPU(),
 			MultiCore: true,
 			TileSize:  32,
 		},
@@ -61,7 +64,7 @@ func NewConfigured[T core.Numeric](in, out int, act core.ActivationType, dt core
 		},
 		Weights: ws,
 		Exec: core.ExecConfig{
-			Backend:   core.BackendCPUTiled,
+			Backend:   core.PreferNativeCPU(),
 			MultiCore: true,
 			TileSize:  32,
 		},
@@ -106,6 +109,11 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 		return ForwardSIMD(l, input)
 	case core.BackendWebGPU:
 		return ForwardWebGPU(l, input)
+	case core.BackendNativeCPU:
+		if nativecpp.NativeCPUAvailable() {
+			return ForwardNativeCPU(l, input)
+		}
+		return ForwardCPUTiled(l, input)
 	default:
 		return ForwardCPUTiled(l, input)
 	}
@@ -121,6 +129,11 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 		return BackwardSIMD(l, gradOut, input, pre)
 	case core.BackendWebGPU:
 		return BackwardWebGPU(l, gradOut, input, pre)
+	case core.BackendNativeCPU:
+		if nativecpp.NativeCPUAvailable() {
+			return BackwardNativeCPU(l, gradOut, input, pre)
+		}
+		return BackwardCPUTiled(l, gradOut, input, pre)
 	default:
 		return BackwardCPUTiled(l, gradOut, input, pre)
 	}

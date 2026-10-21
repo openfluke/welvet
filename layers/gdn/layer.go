@@ -45,6 +45,9 @@ type Layer struct {
 	mixed, qRep, kRep     []float32
 	beta, g, core         []float32
 	kvMem, delta          []float32
+
+	pendingPacked []float32 // full loom pack until SyncWeightsFromNative
+	packPending   bool
 }
 
 // syncExec applies grid/backend policy: WebGPU projections only when BackendWebGPU.

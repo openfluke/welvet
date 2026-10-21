@@ -1,0 +1,59 @@
+=== go_v_cpp ALL TRAIN — linux/amd64 — 52 sections ===
+SECTION                                STATUS       TIME  NOTE
+--------------------------------------------------------------------------------
+DenseTrain                               PASS      315ms
+RMSNormTrain                             PASS      296ms
+LayerNormTrain                           PASS      305ms
+SwiGLUTrain                              PASS      542ms
+SoftmaxTrain                             PASS      451ms
+EmbeddingTrain                           PASS      182ms
+MHATrain                                 PASS     1.462s
+CNNTrain                                 PASS     1.537s
+ConvTTrain                               PASS      986ms
+RNNTrain                                 PASS      212ms
+LSTMTrain                                PASS      301ms
+SequentialTrain                          PASS      241ms
+ResidualTrain                            PASS      227ms
+MambaTrain                               PASS      322ms
+MetacognitionTrain                       PASS      195ms
+GDNTrain                                 PASS       29ms
+KMeansTrain                              PASS      185ms
+StackTrain                               PASS      216ms
+StepBPTrain                              PASS     1.678s
+TweenTrain                               PASS     1.604s
+TweenChainTrain                          PASS     1.547s
+StepTweenTrain                           PASS     1.599s
+StepTweenChainTrain                      PASS     1.544s
+MeshTweenTrain                           PASS       48ms
+MeshTweenChainTrain                      PASS       46ms
+TweenSplitTrain                          PASS     1.746s
+StepTweenSplitTrain                      PASS      1.65s
+TweenAltTrain                            PASS     1.838s
+StepTweenAltTrain                        PASS     1.716s
+TweenSplitHeadProxyTrain                 PASS     1.596s
+TweenSplitLinearTrain                    PASS     1.677s
+TweenSplitFastProxyTrain                 PASS     1.591s
+TweenSplitLinearCacheTrain               PASS     1.603s
+TweenSplitHeadProxyAsyncTrain            PASS     1.681s
+TweenSplitSparseTrain                    PASS     1.612s
+MeshTweenSplitTrain                      PASS       44ms
+MeshTweenAltTrain                        PASS       48ms
+MeshTweenSplitFastProxyTrain             PASS       44ms
+MeshTweenSplitSparseTrain                PASS       45ms
+StepTweenSplitHeadProxyTrain             PASS     1.553s
+StepTweenSplitLinearTrain                PASS     1.649s
+StepTweenSplitFastProxyTrain             PASS     1.561s
+StepTweenSplitLinearCacheTrain           PASS     1.622s
+StepTweenSplitHeadProxyAsyncTrain        PASS      1.54s
+StepTweenSplitSparseTrain                PASS     1.592s
+FreezeTrain                              PASS     1.478s
+ShadowTrain                              PASS     1.605s
+AdversarialTrain                         PASS     1.605s
+MemoryTrain                              PASS       1.6s
+ParallelNBPTrain                         PASS      149ms
+ParallelPolyTrain                        PASS     1.742s
+ParallelTweenTrain                       PASS      485ms
+--------------------------------------------------------------------------------
+SECTIONS: 52  PASS: 52  FAIL: 0  TOTAL: 51.137s
+PLATFORM: linux/amd64
+--- PASS: TestGoVCppAllTrain (51.14s)

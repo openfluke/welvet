@@ -1,0 +1,30 @@
+package mha
+
+import (
+	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/nativecpp"
+)
+
+// ForwardNativeCPU prefers the welvet.cpp C ABI when a packed FormatNone path is
+// available; otherwise runs the Go CPU tiled implementation (projections/children
+// still inherit Exec.Backend == NativeCPU and may hit Dense C ABI).
+func ForwardNativeCPU[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+	_ = nativecpp.NativeCPUAvailable
+	return ForwardCPUTiled(l, input)
+}
+
+// BackwardNativeCPU mirrors ForwardNativeCPU — Go CPU tiled / child NativeCPU Dense.
+func BackwardNativeCPU[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+	_ = nativecpp.NativeCPUAvailable
+	return BackwardCPUTiled(l, gradOut, input, pre)
+}
+
+
+// ApplyExecConfig resolves a nativecpp.ExecConfig onto this layer's Exec.Backend.
+func (l *Layer) ApplyExecConfig(cfg nativecpp.ExecConfig, volume, sector, layerKey string) {
+	if l == nil {
+		return
+	}
+	nativecpp.ApplyExecConfig(cfg, volume, sector, layerKey, &l.Exec)
+}
+

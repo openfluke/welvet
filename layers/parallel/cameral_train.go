@@ -15,6 +15,14 @@ type outputGap[T core.Numeric] func(pred, target *core.Tensor[T]) (float64, *cor
 // Split-family modes use one collect tape (OpenSplitTape). Alt recomputes
 // the MSE gap between Split and Tween phases.
 func TrainStackMSE[T core.Numeric](s *Stack, input, target *core.Tensor[T], mode TrainMode, lr float64) (loss float64, err error) {
+	// BackendNativeCPU + Dense NestedStack → C ABI TrainMode dispatcher (no auto Sync).
+	if lossN, ok, errN := tryTrainStackNativeMSE(s, input, target, mode, lr); ok {
+		if errN == nil && s != nil {
+			_ = s.MaybeSync(SyncAfterStep)
+			_ = s.MaybeSync(SyncAfterSample)
+		}
+		return lossN, errN
+	}
 	return trainStackGap(s, input, target, mode, lr, mseGrad[T], trainTweenAltStackMSE[T])
 }
 
@@ -66,6 +74,17 @@ func trainStackGap[T core.Numeric](s *Stack, input, target *core.Tensor[T], mode
 func TrainMSE[T core.Numeric](l *Layer, input, target *core.Tensor[T], mode TrainMode, lr float64) (loss float64, err error) {
 	if l == nil || input == nil || target == nil {
 		return 0, fmt.Errorf("parallel: TrainMSE nil")
+	}
+	// BackendNativeCPU + Dense NewConfigured → C ABI TrainMode dispatcher (no auto Sync).
+	if lossN, ok, errN := tryTrainParallelNativeMSE(l, input, target, mode, lr); ok {
+		if errN == nil {
+			l.NoteLoss(lossN)
+			_ = l.MaybeSync(SyncAfterStep)
+			_ = l.MaybeSync(SyncAfterSample)
+			l.AdvanceRotate()
+			l.RefreshMetrics()
+		}
+		return lossN, errN
 	}
 	if mode.Resolve(ModeNormalBP).Family() == familyTweenAlt {
 		return trainTweenAltLayerMSE(l, input, target, lr)

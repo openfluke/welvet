@@ -52,6 +52,28 @@ func ParseLayerType(s string) (LayerType, error) {
 	return LayerDense, fmt.Errorf("core: unknown layer type %q", s)
 }
 
+// ParseBackend maps a persistence / ExecConfig backend string.
+func ParseBackend(s string) Backend {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "cpu-tiled", "cpu", "go_cpu", "gotiled", "0":
+		return BackendCPUTiled
+	case "simd", "1":
+		return BackendSIMD
+	case "webgpu", "gpu", "2":
+		return BackendWebGPU
+	case "native_cpu", "native-cpu", "native", "cpp", "3":
+		return BackendNativeCPU
+	default:
+		if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+			switch Backend(n) {
+			case BackendCPUTiled, BackendSIMD, BackendWebGPU, BackendNativeCPU:
+				return Backend(n)
+			}
+		}
+		return BackendCPUTiled
+	}
+}
+
 // ParseActivation maps a persistence activation string.
 func ParseActivation(s string) ActivationType {
 	switch strings.TrimSpace(s) {

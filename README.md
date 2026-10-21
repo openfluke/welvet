@@ -4,7 +4,7 @@
 
 | | |
 |--|--|
-| **Version** | **v1.1.3** |
+| **Version** | **v1.1.7** |
 | **Scorecard** | **100 / 100** pts (see [Version scorecard](#version-scorecard)) |
 
 Engine is v1. Apps (`octo`), stubs, and NPU/C++ accel sit **outside** this board — they are sibling / later trees (`welvet.cpp`), not missing Welvet.
@@ -50,7 +50,7 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v1.1.3.** Scorecard still **100/100** (v1.0 board complete). This patch adds
+**Status: v1.1.7.** Scorecard still **100/100** (v1.0 board complete). This patch ships **full NativeCPU TrainMode** dispatch (`welvet_stack_train_mse` / `welvet_parallel_train_mse` / `welvet_grid_train_mse` / `welvet_stack_line_train_mse`, engine **0.1.85**): `TrainStackMSE`/`TrainMSE` intercept when `BackendNativeCPU`, Mirror Capture + `SyncWeightsFromNative` for `.entity`. Prior **v1.1.6** closed Parallel NormalBP + ApplyExecConfig + dtype train tests. Prior **v1.1.5** finished **opt-in NativeCPU** (**default stays BackendCPUTiled**). Prior **v1.1.3** added
 **FlightRole** on the Step\* systolic line (`RoleTrain` / `RoleAction`, `TickLine` /
 `TickStackLine`) so hosts can queue train vs action and only act on action throughput.
 Prior **v1.1.2** dropped local `replace` for consumable `go get`; **v1.1.1** fixed CamSync
@@ -70,7 +70,7 @@ NPU/Metal/QNN are not scored here.
 
 **Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. Patch tags
 (v1.0.1–v1.0.3) and minor/patch tags (**v1.1.0**, **v1.1.1**, …) ship engine deltas without moving the
-board. Weights sum to **100**. This tag is **v1.1.3** (Step\* train/action FlightRole on the systolic Line).
+board. Weights sum to **100**. This tag is **v1.1.7** (NativeCPU TrainMode stack/parallel/grid/line + SyncWeightsFromNative).
 
 | # | Section | Wt | How scored today | Earned |
 |--:|---------|---:|------------------|-------:|
