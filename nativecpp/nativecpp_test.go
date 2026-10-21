@@ -69,9 +69,12 @@ func TestDefaultBackendIsCPUTiled(t *testing.T) {
 	}
 }
 
-func TestLinuxAmd64NativeVersion(t *testing.T) {
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		t.Skip("linux/amd64 only")
+func TestShippedNativeVersion(t *testing.T) {
+	switch {
+	case runtime.GOOS == "linux" && runtime.GOARCH == "amd64":
+	case runtime.GOOS == "windows" && runtime.GOARCH == "arm64":
+	default:
+		t.Skip("no shipped libwelvet for this OS/arch")
 	}
 	if !nativecpp.NativeCPUAvailable() {
 		t.Fatal("expected native lib loaded")

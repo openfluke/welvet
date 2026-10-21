@@ -165,6 +165,11 @@ go get github.com/openfluke/welvet@${tag}
 - **GPU fuse** — `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan)
 - **lucy** — shared SoftAcc / Availability / AdaptPct / Score measuring harness
 
+### What's new in v1.1.8
+- **windows/arm64** — ship \`libwelvet.dll\` + import lib; \`nativecpp\` cgo for \`windows && arm64\` (shared wrappers with linux/amd64)
+- **webgpu v1.0.6** — windows/arm64 \`libwgpu_native.a\` rebuilt as gnullvm (Go CGO / llvm-mingw links without MSVC RTTI stubs)
+- Engine pin still **0.1.85**; **default stays BackendCPUTiled**
+
 ### What's new in v1.1.7
 - **Full NativeCPU TrainMode** — C ABI \`welvet_stack_train_mse\` / \`welvet_parallel_train_mse\` / \`welvet_grid_train_mse\` / \`welvet_stack_line_train_mse\` (engine **0.1.85**)
 - \`TrainStackMSE\` / \`TrainMSE\` intercept when \`BackendNativeCPU\`; Mirror Capture + \`SyncWeightsFromNative\` for \`.entity\`

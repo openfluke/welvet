@@ -5,4 +5,4 @@ platforms:
   linux_arm64=pending
   darwin_arm64=pending
   windows_amd64=pending
-  windows_arm64=pending
+  windows_arm64=present
