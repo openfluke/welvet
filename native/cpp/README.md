@@ -17,7 +17,10 @@ Composite layers without a packed C call still inherit NativeCPU onto Dense chil
 | `include/welvet_c.h` | Stable C ABI header |
 | `linux_amd64/libwelvet.so` | Linux x86-64 shared lib (single unversioned artifact) |
 | `linux_arm64/libwelvet.so` | Linux aarch64 shared lib |
-| `darwin_arm64/` | pending |
+| `darwin_arm64/libwelvet.dylib` | macOS Apple Silicon shared lib |
+| `android_arm64/libwelvet.so` | Android arm64-v8a shared lib (artifact; cgo pending) |
+| `android_x86_64/libwelvet.so` | Android x86_64 shared lib (artifact; cgo pending) |
+| `ios_arm64/libwelvet.a` | iPhoneOS arm64 static archive (artifact; cgo pending) |
 | `windows_amd64/` | pending |
 | `windows_arm64/` | `libwelvet.dll` (+ import lib) |
 

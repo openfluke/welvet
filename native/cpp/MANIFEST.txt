@@ -3,6 +3,9 @@ abi_header=include/welvet_c.h
 platforms:
   linux_amd64=present
   linux_arm64=present
-  darwin_arm64=pending
+  darwin_arm64=present
+  android_arm64=present
+  android_x86_64=present
+  ios_arm64=present
   windows_amd64=pending
   windows_arm64=present

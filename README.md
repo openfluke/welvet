@@ -4,7 +4,7 @@
 
 | | |
 |--|--|
-| **Version** | **v1.1.8** |
+| **Version** | **v1.1.9** |
 | **Scorecard** | **100 / 100** pts (see [Version scorecard](#version-scorecard)) |
 
 Engine is v1. Apps (`octo`), stubs, and NPU/C++ accel sit **outside** this board — they are sibling / later trees (`welvet.cpp`), not missing Welvet.
@@ -50,7 +50,7 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v1.1.8.** Scorecard still **100/100** (v1.0 board complete). This patch ships **windows/arm64** `libwelvet.dll` + `nativecpp` cgo wiring, bumps **webgpu → v1.0.6** (gnullvm static so Go CGO links on win/arm64), and keeps engine **0.1.85**. Prior **v1.1.7** shipped **full NativeCPU TrainMode** dispatch (`welvet_stack_train_mse` / `welvet_parallel_train_mse` / `welvet_grid_train_mse` / `welvet_stack_line_train_mse`): `TrainStackMSE`/`TrainMSE` intercept when `BackendNativeCPU`, Mirror Capture + `SyncWeightsFromNative` for `.entity`. Prior **v1.1.6** closed Parallel NormalBP + ApplyExecConfig + dtype train tests. Prior **v1.1.5** finished **opt-in NativeCPU** (**default stays BackendCPUTiled**). Prior **v1.1.3** added
+**Status: v1.1.9.** Scorecard still **100/100** (v1.0 board complete). This patch ships **darwin/arm64** `libwelvet.dylib` + `nativecpp` cgo, plus **android_arm64** / **android_x86_64** `.so` and **ios_arm64** `libwelvet.a` artifacts (mobile cgo later), engine still **0.1.85**. Prior **v1.1.8** shipped **windows/arm64** `libwelvet.dll` + webgpu **v1.0.6**. Prior **v1.1.7** shipped **full NativeCPU TrainMode** dispatch (`welvet_stack_train_mse` / `welvet_parallel_train_mse` / `welvet_grid_train_mse` / `welvet_stack_line_train_mse`): `TrainStackMSE`/`TrainMSE` intercept when `BackendNativeCPU`, Mirror Capture + `SyncWeightsFromNative` for `.entity`. Prior **v1.1.6** closed Parallel NormalBP + ApplyExecConfig + dtype train tests. Prior **v1.1.5** finished **opt-in NativeCPU** (**default stays BackendCPUTiled**). Prior **v1.1.3** added
 **FlightRole** on the Step\* systolic line (`RoleTrain` / `RoleAction`, `TickLine` /
 `TickStackLine`) so hosts can queue train vs action and only act on action throughput.
 Prior **v1.1.2** dropped local `replace` for consumable `go get`; **v1.1.1** fixed CamSync
@@ -70,7 +70,7 @@ NPU/Metal/QNN are not scored here.
 
 **Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. Patch tags
 (v1.0.1–v1.0.3) and minor/patch tags (**v1.1.0**, **v1.1.1**, …) ship engine deltas without moving the
-board. Weights sum to **100**. This tag is **v1.1.8** (windows/arm64 libwelvet + webgpu v1.0.6; prior v1.1.7 NativeCPU TrainMode).
+board. Weights sum to **100**. This tag is **v1.1.9** (darwin/arm64 + android/ios native artifacts; prior v1.1.8 windows/arm64 + webgpu v1.0.6).
 
 | # | Section | Wt | How scored today | Earned |
 |--:|---------|---:|------------------|-------:|

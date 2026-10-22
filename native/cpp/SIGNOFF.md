@@ -1,13 +1,15 @@
 # Platform sign-off (go_v_cpp `--all-train`)
 
 Engine pin: **0.1.85-m2-grid-line-trainmodes** (`native/cpp/MANIFEST.txt`).
-Go Welvet: **v1.1.8** (`nativecpp` + `linux_amd64/libwelvet.so` + `linux_arm64/libwelvet.so` + `windows_arm64/libwelvet.dll`).
+Go Welvet: **v1.1.9** (`nativecpp` + linux/darwin/windows arm64 libs + android/ios artifacts).
 
 | Platform | Status | Sections | Total wall | Date |
 |----------|--------|----------|------------|------|
 | **linux/amd64** | **PASS** (suite vs 0.1.82; re-run optional for 0.1.85) | **52 / 52** | **51.1s** | 2026-10-21 |
 | linux/arm64 | **lib+tool built** (Fedora WSL); AllTrain pending | | | 2026-10-22 |
-| darwin/arm64 | pending | | | |
+| **darwin/arm64** | **lib+cgo shipped**; w2a `logs/mac.txt` snapshot (re-run AllTrain to close) | | | 2026-10-22 |
+| android_arm64 / android_x86_64 | **lib shipped** (artifact; device AllTrain later) | | | 2026-10-22 |
+| ios_arm64 | **static .a shipped** (artifact; device AllTrain later) | | | 2026-10-22 |
 | windows/amd64 | pending | | | |
 | windows/arm64 | **lib+tool shipped**; AllTrain **5/52** PASS (Dense/RMS/LN/SwiGLU/LSTM); rest mostly 1-ulp exact_bit on ARM | see logs | **6m59s** | 2026-10-22 |
 
@@ -24,6 +26,7 @@ strip -o ../welvet/native/cpp/<goos>_<goarch>/libwelvet.so build/libwelvet.so
 # 3) Sign-off suite (timing table + section totals)
 cd welvet.cpp && ./scripts/linux_build_w2a.sh --all-train
 # or: WELVET_DENSE_FWD=$PWD/build/welvet_dense_fwd go test ./tests/go_v_cpp/ -run '^TestGoVCppAllTrain$' -v -count=1 -timeout 120m
+# mac: cd w2a && ./scripts/run_go_v_cpp_mac_snapshot.sh
 ```
 
 Update this table when a platform passes.
