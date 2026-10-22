@@ -6,6 +6,7 @@ import (
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/nativecpp"
+	"github.com/openfluke/welvet/nativeqnn"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/quant"
 )
@@ -21,7 +22,9 @@ type Layer struct {
 	Ops      []any // heterogeneous children; when set, ChildOps prefers this
 	Tanhi    any   // optional *tanhi.UDPConfig; synced from grid on Place
 
-	nativeMir *nativecpp.Mirror // pending packed child W until SyncWeightsFromNative
+	nativeMir *nativecpp.Mirror      // pending packed child W until SyncWeightsFromNative
+	qnnSeq    *nativeqnn.Sequential // fused HTP stack after SyncToQNN
+	qnnSynced bool
 }
 
 // New creates Sequential with Depth square Dense children (FormatNone Float32).
@@ -79,16 +82,22 @@ func (l *Layer) syncChildExec() {
 	if l == nil {
 		return
 	}
+	// Parent CPU-tiled: children may keep independent backends (Go / nativecpp / QNN).
+	propagate := l.Exec.Backend != core.BackendCPUTiled
 	for _, ch := range l.Children {
 		if ch == nil {
 			continue
 		}
-		ch.Exec = l.Exec
+		if propagate {
+			ch.Exec = l.Exec
+		}
 		ch.Core.TileSize = l.Core.TileSize
 		ch.Core.MultiCore = l.Core.MultiCore
 	}
 	for _, op := range l.Ops {
-		childSetExec(op, l.Exec)
+		if propagate {
+			childSetExec(op, l.Exec)
+		}
 	}
 }
 
@@ -137,6 +146,12 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 		} else {
 			pre, post, err = ForwardCPUTiled(l, input)
 		}
+	case core.BackendQNN:
+		if nativeqnn.Available() {
+			pre, post, err = ForwardQNN(l, input)
+		} else {
+			err = fmt.Errorf("sequential: BackendQNN but libwelvet_qnn unavailable")
+		}
 	default:
 		pre, post, err = ForwardCPUTiled(l, input)
 	}
@@ -165,6 +180,8 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 		} else {
 			gradIn, gradW, err = BackwardCPUTiled(l, gradOut, input, pre)
 		}
+	case core.BackendQNN:
+		err = fmt.Errorf("sequential: BackendQNN is forward-only")
 	default:
 		gradIn, gradW, err = BackwardCPUTiled(l, gradOut, input, pre)
 	}

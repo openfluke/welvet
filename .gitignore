@@ -6,11 +6,15 @@
 *.so
 *.dylib
 *.dll
-# Ship welvet.cpp C ABI artifacts with the Go module
+# Ship welvet.cpp / welvet.qnn C ABI artifacts with the Go module
 !native/cpp/**/*.so
 !native/cpp/**/*.dylib
 !native/cpp/**/*.dll
 !native/cpp/**/*.a
+!native/qnn/**/*.so
+!native/qnn/**/*.dylib
+!native/qnn/**/*.dll
+!native/qnn/**/*.a
 bin/
 dist/
 .DS_Store

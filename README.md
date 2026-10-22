@@ -47,6 +47,8 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `model/` | `transformer`, `entity`, `tokenizer`, `sampling`, `hf` |
 | `apps/` | `octo`, `flux2`, `mosstts` (not on the v1 board) |
 | `stub/` | future: `accel`, `donate`, `fountain`, `hardware`, `memory`, `seed`, `serialization` (not on the v1 board) |
+| `native/cpp/`, `nativecpp` | welvet.cpp C ABI (NativeCPU) |
+| `native/qnn/`, `nativeqnn` | welvet.qnn Hexagon HTP C ABI (`BackendQNN`, user `SyncToQNN` / `SyncFromQNN`) |
 | `w2a/`, `tools/` | harness (not engine) |
 
 

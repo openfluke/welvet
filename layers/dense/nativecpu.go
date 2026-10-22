@@ -24,7 +24,7 @@ func ForwardNativeCPU[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, pos
 	if err != nil {
 		return nil, nil, err
 	}
-	w, err := weights.MatrixF32(l.Weights)
+	w, err := l.NativeMatrixF32()
 	if err != nil {
 		return nil, nil, err
 	}
