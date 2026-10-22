@@ -1,5 +1,30 @@
 # Welvet installation
 
+How to install Go Welvet and (optionally) enable the shipped **NativeCPU** C ABI (`libwelvet`) via cgo.
+
+| Platform | Native artifact | Go `nativecpp` cgo | Notes |
+| --- | --- | --- | --- |
+| **windows/arm64** | `libwelvet.dll` | **wired** | Procedure below **verified** on device |
+| **windows/amd64** | `libwelvet.dll` | **wired** | Same pattern as ARM64; llvm-mingw x86_64 |
+| **linux/amd64** | `libwelvet.so` | **wired** | Usual desktop / CI path |
+| **linux/arm64** | `libwelvet.so` | **wired** | Fedora / WSL / native aarch64 |
+| **darwin/arm64** | `libwelvet.dylib` | **wired** | Apple Silicon |
+| **android/arm64** | `libwelvet.so` | artifact only | Drop into `jniLibs`; cgo pending |
+| **android/x86_64** | `libwelvet.so` | artifact only | Emulator; cgo pending |
+| **ios/arm64** | `libwelvet.a` | artifact only | Static link / `-force_load`; cgo pending |
+
+**Defaults:** pure Go `BackendCPUTiled` always works without a C compiler. Native acceleration needs cgo + the platform lib (or packaging that lib next to your binary).
+
+Pin the module (any OS):
+
+```bash
+go get github.com/openfluke/welvet@v1.1.10
+```
+
+Engine pin for shipped natives: **0.1.85-m2-grid-line-trainmodes** (`native/cpp/MANIFEST.txt`).
+
+---
+
 ## Windows ARM64
 
 This procedure was verified on Windows ARM64 using:
@@ -147,7 +172,7 @@ PASS: trained y=2x+1, saved linear.entity, reloaded and verified unseen inputs.
 
 The saved model is `linear.entity`. The complete successful output is in `latest-run.txt`.
 
-### Troubleshooting
+### Troubleshooting (Windows ARM64)
 
 | Symptom | Cause and fix |
 | --- | --- |
@@ -157,3 +182,218 @@ The saved model is `linear.entity`. The complete successful output is in `latest
 | New settings do not appear in a terminal | Restart the parent terminal application; check for explicit environment overrides. |
 
 No debug flag was needed.
+
+---
+
+## Windows AMD64 (x86-64)
+
+Same shape as Windows ARM64: Go + **llvm-mingw** (x86_64 host) + PATH to `native/cpp/windows_amd64` so `libwelvet.dll` loads.
+
+### 1. Go
+
+Install the Windows AMD64 toolchain from [go.dev/dl](https://go.dev/dl/) (e.g. `go1.22+` / current stable `windows-amd64.zip`). Put `go\bin` on user PATH. Confirm:
+
+```powershell
+go version
+# expect: windows/amd64
+```
+
+### 2. C compiler (llvm-mingw x86_64)
+
+Download the **ucrt-x86_64** llvm-mingw zip from [mstorsjo/llvm-mingw releases](https://github.com/mstorsjo/llvm-mingw/releases) (same release tag family as ARM64 is fine). Extract under e.g. `C:\git\toolchains`.
+
+Typical compilers:
+
+```text
+...\llvm-mingw-*-ucrt-x86_64\bin\x86_64-w64-mingw32-clang.exe
+...\llvm-mingw-*-ucrt-x86_64\bin\x86_64-w64-mingw32-clang++.exe
+```
+
+### 3. Enable cgo
+
+```powershell
+$compilerBin = 'C:\git\toolchains\llvm-mingw-<ver>-ucrt-x86_64\bin'  # adjust
+$cc = Join-Path $compilerBin 'x86_64-w64-mingw32-clang.exe'
+$cxx = Join-Path $compilerBin 'x86_64-w64-mingw32-clang++.exe'
+
+go env -w CGO_ENABLED=1 "CC=$cc" "CXX=$cxx"
+[Environment]::SetEnvironmentVariable('CGO_ENABLED', '1', 'User')
+[Environment]::SetEnvironmentVariable('CC', $cc, 'User')
+[Environment]::SetEnvironmentVariable('CXX', $cxx, 'User')
+# Also add $compilerBin to user PATH (same Add-UserPath helper as ARM64)
+```
+
+### 4. Project + DLL PATH
+
+```powershell
+go mod init example.com/welvet-amd64-demo
+go get github.com/openfluke/welvet@v1.1.10
+
+$moduleCache = go env GOMODCACHE
+$nativeBin = Join-Path $moduleCache 'github.com\openfluke\welvet@v1.1.10\native\cpp\windows_amd64'
+# Add $nativeBin (and llvm-mingw bin) to PATH — same pattern as ARM64 step 5
+```
+
+Ship `libwelvet.dll` (and mingw runtime DLLs if needed) next to your `.exe` for distribution.
+
+Sign-off helper in the suite: `w2a/scripts/run_go_v_cpp_windows_snapshot.cmd` → `logs/windowsx86.txt`.
+
+---
+
+## Linux AMD64
+
+### 1. Go + C toolchain
+
+```bash
+# Distro packages (Fedora example)
+sudo dnf install golang gcc gcc-c++   # or go from go.dev
+
+go version   # expect linux/amd64
+```
+
+cgo needs a working `gcc`/`clang` on `PATH`. Default `CGO_ENABLED=1` on Linux.
+
+### 2. Project
+
+```bash
+mkdir -p ~/welvet-demo && cd ~/welvet-demo
+go mod init example.com/welvet-linux-amd64-demo
+go get github.com/openfluke/welvet@v1.1.10
+go mod tidy
+```
+
+### 3. Native lib
+
+cgo links `native/cpp/linux_amd64` with an **rpath** into the module cache, so you usually do **not** need `LD_LIBRARY_PATH` for local `go run` / `go test`.
+
+Optional check:
+
+```bash
+ls "$(go env GOMODCACHE)/github.com/openfluke/welvet@v1.1.10/native/cpp/linux_amd64/libwelvet.so"
+```
+
+For a deployed binary, either keep rpath valid or install/`patchelf`/`LD_LIBRARY_PATH` so `libwelvet.so` resolves.
+
+### 4. Verify
+
+```bash
+go env CGO_ENABLED
+go run .
+```
+
+Optional NativeCPU: set `layer.Exec.Backend = core.BackendNativeCPU` (or `core.PreferNativeCPU()`). Default stays `BackendCPUTiled`.
+
+---
+
+## Linux ARM64
+
+Same as linux/amd64, different artifact directory.
+
+```bash
+# Confirm arch
+uname -m    # aarch64
+go env GOARCH   # arm64
+
+go get github.com/openfluke/welvet@v1.1.10
+ls "$(go env GOMODCACHE)/github.com/openfluke/welvet@v1.1.10/native/cpp/linux_arm64/libwelvet.so"
+```
+
+Needs `gcc`/`clang` + `CGO_ENABLED=1`. Rpath points at `linux_arm64`. Rebuild recipe if you refresh the lib from welvet.cpp: see `native/cpp/linux_arm64/README.md`.
+
+---
+
+## macOS Darwin ARM64 (Apple Silicon)
+
+### 1. Go + Xcode CLT
+
+```bash
+# Go: https://go.dev/dl/  (darwin-arm64) or brew install go
+xcode-select --install   # clang for cgo
+
+go version   # expect darwin/arm64
+```
+
+### 2. Project
+
+```bash
+mkdir -p ~/welvet-demo && cd ~/welvet-demo
+go mod init example.com/welvet-darwin-arm64-demo
+go get github.com/openfluke/welvet@v1.1.10
+```
+
+### 3. Native lib
+
+cgo links `native/cpp/darwin_arm64/libwelvet.dylib` with rpath. Confirm:
+
+```bash
+ls "$(go env GOMODCACHE)/github.com/openfluke/welvet@v1.1.10/native/cpp/darwin_arm64/libwelvet.dylib"
+```
+
+### 4. Verify
+
+```bash
+CGO_ENABLED=1 go run .
+```
+
+Suite snapshot helper (sibling w2a checkout): `w2a/scripts/run_go_v_cpp_mac_snapshot.sh` → `logs/mac.txt`.
+
+---
+
+## Android (arm64-v8a / x86_64)
+
+**Status:** `libwelvet.so` is **shipped** under `native/cpp/android_arm64` and `android_x86_64`. Go **`nativecpp` cgo is not wired yet** — you cannot `PreferNativeCPU` from a normal `GOOS=android` Go build today.
+
+### Use the artifact from an NDK / JNI app
+
+1. `go get github.com/openfluke/welvet@v1.1.10` (or copy from a checkout).
+2. Copy the matching `.so` into your app, e.g.:
+
+```text
+app/src/main/jniLibs/arm64-v8a/libwelvet.so
+app/src/main/jniLibs/x86_64/libwelvet.so
+```
+
+3. Load / link via JNI or an NDK shared-lib dependency against `native/cpp/include/welvet_c.h`.
+
+Rebuild from welvet.cpp (API 28+): see `native/cpp/android_arm64/README.md` and `android_x86_64/README.md`.
+
+---
+
+## iOS (arm64)
+
+**Status:** static `libwelvet.a` is **shipped** under `native/cpp/ios_arm64`. Go **`nativecpp` cgo is not wired yet**.
+
+### Link into an app
+
+1. Obtain `libwelvet.a` from the module cache or repo (`native/cpp/ios_arm64/`).
+2. Add it to the Xcode / gomobile link line; typically **`-force_load`** the archive (no device dylib).
+3. Headers: `native/cpp/include/welvet_c.h`.
+4. Deployment target: **15.0+** (as built).
+
+Rebuild from welvet.cpp with iphoneos SDK: see `native/cpp/ios_arm64/README.md`.
+
+---
+
+## Pure Go (any OS, no native)
+
+If you skip cgo or the platform has no wired lib:
+
+```bash
+CGO_ENABLED=0 go build ./...
+```
+
+Welvet runs on **`BackendCPUTiled`** (and other Go backends). NativeCPU simply stays unavailable (`nativecpp` stub).
+
+---
+
+## Common troubleshooting
+
+| Symptom | Likely fix |
+| --- | --- |
+| `nativecpp: libwelvet not available on this platform` | Wrong OS/arch, `CGO_ENABLED=0`, or android/ios (cgo pending). |
+| `C compiler … not found` | Install gcc/clang (Unix) or llvm-mingw (Windows); set `CC`/`CXX`. |
+| Windows `0xc0000135` / missing DLL | Put `native/cpp/windows_*` **and** llvm-mingw `bin` on `PATH`, or copy DLLs next to the exe. |
+| Linux/mac: `libwelvet.so` / `.dylib` not found at runtime | Broken rpath after relocating the binary; set `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH` or ship the lib beside the binary. |
+| WebGPU types undefined | Often cgo off — enable cgo and a working C toolchain. |
+
+More detail per artifact: `native/cpp/README.md` and each `native/cpp/<platform>/README.md`.
