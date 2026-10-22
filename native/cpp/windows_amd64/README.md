@@ -1,10 +1,14 @@
 # windows_amd64
 
-Drop the stripped `libwelvet` (or `.dll` / `.dylib`) for this platform here after cross/native build from welvet.cpp `0.1.85`.
+Shipped `libwelvet` for Windows x86-64 (llvm-mingw / gnullvm-compatible).
 
-Expected names:
-- linux_*: `libwelvet.so`
-- darwin_*: `libwelvet.dylib`
-- windows_*: `welvet.dll` (+ `libwelvet.a` import lib if needed)
+| File | Role |
+|------|------|
+| `libwelvet.dll` | Shared library (runtime) |
+| `libwelvet.dll.a` | Import lib for cgo `-lwelvet` |
 
-Then bump `native/cpp/MANIFEST.txt` and wire `nativecpp/*_windows_amd64.go`.
+Built from welvet.cpp **0.1.85-m2-grid-line-trainmodes** (`scripts/build.sh` / cmake + llvm-mingw).
+
+Go binding: `nativecpp` with `cgo && windows && amd64`. Put this directory on `PATH` (or next to the test binary) so the DLL loads at runtime.
+
+Sign-off: `w2a/scripts/run_go_v_cpp_windows_snapshot.cmd` → `logs/windowsx86.txt`.

@@ -1,4 +1,4 @@
-//go:build (cgo && linux && (amd64 || arm64)) || (cgo && darwin && arm64) || (cgo && windows && arm64)
+//go:build (cgo && linux && (amd64 || arm64)) || (cgo && darwin && arm64) || (cgo && windows && (amd64 || arm64))
 
 package nativecpp
 
@@ -7,6 +7,7 @@ package nativecpp
 #cgo linux,amd64 LDFLAGS: -L${SRCDIR}/../native/cpp/linux_amd64 -lwelvet -Wl,-rpath,${SRCDIR}/../native/cpp/linux_amd64
 #cgo linux,arm64 LDFLAGS: -L${SRCDIR}/../native/cpp/linux_arm64 -lwelvet -Wl,-rpath,${SRCDIR}/../native/cpp/linux_arm64
 #cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/../native/cpp/darwin_arm64 -lwelvet -Wl,-rpath,${SRCDIR}/../native/cpp/darwin_arm64
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/../native/cpp/windows_amd64 -lwelvet
 #cgo windows,arm64 LDFLAGS: -L${SRCDIR}/../native/cpp/windows_arm64 -lwelvet
 #include "welvet_c.h"
 #include <stdlib.h>

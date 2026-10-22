@@ -21,7 +21,7 @@ Composite layers without a packed C call still inherit NativeCPU onto Dense chil
 | `android_arm64/libwelvet.so` | Android arm64-v8a shared lib (artifact; cgo pending) |
 | `android_x86_64/libwelvet.so` | Android x86_64 shared lib (artifact; cgo pending) |
 | `ios_arm64/libwelvet.a` | iPhoneOS arm64 static archive (artifact; cgo pending) |
-| `windows_amd64/` | pending |
+| `windows_amd64/` | `libwelvet.dll` (+ import lib) |
 | `windows_arm64/` | `libwelvet.dll` (+ import lib) |
 
 Pinned engine: see `MANIFEST.txt` (must match `welvet_version()`). Current: **0.1.85-m2-grid-line-trainmodes**.

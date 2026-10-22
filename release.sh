@@ -165,6 +165,11 @@ go get github.com/openfluke/welvet@${tag}
 - **GPU fuse** — `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan)
 - **lucy** — shared SoftAcc / Availability / AdaptPct / Score measuring harness
 
+### What's new in v1.1.10
+- **windows/amd64** — ship \`libwelvet.dll\` + import lib; \`nativecpp\` cgo for \`windows && amd64\` (llvm-mingw)
+- Engine pin still **0.1.85**; **default stays BackendCPUTiled**
+- Sign-off: \`w2a/scripts/run_go_v_cpp_windows_snapshot.cmd\` → \`logs/windowsx86.txt\`
+
 ### What's new in v1.1.9
 - **darwin/arm64** — ship \`libwelvet.dylib\` + \`nativecpp\` cgo (\`darwin && arm64\`)
 - **android_arm64 / android_x86_64** — ship \`libwelvet.so\` artifacts (device cgo later)

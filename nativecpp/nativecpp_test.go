@@ -72,7 +72,7 @@ func TestDefaultBackendIsCPUTiled(t *testing.T) {
 func TestShippedNativeVersion(t *testing.T) {
 	switch {
 	case runtime.GOOS == "linux" && runtime.GOARCH == "amd64":
-	case runtime.GOOS == "windows" && runtime.GOARCH == "arm64":
+	case runtime.GOOS == "windows" && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64"):
 	default:
 		t.Skip("no shipped libwelvet for this OS/arch")
 	}

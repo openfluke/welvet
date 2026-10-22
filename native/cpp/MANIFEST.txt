@@ -7,5 +7,5 @@ platforms:
   android_arm64=present
   android_x86_64=present
   ios_arm64=present
-  windows_amd64=pending
+  windows_amd64=present
   windows_arm64=present

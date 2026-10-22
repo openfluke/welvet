@@ -1,4 +1,4 @@
-//go:build !((cgo && linux && (amd64 || arm64)) || (cgo && darwin && arm64) || (cgo && windows && arm64))
+//go:build !((cgo && linux && (amd64 || arm64)) || (cgo && darwin && arm64) || (cgo && windows && (amd64 || arm64)))
 
 package nativecpp
 
