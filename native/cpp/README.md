@@ -16,10 +16,10 @@ Composite layers without a packed C call still inherit NativeCPU onto Dense chil
 |------|----------|
 | `include/welvet_c.h` | Stable C ABI header |
 | `linux_amd64/libwelvet.so` | Linux x86-64 shared lib (single unversioned artifact) |
-| `linux_arm64/` | pending |
+| `linux_arm64/libwelvet.so` | Linux aarch64 shared lib |
 | `darwin_arm64/` | pending |
 | `windows_amd64/` | pending |
-| `windows_arm64/` | pending |
+| `windows_arm64/` | `libwelvet.dll` (+ import lib) |
 
 Pinned engine: see `MANIFEST.txt` (must match `welvet_version()`). Current: **0.1.85-m2-grid-line-trainmodes**.
 

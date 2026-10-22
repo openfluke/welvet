@@ -1,10 +1,12 @@
-//go:build cgo && linux && amd64
+//go:build (cgo && linux && (amd64 || arm64)) || (cgo && windows && arm64)
 
 package nativecpp
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../native/cpp/include
-#cgo LDFLAGS: -L${SRCDIR}/../native/cpp/linux_amd64 -lwelvet -Wl,-rpath,${SRCDIR}/../native/cpp/linux_amd64
+#cgo linux,amd64 LDFLAGS: -L${SRCDIR}/../native/cpp/linux_amd64 -lwelvet -Wl,-rpath,${SRCDIR}/../native/cpp/linux_amd64
+#cgo linux,arm64 LDFLAGS: -L${SRCDIR}/../native/cpp/linux_arm64 -lwelvet -Wl,-rpath,${SRCDIR}/../native/cpp/linux_arm64
+#cgo windows,arm64 LDFLAGS: -L${SRCDIR}/../native/cpp/windows_arm64 -lwelvet
 #include "welvet_c.h"
 #include <stdlib.h>
 */

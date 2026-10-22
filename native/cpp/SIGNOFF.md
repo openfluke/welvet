@@ -1,15 +1,15 @@
 # Platform sign-off (go_v_cpp `--all-train`)
 
 Engine pin: **0.1.85-m2-grid-line-trainmodes** (`native/cpp/MANIFEST.txt`).
-Go Welvet: **v1.1.7** (`nativecpp` + single `linux_amd64/libwelvet.so`).
+Go Welvet: **v1.1.8** (`nativecpp` + `linux_amd64/libwelvet.so` + `linux_arm64/libwelvet.so` + `windows_arm64/libwelvet.dll`).
 
 | Platform | Status | Sections | Total wall | Date |
 |----------|--------|----------|------------|------|
 | **linux/amd64** | **PASS** (suite vs 0.1.82; re-run optional for 0.1.85) | **52 / 52** | **51.1s** | 2026-10-21 |
-| linux/arm64 | pending | | | |
+| linux/arm64 | **lib+tool built** (Fedora WSL); AllTrain pending | | | 2026-10-22 |
 | darwin/arm64 | pending | | | |
 | windows/amd64 | pending | | | |
-| windows/arm64 | pending | | | |
+| windows/arm64 | **lib+tool shipped**; AllTrain **5/52** PASS (Dense/RMS/LN/SwiGLU/LSTM); rest mostly 1-ulp exact_bit on ARM | see logs | **6m59s** | 2026-10-22 |
 
 ## How to re-run on another machine
 
