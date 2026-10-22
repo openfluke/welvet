@@ -159,10 +159,10 @@ go get github.com/openfluke/welvet@${tag}
 \`\`\`
 
 ### What's new in v1.0
-- **Scorecard 100/100** — engine is v1. Apps, stubs, and NPU/C++ accel are off-board (later `welvet.cpp`)
+- **Scorecard 100/100** — engine is v1. Apps, stubs, and NPU/C++ accel are off-board (later \`welvet.cpp\`)
 - **Training credit (§9)** — StepBP, Tween*, TweenSplit, HeadProxy, Linear, FastProxy, Sparse, Alt, cameral BranchModes
 - **FastProxy** — DFA-shaped \(B:=W_{\mathrm{head}}^\top\) rivaling StepBP Acc on sine/copy toys
-- **GPU fuse** — `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan)
+- **GPU fuse** — \`fusedgpu/\` decoder fuse (WebGPU + optional Android Vulkan)
 - **lucy** — shared SoftAcc / Availability / AdaptPct / Score measuring harness
 
 ### What's new in v1.1.10
@@ -207,9 +207,9 @@ go get github.com/openfluke/welvet@${tag}
 - **Cam adjusting fixed** — CamSync / inter-cameral weight blend now works on **all layers** (Dense, CNN, Parallel branches, Stack-resolved stores), not just a subset of paths
 
 ### What's new in v1.1.0
-- **CamSync** — soft/hard inter-cameral weight blend (`CamSyncConfig` / `weights.BlendStores`); α 1%→100%; Groups; Cross same-shape pairs across Stack children / meshes; after sample / step / pulse / manual
-- **`training_modes.md`** — all 29 named credit modes with equations + ShortTrainMode legend
-- **Lucy Lean density** — Acc keep ≥95% then smallest RAM / fastest Thru / best Avail (`LeanChamp`, `LeanByArch`)
+- **CamSync** — soft/hard inter-cameral weight blend (\`CamSyncConfig\` / \`weights.BlendStores\`); α 1%→100%; Groups; Cross same-shape pairs across Stack children / meshes; after sample / step / pulse / manual
+- **\`training_modes.md\`** — all 29 named credit modes with equations + ShortTrainMode legend
+- **Lucy Lean density** — Acc keep ≥95% then smallest RAM / fastest Thru / best Avail (\`LeanChamp\`, \`LeanByArch\`)
 - DotF64 generic wire fix; feature book **§70 CamSync** (1×2×1 ↔ 2×4×5 same-shape callout)
 
 ### What's in this tree
