@@ -151,80 +151,33 @@ create_or_update_release() {
   notes="$(cat <<EOF
 ## Welvet ${tag}
 
-Pure Go AI engine release aligned to scorecard **${earned}/100** → **${tag}**.
+Pure Go AI engine — scorecard **${earned}/100** → **${tag}**.
 
 ### Module
 \`\`\`bash
 go get github.com/openfluke/welvet@${tag}
 \`\`\`
 
-### What's new in v1.0
-- **Scorecard 100/100** — engine is v1. Apps, stubs, and NPU/C++ accel are off-board (later \`welvet.cpp\`)
-- **Training credit (§9)** — StepBP, Tween*, TweenSplit, HeadProxy, Linear, FastProxy, Sparse, Alt, cameral BranchModes
-- **FastProxy** — DFA-shaped \(B:=W_{\mathrm{head}}^\top\) rivaling StepBP Acc on sine/copy toys
-- **GPU fuse** — \`fusedgpu/\` decoder fuse (WebGPU + optional Android Vulkan)
-- **lucy** — shared SoftAcc / Availability / AdaptPct / Score measuring harness
+### What's new in v1.2.0
+- **Qualcomm Hexagon NPU (HTP)** through Go — \`nativeqnn\` + bundled \`libwelvet_qnn\` (sibling **[welvet.qnn](https://github.com/openfluke/welvet.qnn) 1.0.0**)
+- \`BackendQNN\` with explicit \`SyncToQNN\` / \`SyncFromQNN\` (user owns sync; no silent offload)
+- Online NPU paths: Dense prepare+exec; Softmax / RMSNorm / LayerNorm / CNN / ConvT / Embedding / Residual / SwiGLU / MHA / LSTM; caps via \`LayerSupported\`
+- Large-shape \`w2a/go_v_qnn\` benches — NPU beats Go/native on dense / cnn / mha / swiglu / …
+- Pins **welvet.cpp 0.67** via \`nativecpp\` (Go-mirrored board; HTP stays in welvet.qnn)
+- Engine board still **100/100** — vendor NPU points scored in welvet.qnn, not this board
+- First platform ship: **Windows ARM64** Hexagon
 
-### What's new in v1.1.10
-- **windows/amd64** — ship \`libwelvet.dll\` + import lib; \`nativecpp\` cgo for \`windows && amd64\` (llvm-mingw)
-- Engine pin still **0.1.85**; **default stays BackendCPUTiled**
-- Sign-off: \`w2a/scripts/run_go_v_cpp_windows_snapshot.cmd\` → \`logs/windowsx86.txt\`
+### Defaults (unchanged)
+- \`BackendCPUTiled\` remains the default
+- NativeCPU / QNN are **opt-in**
 
-### What's new in v1.1.9
-- **darwin/arm64** — ship \`libwelvet.dylib\` + \`nativecpp\` cgo (\`darwin && arm64\`)
-- **android_arm64 / android_x86_64** — ship \`libwelvet.so\` artifacts (device cgo later)
-- **ios_arm64** — ship static \`libwelvet.a\` (app link / cgo later)
-- Engine pin still **0.1.85**; **default stays BackendCPUTiled**
+### Related
+- NativeCPU / C++: https://github.com/openfluke/welvet.cpp
+- Hexagon HTP: https://github.com/openfluke/welvet.qnn
+- Validation: https://github.com/openfluke/w2a
+- Site: https://openfluke.github.io/welvet/
 
-### What's new in v1.1.8
-- **windows/arm64** — ship \`libwelvet.dll\` + import lib; \`nativecpp\` cgo for \`windows && arm64\` (shared wrappers with linux/amd64)
-- **webgpu v1.0.6** — windows/arm64 \`libwgpu_native.a\` rebuilt as gnullvm (Go CGO / llvm-mingw links without MSVC RTTI stubs)
-- Engine pin still **0.1.85**; **default stays BackendCPUTiled**
-
-### What's new in v1.1.7
-- **Full NativeCPU TrainMode** — C ABI \`welvet_stack_train_mse\` / \`welvet_parallel_train_mse\` / \`welvet_grid_train_mse\` / \`welvet_stack_line_train_mse\` (engine **0.1.85**)
-- \`TrainStackMSE\` / \`TrainMSE\` intercept when \`BackendNativeCPU\`; Mirror Capture + \`SyncWeightsFromNative\` for \`.entity\`
-- Single shipped \`linux_amd64/libwelvet.so\` (unversioned SONAME). **Default stays BackendCPUTiled**
-
-### What's new in v1.1.6
-- Parallel NormalBP C ABI + \`TrainNativeMSE\`; \`ApplyExecConfig\` on all layers; FormatNone dtype train tests
-- Engine pin **0.1.83** era NativeCPU gap close
-
-### What's new in v1.1.5
-- **Opt-in NativeCPU** — \`BackendNativeCPU\` → welvet.cpp C ABI; JSON ExecConfig Network→Volume→Sector→Layer
-
-### What's new in v1.1.4
-- linux/amd64 \`libwelvet.so\` ship + \`nativecpp\` bindings; \`--all-train\` platform sign-off table
-
-### What's new in v1.1.3
-- **FlightRole on Step\* Line** — \`RoleTrain\` / \`RoleAction\`, \`TickLine\` / \`TickStackLine\`; train applies credit on pop, action pops as throughput only (no credit)
-- Helpers: \`StackLineDepth\`, \`StackInFlight\`
-
-### What's new in v1.1.2
-- **Consumable module** — removed local \`replace\` for webgpu / go-sentencepiece; \`go get github.com/openfluke/welvet@v1.1.2\` works without sibling checkouts
-
-### What's new in v1.1.1
-- **Cam adjusting fixed** — CamSync / inter-cameral weight blend now works on **all layers** (Dense, CNN, Parallel branches, Stack-resolved stores), not just a subset of paths
-
-### What's new in v1.1.0
-- **CamSync** — soft/hard inter-cameral weight blend (\`CamSyncConfig\` / \`weights.BlendStores\`); α 1%→100%; Groups; Cross same-shape pairs across Stack children / meshes; after sample / step / pulse / manual
-- **\`training_modes.md\`** — all 29 named credit modes with equations + ShortTrainMode legend
-- **Lucy Lean density** — Acc keep ≥95% then smallest RAM / fastest Thru / best Avail (\`LeanChamp\`, \`LeanByArch\`)
-- DotF64 generic wire fix; feature book **§70 CamSync** (1×2×1 ↔ 2×4×5 same-shape callout)
-
-### What's in this tree
-- Layers, 34 dtypes, 20 quant formats
-- Backends: CPU tiled · Plan 9 SIMD · WebGPU
-- Native in-dtype SGD / storage-truth train (no retained f32 master)
-- Cross-numeric train proven in w2a Step
-
-### Related releases
-- Validation suite: https://github.com/openfluke/w2a/releases
-- Feature book: https://github.com/openfluke/openfluke.github.io/releases
-- Showcase: https://github.com/openfluke/down-the-dem
-
-### Site
-https://openfluke.github.io/welvet/
+Prior tags (v1.0…v1.1.10): CamSync, multi-OS \`libwelvet\`, NativeCPU train modes — see older GitHub releases.
 
 ### Regenerate
 \`\`\`bash
