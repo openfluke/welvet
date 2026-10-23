@@ -1,4 +1,4 @@
-engine=0.1.85-m2-grid-line-trainmodes
+engine=0.67
 abi_header=include/welvet_c.h
 platforms:
   linux_amd64=present

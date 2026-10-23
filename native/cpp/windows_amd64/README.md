@@ -7,7 +7,7 @@ Shipped `libwelvet` for Windows x86-64 (llvm-mingw / gnullvm-compatible).
 | `libwelvet.dll` | Shared library (runtime) |
 | `libwelvet.dll.a` | Import lib for cgo `-lwelvet` |
 
-Built from welvet.cpp **0.1.85-m2-grid-line-trainmodes** (`scripts/build.sh` / cmake + llvm-mingw).
+Built from welvet.cpp **0.67** (`scripts/build.sh` / cmake + llvm-mingw).
 
 Go binding: `nativecpp` with `cgo && windows && amd64`. Put this directory on `PATH` (or next to the test binary) so the DLL loads at runtime.
 

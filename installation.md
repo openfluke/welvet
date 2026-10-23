@@ -18,10 +18,11 @@ How to install Go Welvet and (optionally) enable the shipped **NativeCPU** C ABI
 Pin the module (any OS):
 
 ```bash
-go get github.com/openfluke/welvet@v1.1.10
+go get github.com/openfluke/welvet@v1.2.0
 ```
 
-Engine pin for shipped natives: **0.1.85-m2-grid-line-trainmodes** (`native/cpp/MANIFEST.txt`).
+Engine pin for shipped natives: **0.67** (`native/cpp/MANIFEST.txt`).  
+Hexagon NPU (optional, Windows ARM64): welvet.qnn **1.0.0** → `native/qnn/windows_arm64/libwelvet_qnn.dll` + QAIRT on `PATH` (see welvet.qnn README).
 
 ---
 
@@ -32,7 +33,7 @@ This procedure was verified on Windows ARM64 using:
 | Component | Version |
 | --- | --- |
 | Go | 1.27.3, windows/arm64 |
-| Welvet | v1.1.10 |
+| Welvet | v1.2.0 |
 | WebGPU dependency | github.com/openfluke/webgpu v1.0.6 |
 | C/C++ toolchain | llvm-mingw 20261020, UCRT, aarch64 host |
 
@@ -121,10 +122,10 @@ For a new project, initialize a module and pin Welvet:
 New-Item -ItemType Directory -Force C:\git\welvet-1.1.10-demo
 Set-Location C:\git\welvet-1.1.10-demo
 go mod init example.com/welvet-arm64-demo
-go get github.com/openfluke/welvet@v1.1.10
+go get github.com/openfluke/welvet@v1.2.0
 ```
 
-Skip initialization if the project already has a `go.mod`. After adding your Go source, run `go mod tidy`. In this demo, Welvet v1.1.10 resolves WebGPU v1.0.6.
+Skip initialization if the project already has a `go.mod`. After adding your Go source, run `go mod tidy`. In this demo, Welvet v1.2.0 resolves WebGPU v1.0.6.
 
 ### 5. Make the bundled Welvet DLL discoverable
 
@@ -132,7 +133,7 @@ The executable imports `libwelvet.dll`. Add the directory containing the bundled
 
 ```powershell
 $moduleCache = go env GOMODCACHE
-$nativeBin = Join-Path $moduleCache 'github.com\openfluke\welvet@v1.1.10\native\cpp\windows_arm64'
+$nativeBin = Join-Path $moduleCache 'github.com\openfluke\welvet@v1.2.0\native\cpp\windows_arm64'
 if (!(Test-Path (Join-Path $nativeBin 'libwelvet.dll'))) {
     throw "Welvet ARM64 DLL not found in $nativeBin"
 }
@@ -142,7 +143,7 @@ $env:Path = $nativeBin + ';' + $env:Path
 
 Keep the llvm-mingw `bin` directory on PATH as well: the built executable also imports its `libunwind.dll`.
 
-This PATH entry points into the Go module cache for **v1.1.10**. If you change Welvet versions or clear that cache, update or restore the DLL directory. For a distributed application, package its required runtime DLLs with the executable instead of relying on this development-machine PATH.
+This PATH entry points into the Go module cache for **v1.2.0**. If you change Welvet versions or clear that cache, update or restore the DLL directory. For a distributed application, package its required runtime DLLs with the executable instead of relying on this development-machine PATH.
 
 ### 6. Restart terminals and verify
 
@@ -227,10 +228,10 @@ go env -w CGO_ENABLED=1 "CC=$cc" "CXX=$cxx"
 
 ```powershell
 go mod init example.com/welvet-amd64-demo
-go get github.com/openfluke/welvet@v1.1.10
+go get github.com/openfluke/welvet@v1.2.0
 
 $moduleCache = go env GOMODCACHE
-$nativeBin = Join-Path $moduleCache 'github.com\openfluke\welvet@v1.1.10\native\cpp\windows_amd64'
+$nativeBin = Join-Path $moduleCache 'github.com\openfluke\welvet@v1.2.0\native\cpp\windows_amd64'
 # Add $nativeBin (and llvm-mingw bin) to PATH — same pattern as ARM64 step 5
 ```
 
@@ -258,7 +259,7 @@ cgo needs a working `gcc`/`clang` on `PATH`. Default `CGO_ENABLED=1` on Linux.
 ```bash
 mkdir -p ~/welvet-demo && cd ~/welvet-demo
 go mod init example.com/welvet-linux-amd64-demo
-go get github.com/openfluke/welvet@v1.1.10
+go get github.com/openfluke/welvet@v1.2.0
 go mod tidy
 ```
 
@@ -269,7 +270,7 @@ cgo links `native/cpp/linux_amd64` with an **rpath** into the module cache, so y
 Optional check:
 
 ```bash
-ls "$(go env GOMODCACHE)/github.com/openfluke/welvet@v1.1.10/native/cpp/linux_amd64/libwelvet.so"
+ls "$(go env GOMODCACHE)/github.com/openfluke/welvet@v1.2.0/native/cpp/linux_amd64/libwelvet.so"
 ```
 
 For a deployed binary, either keep rpath valid or install/`patchelf`/`LD_LIBRARY_PATH` so `libwelvet.so` resolves.
@@ -294,8 +295,8 @@ Same as linux/amd64, different artifact directory.
 uname -m    # aarch64
 go env GOARCH   # arm64
 
-go get github.com/openfluke/welvet@v1.1.10
-ls "$(go env GOMODCACHE)/github.com/openfluke/welvet@v1.1.10/native/cpp/linux_arm64/libwelvet.so"
+go get github.com/openfluke/welvet@v1.2.0
+ls "$(go env GOMODCACHE)/github.com/openfluke/welvet@v1.2.0/native/cpp/linux_arm64/libwelvet.so"
 ```
 
 Needs `gcc`/`clang` + `CGO_ENABLED=1`. Rpath points at `linux_arm64`. Rebuild recipe if you refresh the lib from welvet.cpp: see `native/cpp/linux_arm64/README.md`.
@@ -318,7 +319,7 @@ go version   # expect darwin/arm64
 ```bash
 mkdir -p ~/welvet-demo && cd ~/welvet-demo
 go mod init example.com/welvet-darwin-arm64-demo
-go get github.com/openfluke/welvet@v1.1.10
+go get github.com/openfluke/welvet@v1.2.0
 ```
 
 ### 3. Native lib
@@ -326,7 +327,7 @@ go get github.com/openfluke/welvet@v1.1.10
 cgo links `native/cpp/darwin_arm64/libwelvet.dylib` with rpath. Confirm:
 
 ```bash
-ls "$(go env GOMODCACHE)/github.com/openfluke/welvet@v1.1.10/native/cpp/darwin_arm64/libwelvet.dylib"
+ls "$(go env GOMODCACHE)/github.com/openfluke/welvet@v1.2.0/native/cpp/darwin_arm64/libwelvet.dylib"
 ```
 
 ### 4. Verify
@@ -345,7 +346,7 @@ Suite snapshot helper (sibling w2a checkout): `w2a/scripts/run_go_v_cpp_mac_snap
 
 ### Use the artifact from an NDK / JNI app
 
-1. `go get github.com/openfluke/welvet@v1.1.10` (or copy from a checkout).
+1. `go get github.com/openfluke/welvet@v1.2.0` (or copy from a checkout).
 2. Copy the matching `.so` into your app, e.g.:
 
 ```text

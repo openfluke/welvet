@@ -1,7 +1,7 @@
 # Platform sign-off (go_v_cpp `--all-train`)
 
-Engine pin: **0.1.85-m2-grid-line-trainmodes** (`native/cpp/MANIFEST.txt`).
-Go Welvet: **v1.1.10** (`nativecpp` + linux/darwin/windows amd64+arm64 libs + android/ios artifacts).
+Engine pin: **0.67** (`native/cpp/MANIFEST.txt`).
+Go Welvet: **v1.2.0** (`nativecpp` + linux/darwin/windows amd64+arm64 libs + android/ios artifacts).
 
 | Platform | Status | Sections | Total wall | Date |
 |----------|--------|----------|------------|------|
