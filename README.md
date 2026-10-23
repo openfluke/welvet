@@ -4,16 +4,20 @@
 
 | | |
 |--|--|
-| **Version** | **v1.1.10** |
-| **Scorecard** | **100 / 100** pts (see [Version scorecard](#version-scorecard)) |
+| **Version** | **v1.2.0** |
+| **Scorecard** | **100 / 100** pts (engine board — see [Version scorecard](#version-scorecard)) |
+| **NativeCPU** | welvet.cpp **0.67** (`nativecpp`) |
+| **Hexagon NPU** | welvet.qnn **1.0.0** (`nativeqnn` · Windows ARM64) |
 
-Engine is v1. Apps (`octo`), stubs, and NPU/C++ accel sit **outside** this board — they are sibling / later trees (`welvet.cpp`), not missing Welvet.
+Engine board stayed **100/100** since v1.0. **v1.2.0** is the proper **minor** for shipping Qualcomm HTP through Go (not a patch on 1.1.10 — and not a reset to 0.1.0). Vendor accel lives in **sibling repos** so SDKs never contaminate each other ([Vendor versioning](#vendor-versioning--future)).
 
 | Repo | Role |
 |------|------|
-| **[openfluke/welvet](https://github.com/openfluke/welvet)** (this tree) | **Engine only** — layers, quant, SIMD (Plan 9 `.s`), WebGPU, ENTITY, dispatch |
-| **[openfluke/w2a](https://github.com/openfluke/w2a)** (`w2a/`) | Tests, CABI, docs, menus — **never** in engine packages |
-| **[openfluke/octo](apps/octo/)** (`apps/octo/`) | Model shell — HF download, convert→ENTITY, quantize, run (Lucy successor) |
+| **[openfluke/welvet](https://github.com/openfluke/welvet)** (this tree) | **Go engine** — layers, quant, SIMD, WebGPU, ENTITY, `nativecpp` / `nativeqnn` bindings |
+| **[openfluke/welvet.cpp](https://github.com/openfluke/welvet.cpp)** | CPU C++ engine + C ABI (**0.67** — same 100-pt board as Go) |
+| **[openfluke/welvet.qnn](https://github.com/openfluke/welvet.qnn)** | Qualcomm Hexagon HTP (**1.0.0**) |
+| **[openfluke/w2a](https://github.com/openfluke/w2a)** | Tests / benches (`go_v_qnn` large matrix) — **never** in engine packages |
+| **[openfluke/octo](apps/octo/)** | Model shell — HF download, convert→ENTITY, quantize, run |
 
 `loom/poly` is legacy reference only. Welvet is the rewrite.
 
@@ -47,16 +51,12 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `model/` | `transformer`, `entity`, `tokenizer`, `sampling`, `hf` |
 | `apps/` | `octo`, `flux2`, `mosstts` (not on the v1 board) |
 | `stub/` | future: `accel`, `donate`, `fountain`, `hardware`, `memory`, `seed`, `serialization` (not on the v1 board) |
+| `native/cpp/`, `nativecpp` | welvet.cpp C ABI (NativeCPU) |
+| `native/qnn/`, `nativeqnn` | welvet.qnn Hexagon HTP C ABI (`BackendQNN`, user `SyncToQNN` / `SyncFromQNN`) |
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v1.1.10.** Scorecard still **100/100** (v1.0 board complete). This patch ships **windows/amd64** `libwelvet.dll` + `nativecpp` cgo, engine still **0.1.85**. Prior **v1.1.9** shipped **darwin/arm64** `libwelvet.dylib` + android/ios artifacts. Prior **v1.1.8** shipped **windows/arm64** `libwelvet.dll` + webgpu **v1.0.6**. Prior **v1.1.7** shipped **full NativeCPU TrainMode** dispatch (`welvet_stack_train_mse` / `welvet_parallel_train_mse` / `welvet_grid_train_mse` / `welvet_stack_line_train_mse`): `TrainStackMSE`/`TrainMSE` intercept when `BackendNativeCPU`, Mirror Capture + `SyncWeightsFromNative` for `.entity`. Prior **v1.1.6** closed Parallel NormalBP + ApplyExecConfig + dtype train tests. Prior **v1.1.5** finished **opt-in NativeCPU** (**default stays BackendCPUTiled**). Prior **v1.1.3** added
-**FlightRole** on the Step\* systolic line (`RoleTrain` / `RoleAction`, `TickLine` /
-`TickStackLine`) so hosts can queue train vs action and only act on action throughput.
-Prior **v1.1.2** dropped local `replace` for consumable `go get`; **v1.1.1** fixed CamSync
-on all layer types; **v1.1.0** packed CamSync, [`training_modes.md`](training_modes.md),
-Lucy **Lean** density, and feature-book §70.
-NPU/Metal/QNN are not scored here.
+**Status: v1.2.0.** Engine scorecard still **100/100**. This minor ships **Qualcomm Hexagon NPU** via `nativeqnn` + bundled `libwelvet_qnn` (welvet.qnn **1.0.0**), large-shape `w2a/go_v_qnn` benches (NPU beats Go/native on dense/cnn/mha/swiglu/…), and pins welvet.cpp **0.67** (Go-mirrored board 67/100; HTP stays in qnn). Prior **v1.1.10** windows/amd64 native; **v1.1.9** darwin/arm64 + android/ios; **v1.1.8** windows/arm64 + webgpu **v1.0.6**. Engine board still excludes vendor NPU points (scored in welvet.qnn).
 
 | Legend | Meaning | Pts credit |
 |--------|---------|------------|
@@ -68,9 +68,7 @@ NPU/Metal/QNN are not scored here.
 
 ## Version scorecard
 
-**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. Patch tags
-(v1.0.1–v1.0.3) and minor/patch tags (**v1.1.0**, **v1.1.1**, …) ship engine deltas without moving the
-board. Weights sum to **100**. This tag is **v1.1.10** (windows/amd64 native lib + cgo; prior v1.1.9 darwin/arm64 + android/ios; prior v1.1.8 windows/arm64 + webgpu v1.0.6).
+**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. After v1.0, **patch** = bugfix / platform artifact; **minor** = real capability (NativeCPU train, WebGPU, **QNN**). Weights sum to **100**. This tag is **v1.2.0** (Hexagon HTP + nativeqnn).
 
 | # | Section | Wt | How scored today | Earned |
 |--:|---------|---:|------------------|-------:|
@@ -119,8 +117,21 @@ Status rollup — version points live in the [scorecard](#version-scorecard) onl
 | `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan) | ✅ |
 | `apps/octo/` interactive model shell (download / convert / chat) | 🚧 off-board |
 | `stub/` seed · serialization · hardware · memory · fountain · donate | 🚧 off-board |
-| `stub/accel/` (NPU/Metal/QNN — not Go Welvet; later `welvet.cpp`) | ⬜ off-board |
+| `nativeqnn` + welvet.qnn **1.0.0** — Hexagon HTP forward (Windows ARM64) | ✅ off-board (vendor repo) |
+| `nativecpp` + welvet.cpp **0.67** — NativeCPU C ABI | ✅ |
 | Full v1 matrix (every cell peak-fused, no host ALU) | 🚧 (peak fused ✅; nested Sequential/Residual still open) |
+
+### What Go Welvet can do now (v1.2.0)
+
+| Path | Backend | What |
+|------|---------|------|
+| Default | `BackendCPUTiled` | Full layer set, 34 dtypes, 20 quants, train modes |
+| Fast CPU | `BackendSIMD` / Plan 9 `.s` | Dense + Softmax/SiLU fused paths |
+| GPU | `BackendWebGPU` | Dense/MHA/CNN/norms/… on device |
+| Native CPU | `BackendNativeCPU` + `SyncToNative` | welvet.cpp C ABI (opt-in) |
+| **Hexagon NPU** | `BackendQNN` + `SyncToQNN` / `SyncFromQNN` | Dense prepare+exec; Softmax/RMS/LN/CNN/ConvT/Emb/Residual/SwiGLU/MHA/LSTM online; layer×dtype caps via `LayerSupported` |
+
+User owns sync — no silent offload. Caps reject unsupported layer×dtype on mount. Headline NPU time is DLL `graphExecute`; Go→NPU call includes cgo/pack (and graph build for online layers).
 
 Validate live:
 ```bash
@@ -149,7 +160,27 @@ cd w2a && go test ./tests/metacognition -v
 cd w2a && go test ./tests/dense -run LinearGradIn -v
 cd w2a && go test ./tests/entity -run Cameral -v
 cd w2a && go test ./tests/parallel -run 'Credit|AllCredit|AllStack|Combine|HemiN|Sparse|ParseTrain|RequiresGrid|WrappedCNN|Inherit|TrainMSE' -v
+# Hexagon HTP (Windows ARM64 + libwelvet_qnn + QAIRT on PATH):
+cd w2a && go test ./tests/go_v_qnn -v -count=1 -run TestGoVQNNMatrix -timeout 180m
 ```
+
+---
+
+## Vendor versioning — future
+
+Accel SDKs stay in **separate repos** (no cross-vendor contamination). Go only grows thin `native*` packages.
+
+| Repo | Compute | OS roadmap | First tag |
+|------|---------|------------|-----------|
+| **welvet.qnn** | Qualcomm Hexagon NPU | Windows ARM64 → Linux ARM64 | **1.0.0** |
+| welvet.cuda / welvet.nvidia | NVIDIA GPU | Windows + Linux | planned |
+| welvet.rocm / welvet.amd | AMD GPU | Windows + Linux | planned |
+| welvet.xpu / welvet.intel_gpu | Intel GPU | Windows + Linux | planned |
+| welvet.intel_npu | Intel NPU | Windows + Linux | planned |
+| **welvet.cpp** | CPU + C ABI (Go-parity board) | Linux / Windows / macOS / Android / iOS | **0.67** |
+| **welvet** (Go) | Engine + bindings | all | **v1.2.0** |
+
+Policy: vendor **1.0.0** = first stable forward ship on a documented host. Go **minor** bumps when a new vendor binding ships.
 
 ---
 
@@ -656,7 +687,7 @@ Octo is a nested shell repo. Stubs are future. NPU/Metal/QNN are 3rd-party C++ �
 |---------|----------|:------:|
 | `apps/octo/` | Interactive model shell (download / convert / chat) | 🚧 |
 | `stub/seed/` · `serialization/` · `hardware/` · `memory/` · `fountain/` · `donate/` | Future engine surfaces | 🚧 |
-| `stub/accel/` | Intel NPU / Qualcomm / Apple Metal / QNN — later `welvet.cpp` | ⬜ |
+| `nativeqnn` / future `nativecuda`… | Vendor accel via sibling repos (qnn **1.0.0** shipped) | ✅ / ⬜ |
 | `fusedgpu/` | Q4_0 Engine + BinaryG128 HybridEngine; Android Vulkan optional (`WELVET_NATIVE_VK`) | ✅ (in §10) |
 
 ### Harness (not engine — does not count toward v1 pts)

@@ -4,6 +4,10 @@ package core
 // nativecpp registers the real checker from init(); default is false (pure Go).
 var nativeCPUAvailable = func() bool { return false }
 
+// qnnAvailable reports whether welvet.qnn is loaded for BackendQNN dispatch.
+// nativeqnn registers the real checker from init(); default is false.
+var qnnAvailable = func() bool { return false }
+
 // SetNativeCPUAvailableChecker lets nativecpp register libwelvet availability.
 // Pass nil to reset to "unavailable".
 func SetNativeCPUAvailableChecker(fn func() bool) {
@@ -12,6 +16,15 @@ func SetNativeCPUAvailableChecker(fn func() bool) {
 		return
 	}
 	nativeCPUAvailable = fn
+}
+
+// SetQNNAvailableChecker lets nativeqnn register libwelvet_qnn availability.
+func SetQNNAvailableChecker(fn func() bool) {
+	if fn == nil {
+		qnnAvailable = func() bool { return false }
+		return
+	}
+	qnnAvailable = fn
 }
 
 // PreferNativeCPU returns BackendNativeCPU when libwelvet is loaded, else BackendCPUTiled.
@@ -24,6 +37,17 @@ func PreferNativeCPU() Backend {
 	return BackendCPUTiled
 }
 
-// DefaultBackend is always BackendCPUTiled. NativeCPU is opt-in (PreferNativeCPU /
-// Exec.Backend = BackendNativeCPU).
+// PreferQNN returns BackendQNN when libwelvet_qnn is loaded, else BackendCPUTiled.
+func PreferQNN() Backend {
+	if qnnAvailable() {
+		return BackendQNN
+	}
+	return BackendCPUTiled
+}
+
+// QNNAvailable reports whether the Hexagon NPU C ABI is linked.
+func QNNAvailable() bool { return qnnAvailable() }
+
+// DefaultBackend is always BackendCPUTiled. NativeCPU / QNN are opt-in
+// (PreferNativeCPU / PreferQNN / Exec.Backend = …).
 func DefaultBackend() Backend { return BackendCPUTiled }

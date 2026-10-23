@@ -730,7 +730,7 @@ func TestNativeEngineVersion085(t *testing.T) {
 		t.Skip("needs linux/amd64 libwelvet")
 	}
 	v := nativecpp.Version()
-	if !strings.HasPrefix(v, "0.1.85") {
-		t.Fatalf("want engine 0.1.85* got %q", v)
+	if !strings.HasPrefix(v, "0.67") {
+		t.Fatalf("want engine 0.67* got %q", v)
 	}
 }

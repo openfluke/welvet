@@ -128,7 +128,8 @@ const (
 	BackendCPUTiled  Backend = 0
 	BackendSIMD      Backend = 1
 	BackendWebGPU    Backend = 2
-	BackendNativeCPU Backend = 3 // welvet.cpp via C ABI (linux/amd64 cgo)
+	BackendNativeCPU Backend = 3 // welvet.cpp via C ABI (nativecpp)
+	BackendQNN       Backend = 4 // welvet.qnn Hexagon NPU via C ABI (nativeqnn)
 )
 
 func (b Backend) String() string {
@@ -141,6 +142,8 @@ func (b Backend) String() string {
 		return "webgpu"
 	case BackendNativeCPU:
 		return "native_cpu"
+	case BackendQNN:
+		return "qnn"
 	default:
 		return fmt.Sprintf("Backend(%d)", int(b))
 	}

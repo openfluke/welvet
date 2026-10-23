@@ -5,6 +5,7 @@ import (
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/nativecpp"
+	"github.com/openfluke/welvet/nativeqnn"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/weights"
@@ -12,12 +13,13 @@ import (
 
 // Layer is LayerNorm with learnable γ and β.
 type Layer struct {
-	Core  core.Layer
-	Cfg   Config
-	Exec  core.ExecConfig
-	Gamma *weights.Store // shape 1×Dim
-	Beta  *weights.Store // shape 1×Dim
+	Core      core.Layer
+	Cfg       Config
+	Exec      core.ExecConfig
+	Gamma     *weights.Store // shape 1×Dim
+	Beta      *weights.Store // shape 1×Dim
 	nativeMir *nativecpp.Mirror
+	qnnMir    *nativeqnn.WeightMirror
 }
 
 // New creates LayerNorm with γ=1, β=0 FormatNone.
@@ -105,6 +107,11 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 			return ForwardNativeCPU(l, input)
 		}
 		return ForwardCPUTiled(l, input)
+	case core.BackendQNN:
+		if nativeqnn.Available() {
+			return ForwardQNN(l, input)
+		}
+		return nil, nil, fmt.Errorf("layernorm: BackendQNN but libwelvet_qnn unavailable")
 	default:
 		return ForwardCPUTiled(l, input)
 	}
@@ -127,6 +134,8 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 			return BackwardNativeCPU(l, gradOut, input, pre)
 		}
 		return BackwardCPUTiled(l, gradOut, input, pre)
+	case core.BackendQNN:
+		return nil, nil, fmt.Errorf("layernorm: BackendQNN is forward-only")
 	default:
 		return BackwardCPUTiled(l, gradOut, input, pre)
 	}

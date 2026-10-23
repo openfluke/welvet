@@ -5,6 +5,7 @@ import (
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/nativecpp"
+	"github.com/openfluke/welvet/nativeqnn"
 	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/weights"
 )
@@ -18,7 +19,12 @@ type Layer struct {
 	// Reusable forward buffers (float32 LM path) — avoids NewTensor per GEMV.
 	fwdOut []float32
 
-	nativeMir *nativecpp.Mirror // pending C++ W_after until SyncWeightsFromNative
+	nativeMir *nativecpp.Mirror       // SyncToNative / SyncWeightsFromNative
+	qnnMir    *nativeqnn.WeightMirror // SyncToQNN / SyncFromQNN
+	qnnPrepOK bool                    // HTP graph prepared for current Sync+shape
+	qnnPrepB  int
+	qnnPrepIn int
+	qnnPrepOut int
 }
 
 // New creates a Dense layer with zero weights in the given dtype (FormatNone).
@@ -114,6 +120,11 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 			return ForwardNativeCPU(l, input)
 		}
 		return ForwardCPUTiled(l, input)
+	case core.BackendQNN:
+		if nativeqnn.Available() {
+			return ForwardQNN(l, input)
+		}
+		return nil, nil, fmt.Errorf("dense: BackendQNN but libwelvet_qnn unavailable")
 	default:
 		return ForwardCPUTiled(l, input)
 	}
@@ -134,6 +145,8 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 			return BackwardNativeCPU(l, gradOut, input, pre)
 		}
 		return BackwardCPUTiled(l, gradOut, input, pre)
+	case core.BackendQNN:
+		return nil, nil, fmt.Errorf("dense: BackendQNN is forward-only (no backward on HTP)")
 	default:
 		return BackwardCPUTiled(l, gradOut, input, pre)
 	}

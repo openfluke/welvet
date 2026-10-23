@@ -16,6 +16,8 @@ func FromCoreBackend(b core.Backend) string {
 	switch b {
 	case core.BackendNativeCPU:
 		return BackendNativeCPU
+	case core.BackendQNN:
+		return "qnn"
 	case core.BackendSIMD:
 		return "simd"
 	case core.BackendWebGPU:
