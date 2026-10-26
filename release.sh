@@ -10,7 +10,8 @@
 #
 # Usage:
 #   ./release.sh                 # full release
-#   ./release.sh --dry-run       # version + smoke only
+#   ./release.sh --dry-run       # generate notes + smoke; no git/publishing
+#   ./release.sh --notes-only    # render release Markdown only
 #   ./release.sh --no-push       # commit locally, skip push/release
 #   ./release.sh --skip-build    # skip go build smoke
 #   ./release.sh --retag         # force-move existing tag to HEAD + refresh release
@@ -32,15 +33,17 @@ DRY_RUN=0
 NO_PUSH=0
 SKIP_BUILD=0
 RETAG=0
+NOTES_ONLY=0
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
+    --notes-only) NOTES_ONLY=1 ;;
     --no-push) NO_PUSH=1 ;;
     --skip-build) SKIP_BUILD=1 ;;
     --retag) RETAG=1 ;;
     -h|--help)
-      sed -n '2,28p' "$0"
+      sed -n '2,29p' "$0"
       exit 0
       ;;
     *)
@@ -144,33 +147,38 @@ release_exists() {
   fi
 }
 
-create_or_update_release() {
+# A quoted Python heredoc keeps Markdown backticks literal on macOS Bash 3.2.
+# Render before any git mutation, including --dry-run, so quoting is validated.
+write_release_notes() {
   local tag="$1"
   local earned="$2"
-  local notes
-  notes="$(cat <<EOF
-## Welvet ${tag}
+  local destination="$3"
+  python3 - "$tag" "$earned" "$destination" <<'PY_NOTES'
+from pathlib import Path
+import sys
+body = r"""## Welvet @VERSION@
 
-Pure Go AI engine — scorecard **${earned}/100** → **${tag}**.
+Pure Go AI engine — scorecard **@EARNED@/100** → **@VERSION@**.
 
 ### Module
-\`\`\`bash
-go get github.com/openfluke/welvet@${tag}
-\`\`\`
+```bash
+go get github.com/openfluke/welvet@@VERSION@
+```
 
 ### What's new in v1.3.0
-- **Apple Metal GPU integration** through Go's \`nativemetal\` package and bundled **welvet.metal 0.68** library (mounted-model ABI **1**)
-- Mount supported Go layers / Stack / Parallel / Grid, run repeated \`Forward\` / \`TrainMSE\`, then explicitly \`SyncToGo()\` before saving through Go
+- **Apple Metal GPU integration** through Go's `nativemetal` package and bundled **welvet.metal 0.68** library (mounted-model ABI **1**)
+- Mount supported Go layers / Stack / Parallel / Grid, run repeated `Forward` / `TrainMSE`, then explicitly `SyncToGo()` before saving through Go
 - Native parameter bytes, scales and Float64 biases preserved; all 34 dtype ENTITY save/reload roundtrips verified (GDN remains Float32-only)
 - w2a validation: **305 training/mesh groups**, CamSync boundaries, lifecycle, malformed-input and race checks on Apple M5
-- \`-tags welvet_metal\` builds Metal-only applications without the CPU sibling binding; supported Metal execution requires macOS Apple silicon + Go/cgo
-- Explicit mounted sessions are available now; general Exec.Backend/NAC auto-selection and portable native-state checkpoints remain separate work
+- `-tags welvet_metal` builds Metal-only applications without the CPU sibling binding; supported Metal execution requires macOS Apple silicon + Go/cgo
+- Explicit JSON/Exec.Backend routing through `EnableRouting` and `runtime/placement`, including mixed Go/C++/Metal gradient handoff
+- Automatic hardware/performance selection and portable native-state checkpoints remain separate work
 - Independent pins: **welvet.cpp 0.67**, **welvet.qnn 1.0.0**, **welvet.metal 0.68**; Go engine board remains **100/100**
 
 ### Platform selection
 - Existing Go CPU / SIMD / WebGPU / NativeCPU / QNN behavior is preserved for ordinary builds
 - Metal is optional: installing Go Welvet on Linux does not require Apple hardware or load the Metal library
-- Library resolution and supported model limits: see \`native/metal/README.md\`
+- Library resolution and supported model limits: see `native/metal/README.md`
 
 ### Related
 - NativeCPU / C++: https://github.com/openfluke/welvet.cpp
@@ -179,27 +187,34 @@ go get github.com/openfluke/welvet@${tag}
 - Validation: https://github.com/openfluke/w2a
 - Site: https://openfluke.github.io/welvet/
 
-Prior v1.2.0: Qualcomm HTP / nativeqnn. Earlier tags (v1.0…v1.1.10): CamSync, multi-OS \`libwelvet\`, NativeCPU train modes — see older GitHub releases.
+Prior v1.2.0: Qualcomm HTP / nativeqnn. Earlier tags (v1.0…v1.1.10): CamSync, multi-OS `libwelvet`, NativeCPU train modes — see older GitHub releases.
 
 ### Regenerate
-\`\`\`bash
+```bash
 cd welvet && ./release.sh
-\`\`\`
-EOF
-)"
+```
+"""
+Path(sys.argv[3]).write_text(body.replace('@VERSION@', sys.argv[1]).replace('@EARNED@', sys.argv[2]), encoding='utf-8')
+PY_NOTES
+}
+
+create_or_update_release() {
+  local tag="$1"
+  local earned="$2"
+  local notes_file="$ROOT/dist/release-${tag}.md"
 
   if have_gh; then
     if release_exists "$tag"; then
       echo "  updating existing release ${tag}…"
       gh release edit "$tag" --repo "$REPO_SLUG" \
         --title "Welvet ${tag}" \
-        --notes "$notes"
+        --notes-file "$notes_file"
     else
       echo "  creating release ${tag}…"
       # Source-only release (Go module tag). No binary assets required.
       gh release create "$tag" --repo "$REPO_SLUG" \
         --title "Welvet ${tag}" \
-        --notes "$notes"
+        --notes-file "$notes_file"
     fi
     return
   fi
@@ -210,33 +225,35 @@ EOF
     id=$(curl -sS -H "$auth" -H "Accept: application/vnd.github+json" \
       "${API}/releases/tags/${tag}" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
     local body
-    body=$(VERSION="$tag" NOTES="$notes" python3 - <<'PY'
+    body=$(VERSION="$tag" NOTES_FILE="$notes_file" python3 - <<'PY'
 import json, os
+from pathlib import Path
 print(json.dumps({
   "name": f"Welvet {os.environ['VERSION']}",
-  "body": os.environ["NOTES"],
+  "body": Path(os.environ["NOTES_FILE"]).read_text(encoding="utf-8"),
   "draft": False,
   "prerelease": False,
 }))
 PY
 )
-    curl -sS -X PATCH -H "$auth" -H "Accept: application/vnd.github+json" \
+    curl -fsS -X PATCH -H "$auth" -H "Accept: application/vnd.github+json" \
       -H "Content-Type: application/json" \
       -d "$body" "${API}/releases/${id}" >/dev/null
   else
     local body
-    body=$(VERSION="$tag" NOTES="$notes" python3 - <<'PY'
+    body=$(VERSION="$tag" NOTES_FILE="$notes_file" python3 - <<'PY'
 import json, os
+from pathlib import Path
 print(json.dumps({
   "tag_name": os.environ["VERSION"],
   "name": f"Welvet {os.environ['VERSION']}",
-  "body": os.environ["NOTES"],
+  "body": Path(os.environ["NOTES_FILE"]).read_text(encoding="utf-8"),
   "draft": False,
   "prerelease": False,
 }))
 PY
 )
-    curl -sS -H "$auth" -H "Accept: application/vnd.github+json" \
+    curl -fsS -H "$auth" -H "Accept: application/vnd.github+json" \
       -H "Content-Type: application/json" \
       -d "$body" "${API}/releases" >/dev/null
   fi
@@ -257,6 +274,15 @@ echo " Welvet engine release"
 echo " version:  ${VERSION}  (${EARNED}/100)"
 echo " repo:     ${REPO_SLUG}"
 echo "════════════════════════════════════════"
+
+mkdir -p "$ROOT/dist"
+NOTES_FILE="$ROOT/dist/release-${VERSION}.md"
+write_release_notes "$VERSION" "$EARNED" "$NOTES_FILE"
+echo "→ release notes: $NOTES_FILE"
+if [[ "$NOTES_ONLY" -eq 1 ]]; then
+  echo "notes-only: no build, commit, tag, push or release"
+  exit 0
+fi
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
   smoke_build
