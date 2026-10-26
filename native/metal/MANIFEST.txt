@@ -1,0 +1,7 @@
+engine=welvet.metal
+version=0.68
+model_abi=1
+platform=darwin_arm64
+minimum_macos=13.0
+source_checkout=/Users/openfluke/gs/welvet.metal
+fce8bb80861967565dbd5b375d5a4f0ed22d97882cf01e9c301be890c1bed964  /Users/openfluke/gs/welvet.metal/../welvet/native/metal/darwin_arm64/libwelvet_metal.dylib
