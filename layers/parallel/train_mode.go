@@ -840,7 +840,9 @@ func trainOpReturnGradIn[T core.Numeric](op any, gradOut, input, pre, post *core
 			}
 			return gIn, nil
 		case *Stack:
-			if hasMixedChildModes(v) {
+			// A nested Stack may inherit its own modes while containing
+			// Parallel branches with explicit cameral actor modes.
+			if needsMixedStackTrain(v) {
 				if err := trainStackMixed(v, gradOut, input, mode, lr); err != nil {
 					return nil, err
 				}

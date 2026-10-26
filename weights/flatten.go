@@ -29,6 +29,10 @@ func (s *Store) SetFromF32(src []float32) error {
 	if len(src) < n {
 		return fmt.Errorf("weights: SetFromF32 len %d < %d", len(src), n)
 	}
+	// Complete replacement invalidates every derived compute wire (CamSync,
+	// DNA/evolution and callers that prime WireF64/GPUWireF32 before writing).
+	s.gpuF32 = nil
+	s.wireF64 = nil
 	fmtSave := s.Format
 	dtSave := s.DType
 	if fmtSave == quant.FormatNone {
