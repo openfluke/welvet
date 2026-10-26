@@ -26,9 +26,9 @@ const (
 	LayerSequential         LayerType = 17
 	LayerResidual           LayerType = 18
 	LayerMetacognition      LayerType = 19
-	LayerMamba             LayerType = 20
-	LayerGDN               LayerType = 21
-	LayerStack             LayerType = 22 // heterogeneous Op chain (nested cameral host)
+	LayerMamba              LayerType = 20
+	LayerGDN                LayerType = 21
+	LayerStack              LayerType = 22 // heterogeneous Op chain (nested cameral host)
 )
 
 func (t LayerType) String() string {
@@ -129,6 +129,7 @@ const (
 	BackendSIMD      Backend = 1
 	BackendWebGPU    Backend = 2
 	BackendNativeCPU Backend = 3 // welvet.cpp via C ABI (nativecpp)
+	BackendMetal     Backend = 5 // independent welvet.metal session dispatcher
 	BackendQNN       Backend = 4 // welvet.qnn Hexagon NPU via C ABI (nativeqnn)
 )
 
@@ -142,6 +143,8 @@ func (b Backend) String() string {
 		return "webgpu"
 	case BackendNativeCPU:
 		return "native_cpu"
+	case BackendMetal:
+		return "metal"
 	case BackendQNN:
 		return "qnn"
 	default:
@@ -151,9 +154,10 @@ func (b Backend) String() string {
 
 // ExecConfig is shared by layer dispatchers.
 type ExecConfig struct {
-	Backend      Backend
-	MultiCore    bool
-	TileSize     int // 0 → layer default
-	UseWebGPU    bool
-	UseSIMD      bool
+	Backend       Backend
+	BackendPinned bool // explicit placement survives parent execution inheritance
+	MultiCore     bool
+	TileSize      int // 0 → layer default
+	UseWebGPU     bool
+	UseSIMD       bool
 }

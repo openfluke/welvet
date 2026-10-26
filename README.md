@@ -75,8 +75,8 @@ Float32-only; the Metal tensor bridge is Float32. [Usage and supported limits](n
 
 Build Metal-only applications with `-tags welvet_metal`; that option disables
 the CPU sibling's cgo binding. Existing builds keep their platform/backend
-behavior. Metal selection uses an explicit session; general `Exec.Backend`/NAC
-auto-selection remains separate work. **v1.2.0** added Qualcomm HTP; earlier
+behavior. Metal supports explicit sessions and JSON/`Exec.Backend` placement through
+`EnableRouting`; automatic hardware/performance selection remains separate work. **v1.2.0** added Qualcomm HTP; earlier
 v1.1.x releases shipped native CPU platform artifacts. Pins remain welvet.cpp
 **0.67** and welvet.qnn **1.0.0**. No tag or GitHub release is published by this
 version-file update.
@@ -793,3 +793,19 @@ Docs: `w2a/docs/`.
 Welvet is the fabric where **any AI op** can run on **any quant** at **any precision** on **any of the three backends**, with tiling and Plan 9 SIMD as first-class. Training credit (FastProxy / Sparse / …) is a first-class axis on a sandwich. NPU is not a fourth Go backend.
 
 If something is hard, we **implement it** or **fail loudly**. We do not paper over gaps.
+
+
+### Explicit mixed Go / C++ / Metal placement (v1.3.0)
+
+`nativemetal.EnableRouting()` connects `Exec.Backend = core.BackendMetal` and
+existing execution JSON to persistent native Metal sessions. Apply a JSON plan
+with `runtime/placement.Stack` or `.Grid`; explicit child placements survive
+container inheritance. Supported layers can exchange Float32 activations and
+gradients across Go/C++/Metal boundaries, and routed Metal SGD updates return to
+Go automatically. Explicit `nativemetal.Mount` sessions retain explicit SyncToGo.
+
+Use the normal build when mixing C++ and Metal; the `welvet_metal` build tag
+disables C++. `go run ./cmd/welvet-metal-routing-example` demonstrates Go layers
+0–3, C++ 4–8 and Metal 9–12, with optional `-config` and `-save` flags. Metal is
+opt-in on Apple silicon macOS/cgo. This adds explicit placement, not automatic
+hardware/performance selection or a fully GPU-resident heterogeneous graph.

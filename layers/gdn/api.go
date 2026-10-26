@@ -5,8 +5,8 @@ import (
 
 	"github.com/openfluke/welvet/architecture"
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/layers/seqmix"
+	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/quant"
 )
 
@@ -191,6 +191,9 @@ func Place(g *architecture.Grid, z, y, x, lidx int, layer *Layer) error {
 
 // Forward dispatches on Exec.Backend (host decode loop; SIMD/WebGPU gated).
 func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalForward(l, input)
+	}
 	if l == nil || input == nil {
 		return nil, nil, fmt.Errorf("gdn: nil")
 	}

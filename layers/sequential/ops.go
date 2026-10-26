@@ -169,8 +169,10 @@ func childPack(op any, format quant.Format) error {
 func childSetExec(op any, exec core.ExecConfig) {
 	switch v := op.(type) {
 	case *dense.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *swiglu.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Gate != nil {
 			v.Gate.Exec = exec
@@ -182,8 +184,33 @@ func childSetExec(op any, exec core.ExecConfig) {
 			v.Down.Exec = exec
 		}
 	case *rmsnorm.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *layernorm.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	}
+}
+
+// Native container delegation must not absorb a child's explicit placement.
+func wholePlacement(l *Layer) bool {
+	for _, op := range l.ChildOps() {
+		var exec core.ExecConfig
+		switch v := op.(type) {
+		case *dense.Layer:
+			exec = v.Exec
+		case *swiglu.Layer:
+			exec = v.Exec
+		case *rmsnorm.Layer:
+			exec = v.Exec
+		case *layernorm.Layer:
+			exec = v.Exec
+		default:
+			return false
+		}
+		if exec.BackendPinned && exec.Backend != l.Exec.Backend {
+			return false
+		}
+	}
+	return true
 }

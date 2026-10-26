@@ -102,6 +102,7 @@ func (l *Layer) SetBackend(b core.Backend) {
 		return
 	}
 	l.Exec.Backend = b
+	l.Exec.BackendPinned = true
 	l.SyncBranchExec()
 }
 
@@ -111,6 +112,6 @@ func (s *Stack) SetBackend(b core.Backend) {
 		return
 	}
 	s.Exec.Backend = b
+	s.Exec.BackendPinned = true
 	s.SyncChildExec()
 }
-

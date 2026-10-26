@@ -5,25 +5,25 @@ import (
 	"math"
 
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/layers/seqmix"
+	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/quant"
 )
 
 // Layer is a minimal selective SSM (seqmix.KindSSM).
 type Layer struct {
-	Core   core.Layer
-	Cfg    Config
-	Exec   core.ExecConfig
-	InProj *dense.Layer // DModel → 2*Inner (x | dt)
+	Core    core.Layer
+	Cfg     Config
+	Exec    core.ExecConfig
+	InProj  *dense.Layer // DModel → 2*Inner (x | dt)
 	OutProj *dense.Layer // Inner → DModel
-	ALog   []float32     // [Inner]
-	DSkip  []float32     // [Inner]
+	ALog    []float32    // [Inner]
+	DSkip   []float32    // [Inner]
 
-	nativeMir  *nativecpp.Mirror
-	pendingAD  []float32 // ALog|DSkip until SyncWeightsFromNative
-	adPending  bool
+	nativeMir *nativecpp.Mirror
+	pendingAD []float32 // ALog|DSkip until SyncWeightsFromNative
+	adPending bool
 }
 
 // Kind returns seqmix.KindSSM.
@@ -129,6 +129,9 @@ func (l *Layer) Pack(format quant.Format) error {
 }
 
 func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalForward(l, input)
+	}
 	if l == nil || input == nil {
 		return nil, nil, fmt.Errorf("mamba: nil layer/input")
 	}
@@ -149,6 +152,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 }
 
 func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalBackward(l, gradOut, input)
+	}
 	if l == nil {
 		return nil, nil, fmt.Errorf("mamba: nil layer")
 	}

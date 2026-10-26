@@ -93,5 +93,6 @@ func (l *Layer) ApplyExecConfig(cfg nativecpp.ExecConfig, volume, sector, layerK
 func (l *Layer) SetBackend(b core.Backend) {
 	if l != nil {
 		l.Exec.Backend = b
+		l.Exec.BackendPinned = true
 	}
 }

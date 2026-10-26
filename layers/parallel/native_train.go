@@ -30,7 +30,7 @@ func useNativeTrainBackend(b core.Backend) bool {
 // tryTrainStackNativeMSE routes TrainStackMSE to C ABI when BackendNativeCPU and the
 // stack packs as Dense NestedStack (Dim→Dim). ok=false ⇒ caller uses Go path.
 func tryTrainStackNativeMSE[T core.Numeric](s *Stack, input, target *core.Tensor[T], mode TrainMode, lr float64) (loss float64, ok bool, err error) {
-	if s == nil || !useNativeTrainBackend(s.Exec.Backend) {
+	if s == nil || !useNativeTrainBackend(s.Exec.Backend) || !wholeBackend(s, core.BackendNativeCPU) {
 		return 0, false, nil
 	}
 	loss, err = trainStackNativeMSE(s, input, target, mode, lr)
@@ -47,7 +47,7 @@ func tryTrainStackNativeMSE[T core.Numeric](s *Stack, input, target *core.Tensor
 // tryTrainParallelNativeMSE routes TrainMSE to C ABI when BackendNativeCPU and the
 // layer packs as Dense NewConfigured. ok=false ⇒ caller uses Go path.
 func tryTrainParallelNativeMSE[T core.Numeric](l *Layer, input, target *core.Tensor[T], mode TrainMode, lr float64) (loss float64, ok bool, err error) {
-	if l == nil || !useNativeTrainBackend(l.Exec.Backend) {
+	if l == nil || !useNativeTrainBackend(l.Exec.Backend) || !wholeBackend(l, core.BackendNativeCPU) {
 		return 0, false, nil
 	}
 	loss, err = trainParallelNativeMSE(l, input, target, mode, lr)

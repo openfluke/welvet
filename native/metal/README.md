@@ -48,7 +48,15 @@ as a checkpoint. Calls use session-owned copies rather than Go/GPU zero-copy.
 
 Packed quant stores, tied mutable parameters, heterogeneous Sequential/Residual
 (use Stack), advanced unencoded MHA/Softmax options, custom/live Meta rules,
-live GDN recurrent state and general automatic Exec.Backend/NAC dispatch remain
+live GDN recurrent state and automatic hardware/performance selection remain
 outside this mounted descriptor. Unsupported mounts return errors. See the
 Metal repository's `docs/GO_INTEGRATION.md` for ownership, lifecycle and precise
 limits. Close never implicitly saves or synchronizes Go weights.
+
+Automatic execution of explicit JSON/`Exec.Backend` assignments is available via
+`nativemetal.EnableRouting()`; close the returned router after the workload.
+Use `runtime/placement.Stack` or `.Grid` to apply the existing execution JSON.
+Routed native updates synchronize to Go automatically; explicit `Mount` sessions
+still require `SyncToGo`. The normal build supports Go/C++/Metal simultaneously;
+`-tags welvet_metal` disables C++. Example: `go run ./cmd/welvet-metal-routing-example`.
+The source checkout's `docs/GO_INTEGRATION.md` describes ownership and limits.

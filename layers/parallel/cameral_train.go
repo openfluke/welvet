@@ -15,6 +15,9 @@ type outputGap[T core.Numeric] func(pred, target *core.Tensor[T]) (float64, *cor
 // Split-family modes use one collect tape (OpenSplitTape). Alt recomputes
 // the MSE gap between Split and Tween phases.
 func TrainStackMSE[T core.Numeric](s *Stack, input, target *core.Tensor[T], mode TrainMode, lr float64) (loss float64, err error) {
+	if s != nil && s.Exec.Backend == core.BackendMetal && wholeBackend(s, core.BackendMetal) {
+		return core.MetalTrainMSE(s, input, target, int(mode), lr)
+	}
 	// BackendNativeCPU + Dense NestedStack → C ABI TrainMode dispatcher (no auto Sync).
 	if lossN, ok, errN := tryTrainStackNativeMSE(s, input, target, mode, lr); ok {
 		if errN == nil && s != nil {
@@ -72,6 +75,9 @@ func trainStackGap[T core.Numeric](s *Stack, input, target *core.Tensor[T], mode
 
 // TrainMSE runs Forward → MSE → Train under mode (Parallel root).
 func TrainMSE[T core.Numeric](l *Layer, input, target *core.Tensor[T], mode TrainMode, lr float64) (loss float64, err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal && wholeBackend(l, core.BackendMetal) {
+		return core.MetalTrainMSE(l, input, target, int(mode), lr)
+	}
 	if l == nil || input == nil || target == nil {
 		return 0, fmt.Errorf("parallel: TrainMSE nil")
 	}

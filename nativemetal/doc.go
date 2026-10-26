@@ -1,4 +1,7 @@
-// Apple Metal integration uses an explicit session boundary:
+// Apple Metal integration supports explicit sessions and optional routed execution.
+// EnableRouting connects JSON/Exec.Backend Metal placements to native sessions;
+// close the returned Router after the workload. Routed updates return to Go
+// automatically. Explicit sessions use the following ownership boundary:
 //
 //	session, err := nativemetal.Mount(model)
 //	// session.TrainMSE(input, target, parallel.ModeNormalBP, learningRate)

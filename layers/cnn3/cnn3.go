@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/layers/dense"
+	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/quant"
 )
 
@@ -87,6 +87,9 @@ func (l *Layer) Pack(format quant.Format) error {
 
 // Forward dispatches by Exec.Backend (im2col → Dense).
 func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalForward(l, input)
+	}
 	if l == nil || l.Proj == nil || input == nil {
 		return nil, nil, fmt.Errorf("cnn3: nil layer/input")
 	}
@@ -108,6 +111,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 
 // Backward dispatches by Exec.Backend.
 func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalBackward(l, gradOut, input)
+	}
 	if l == nil || l.Proj == nil {
 		return nil, nil, fmt.Errorf("cnn3: nil layer")
 	}

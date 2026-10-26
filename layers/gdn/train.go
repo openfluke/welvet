@@ -13,29 +13,29 @@ import (
 // across tokens (see doc.go) — only the current-token contribution to those
 // buffers is stored.
 type gdnStep struct {
-	x                  []float32 // H
-	qkv                []float32 // convDim (raw InQKV projection)
-	convHist           []float32 // convDim*(k-1), conv history BEFORE this token
-	acc                []float32 // convDim, pre-silu conv accumulator
-	mixed              []float32 // convDim, post-silu (q_raw|key_raw|v)
-	qInv, kInv         []float32 // nk, 1/||.|| per key-head group
-	qRep, kRep         []float32 // nh*hdK, post l2norm+broadcast(+scale for q)
-	betaRaw, aRaw      []float32 // nh
-	beta, g            []float32 // nh, sigmoid(betaRaw) / gate value
-	stateOld           []float32 // nh*hdK*hdV, State BEFORE decay this token
-	stateAfterDecay    []float32 // nh*hdK*hdV, State*gt BEFORE delta injection
-	kvMem              []float32 // valDim (nh*hdV), stateAfterDecay^T @ k per head
-	delta              []float32 // valDim (nh*hdV), delta-rule update per head
-	corePre            []float32 // valDim, pre-rmsNormGated head outputs
-	z                  []float32 // valDim, InZ projection at this token
-	coreNormed         []float32 // valDim, post rmsNormGated (Out matvec input)
+	x               []float32 // H
+	qkv             []float32 // convDim (raw InQKV projection)
+	convHist        []float32 // convDim*(k-1), conv history BEFORE this token
+	acc             []float32 // convDim, pre-silu conv accumulator
+	mixed           []float32 // convDim, post-silu (q_raw|key_raw|v)
+	qInv, kInv      []float32 // nk, 1/||.|| per key-head group
+	qRep, kRep      []float32 // nh*hdK, post l2norm+broadcast(+scale for q)
+	betaRaw, aRaw   []float32 // nh
+	beta, g         []float32 // nh, sigmoid(betaRaw) / gate value
+	stateOld        []float32 // nh*hdK*hdV, State BEFORE decay this token
+	stateAfterDecay []float32 // nh*hdK*hdV, State*gt BEFORE delta injection
+	kvMem           []float32 // valDim (nh*hdV), stateAfterDecay^T @ k per head
+	delta           []float32 // valDim (nh*hdV), delta-rule update per head
+	corePre         []float32 // valDim, pre-rmsNormGated head outputs
+	z               []float32 // valDim, InZ projection at this token
+	coreNormed      []float32 // valDim, post rmsNormGated (Out matvec input)
 }
 
 // gdnGrads accumulates weight gradients across all tokens/batch items in one Backward call.
 type gdnGrads struct {
-	cfg                                      Config
-	dInQKV, dInZ, dInB, dInA, dOut           []float32
-	dConvWeight, dALog, dDtBias, dNormGamma  []float32
+	cfg                                     Config
+	dInQKV, dInZ, dInB, dInA, dOut          []float32
+	dConvWeight, dALog, dDtBias, dNormGamma []float32
 }
 
 func newGDNGrads(cfg Config) *gdnGrads {
@@ -536,6 +536,9 @@ func siluDeriv(x float32) float32 {
 
 // Backward dispatches on Exec.Backend (truncated-BPTT host path; see doc.go).
 func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalBackward(l, gradOut, input)
+	}
 	if l == nil {
 		return nil, nil, fmt.Errorf("gdn: Backward nil")
 	}
@@ -628,6 +631,9 @@ func applyBlobSGD(bp **quant.Blob, dW []float32, lr float64) error {
 // ApplyGradSGD unpacks each projection blob to f32, applies SGD, and re-Packs in-place format.
 // ConvWeight/ALog/DtBias/NormGamma (plain []float32) update directly.
 func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) error {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalApplySGD(l, dW, lr)
+	}
 	if l == nil || dW == nil {
 		return fmt.Errorf("gdn: ApplyGradSGD nil")
 	}

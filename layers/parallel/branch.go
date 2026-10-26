@@ -420,8 +420,10 @@ func branchSyncExec(op any, exec core.ExecConfig) {
 	}
 	switch v := op.(type) {
 	case *dense.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *mha.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Q != nil {
 			v.Q.Exec = exec
@@ -436,6 +438,7 @@ func branchSyncExec(op any, exec core.ExecConfig) {
 			v.O.Exec = exec
 		}
 	case *swiglu.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Gate != nil {
 			v.Gate.Exec = exec
@@ -447,79 +450,248 @@ func branchSyncExec(op any, exec core.ExecConfig) {
 			v.Down.Exec = exec
 		}
 	case *rmsnorm.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *layernorm.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *softmax.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *cnn1.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Proj != nil {
 			v.Proj.Exec = exec
 		}
 	case *cnn2.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Proj != nil {
 			v.Proj.Exec = exec
 		}
 	case *cnn3.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Proj != nil {
 			v.Proj.Exec = exec
 		}
 	case *convt1.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Proj != nil {
 			v.Proj.Exec = exec
 		}
 	case *convt2.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Proj != nil {
 			v.Proj.Exec = exec
 		}
 	case *convt3.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Proj != nil {
 			v.Proj.Exec = exec
 		}
 	case *rnn.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *lstm.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *embedding.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *sequential.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		for _, ch := range v.ChildOps() {
 			branchSyncExec(ch, exec)
 		}
 	case *residual.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		for _, ch := range v.ChildOps() {
 			branchSyncExec(ch, exec)
 		}
 	case *ResidualSkip:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		branchSyncExec(v.F, exec)
 	case *Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		v.SyncBranchExec()
 	case *Stack:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		v.SyncChildExec()
 	case *kmeans.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Centers != nil {
 			v.Centers.Exec = exec
 		}
 	case *mamba.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *metacognition.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Observed != nil {
 			v.Observed.Exec = exec
 		}
 	case *gdn.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	}
+}
+
+// wholeBackend prevents a native container fast path from swallowing explicit
+// child placements. Mixed containers keep the existing Go graph scheduler.
+func wholeBackend(op any, backend core.Backend) bool {
+	var exec core.ExecConfig
+	var children []any
+	switch v := op.(type) {
+	case *dense.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *mha.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *swiglu.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *rmsnorm.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *layernorm.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *softmax.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *cnn1.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *cnn2.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *cnn3.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *convt1.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *convt2.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *convt3.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *rnn.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *lstm.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *embedding.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *sequential.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+		children = v.ChildOps()
+	case *residual.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+		children = v.ChildOps()
+	case *ResidualSkip:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+		children = []any{v.F}
+	case *Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+		children = append(children, v.Branches...)
+		if v.Gate != nil {
+			children = append(children, v.Gate)
+		}
+	case *Stack:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+		children = v.Children
+	case *kmeans.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *mamba.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *metacognition.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	case *gdn.Layer:
+		if v == nil {
+			return true
+		}
+		exec = v.Exec
+	default:
+		return true
+	}
+	if exec.BackendPinned && exec.Backend != backend {
+		return false
+	}
+	for _, ch := range children {
+		if !wholeBackend(ch, backend) {
+			return false
+		}
+	}
+	return true
 }

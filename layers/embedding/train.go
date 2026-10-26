@@ -8,6 +8,9 @@ import (
 
 // ApplyGradSGD applies dW (vocab×emb) with SGD on the weight store.
 func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) error {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalApplySGD(l, dW, lr)
+	}
 	if l == nil || l.Weights == nil || dW == nil {
 		return fmt.Errorf("embedding: ApplyGradSGD nil")
 	}

@@ -11,6 +11,9 @@ import (
 // LinearGradIn is gx = Wᵀ gy with no ⊙ act'. MatVecT (same kernel as CPU
 // backward's gx), never a W×W product. Any Numeric activation dtype.
 func LinearGradIn[T core.Numeric](l *Layer, gy, input *core.Tensor[T]) (*core.Tensor[T], error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalDenseProxy(l, gy, input, nil, 0)
+	}
 	if l == nil || l.Weights == nil || gy == nil || input == nil {
 		return nil, fmt.Errorf("dense: LinearGradIn nil")
 	}
@@ -34,6 +37,9 @@ func LinearGradIn[T core.Numeric](l *Layer, gy, input *core.Tensor[T]) (*core.Te
 // GradWOnly is dW = g xᵀ (optional ⊙ act'(pre)). No gx / Wᵀ. Hidden HeadProxy
 // and FastProxy use this so they do not pay a second matvec they would discard.
 func GradWOnly[T core.Numeric](l *Layer, gy, input, pre *core.Tensor[T]) (*core.Tensor[T], error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalDenseProxy(l, gy, input, pre, 1)
+	}
 	if l == nil || l.Weights == nil || gy == nil || input == nil {
 		return nil, fmt.Errorf("dense: GradWOnly nil")
 	}

@@ -20,6 +20,7 @@ import (
 )
 
 type driver interface {
+	segment(int, float64, []byte) ([]byte, error)
 	forward([]byte) ([]byte, error)
 	train(int, float64, int, []byte) (float64, error)
 	export() ([]byte, error)
