@@ -24,6 +24,7 @@ func checkStatus(st C.welvet_status, name string) error {
 	if st.code != 0 {
 		return fmt.Errorf("nativecpp %s: code=%d %s", name, int(st.code), C.GoString(&st.message[0]))
 	}
+	recordCompleted(name)
 	return nil
 }
 

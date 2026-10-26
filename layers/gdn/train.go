@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/quant"
 )
 
@@ -544,6 +545,11 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 	}
 	l.syncExec()
 	switch l.Exec.Backend {
+	case core.BackendNativeCPU:
+		if nativecpp.NativeCPUAvailable() {
+			return BackwardNativeCPU(l, gradOut, input, pre)
+		}
+		return backwardHost(l, gradOut, input, pre)
 	case core.BackendSIMD:
 		return BackwardSIMD(l, gradOut, input, pre)
 	case core.BackendWebGPU:

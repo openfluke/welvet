@@ -809,3 +809,9 @@ disables C++. `go run ./cmd/welvet-metal-routing-example` demonstrates Go layers
 0–3, C++ 4–8 and Metal 9–12, with optional `-config` and `-save` flags. Metal is
 opt-in on Apple silicon macOS/cgo. This adds explicit placement, not automatic
 hardware/performance selection or a fully GPU-resident heterogeneous graph.
+
+The v1.3.0 working tree also completes the missing FormatNone C++ layer dispatch
+connections. `nativecpp.CompletedCallsFor` exposes successful per-operation C ABI
+counts so comparisons can distinguish actual C++ execution from Go orchestration.
+See [native C++ dispatch contracts](nativecpp/DISPATCH.md) and w2a's
+`TestGoNativeCPPRouting` for the supported baselines and compatibility limits.
