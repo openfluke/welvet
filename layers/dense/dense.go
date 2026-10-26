@@ -19,11 +19,11 @@ type Layer struct {
 	// Reusable forward buffers (float32 LM path) — avoids NewTensor per GEMV.
 	fwdOut []float32
 
-	nativeMir *nativecpp.Mirror       // SyncToNative / SyncWeightsFromNative
-	qnnMir    *nativeqnn.WeightMirror // SyncToQNN / SyncFromQNN
-	qnnPrepOK bool                    // HTP graph prepared for current Sync+shape
-	qnnPrepB  int
-	qnnPrepIn int
+	nativeMir  *nativecpp.Mirror       // SyncToNative / SyncWeightsFromNative
+	qnnMir     *nativeqnn.WeightMirror // SyncToQNN / SyncFromQNN
+	qnnPrepOK  bool                    // HTP graph prepared for current Sync+shape
+	qnnPrepB   int
+	qnnPrepIn  int
 	qnnPrepOut int
 }
 
@@ -107,6 +107,9 @@ func (l *Layer) GradWSize() int {
 
 // Forward dispatches by Exec.Backend for activation dtype T (not hardcoded).
 func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalForward(l, input)
+	}
 	if l == nil || l.Weights == nil || input == nil {
 		return nil, nil, fmt.Errorf("dense: nil layer/input")
 	}
@@ -132,6 +135,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 
 // Backward dispatches by Exec.Backend for activation dtype T.
 func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalBackward(l, gradOut, input)
+	}
 	if l == nil || l.Weights == nil {
 		return nil, nil, fmt.Errorf("dense: nil layer")
 	}

@@ -26,12 +26,12 @@ type Stack struct {
 	Core       core.Layer
 	Exec       core.ExecConfig
 	Children   []any
-	ChildModes []TrainMode // optional per-child mode; empty ⇒ inherit parent
-	AltTimes   int         // TweenAlt: Split→Tween pairs per update (0 ⇒ 1)
-	CamSync    *CamSyncConfig // optional inter-cameral / cross-layer weight averaging
-	Tanhi      any            // optional *tanhi.UDPConfig; synced from grid on PlaceStack
-	accel      splitAccel  // LinearCache / HeadProxyAsync / Sparse
-	line       any         // *Line[T] for Step* systolic train
+	ChildModes []TrainMode       // optional per-child mode; empty ⇒ inherit parent
+	AltTimes   int               // TweenAlt: Split→Tween pairs per update (0 ⇒ 1)
+	CamSync    *CamSyncConfig    // optional inter-cameral / cross-layer weight averaging
+	Tanhi      any               // optional *tanhi.UDPConfig; synced from grid on PlaceStack
+	accel      splitAccel        // LinearCache / HeadProxyAsync / Sparse
+	line       any               // *Line[T] for Step* systolic train
 	nativeMir  *nativecpp.Mirror // pending packed Dense W until SyncWeightsFromNative
 }
 
@@ -177,6 +177,9 @@ func (s *Stack) Pack(format quant.Format) error {
 
 // Forward chains children. Backend is whatever each child Exec says after SyncChildExec.
 func ForwardStack[T core.Numeric](s *Stack, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+	if s != nil && s.Exec.Backend == core.BackendMetal && wholeBackend(s, core.BackendMetal) {
+		return core.MetalForward(s, input)
+	}
 	if s == nil || input == nil {
 		return nil, nil, fmt.Errorf("parallel: nil stack/input")
 	}
@@ -205,6 +208,9 @@ func ForwardStack[T core.Numeric](s *Stack, input *core.Tensor[T]) (pre, post *c
 
 // Backward recomputes the forward tape then chains branchBackward; gradW is concat of child dWs.
 func BackwardStack[T core.Numeric](s *Stack, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+	if s != nil && s.Exec.Backend == core.BackendMetal && wholeBackend(s, core.BackendMetal) {
+		return core.MetalBackward(s, gradOut, input)
+	}
 	_ = pre
 	if s == nil {
 		return nil, nil, fmt.Errorf("parallel: nil stack")
@@ -274,6 +280,9 @@ func (s *Stack) GradWSize() int {
 
 // ApplyGradSGDStack splits concat dW across stack children.
 func ApplyGradSGDStack[T core.Numeric](s *Stack, dW *core.Tensor[T], lr float64) error {
+	if s != nil && s.Exec.Backend == core.BackendMetal && wholeBackend(s, core.BackendMetal) {
+		return core.MetalApplySGD(s, dW, lr)
+	}
 	if s == nil {
 		return fmt.Errorf("parallel: ApplyGradSGDStack nil")
 	}

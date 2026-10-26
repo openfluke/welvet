@@ -153,11 +153,14 @@ func Backward[T core.Numeric](op any, gradOut, input, pre *core.Tensor[T]) (grad
 func SyncExec(op any, exec core.ExecConfig) {
 	switch v := op.(type) {
 	case *dense.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *mha.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		v.Q.Exec, v.K.Exec, v.V.Exec, v.O.Exec = exec, exec, exec, exec
 	case *swiglu.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Gate != nil {
 			v.Gate.Exec = exec
@@ -169,48 +172,61 @@ func SyncExec(op any, exec core.ExecConfig) {
 			v.Down.Exec = exec
 		}
 	case *rmsnorm.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *layernorm.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *softmax.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *cnn1.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Proj != nil {
 			v.Proj.Exec = exec
 		}
 	case *cnn2.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Proj != nil {
 			v.Proj.Exec = exec
 		}
 	case *cnn3.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Proj != nil {
 			v.Proj.Exec = exec
 		}
 	case *convt1.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Proj != nil {
 			v.Proj.Exec = exec
 		}
 	case *convt2.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Proj != nil {
 			v.Proj.Exec = exec
 		}
 	case *convt3.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Proj != nil {
 			v.Proj.Exec = exec
 		}
 	case *rnn.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *lstm.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *embedding.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *sequential.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		for _, ch := range v.Children {
 			if ch != nil {
@@ -218,6 +234,7 @@ func SyncExec(op any, exec core.ExecConfig) {
 			}
 		}
 	case *residual.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		for _, ch := range v.Children {
 			if ch != nil {
@@ -225,24 +242,30 @@ func SyncExec(op any, exec core.ExecConfig) {
 			}
 		}
 	case *parallel.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		v.SyncBranchExec()
 	case *parallel.Stack:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		v.SyncChildExec()
 	case *kmeans.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Centers != nil {
 			v.Centers.Exec = exec
 		}
 	case *mamba.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	case *metacognition.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 		if v.Observed != nil {
 			v.Observed.Exec = exec
 		}
 	case *gdn.Layer:
+		exec = core.InheritExec(v.Exec, exec)
 		v.Exec = exec
 	}
 }

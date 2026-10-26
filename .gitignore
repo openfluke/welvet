@@ -32,3 +32,6 @@ apps/mosstts/_ref/
 openfluke.github.io
 .cache/
 apps/planetbridging
+# Ship the independent Apple Metal backend with the Go module
+!native/metal/**/*.dylib
+!native/metal/**/*.a

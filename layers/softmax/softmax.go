@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/nativeqnn"
-	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/quant"
 )
 
@@ -63,6 +63,9 @@ func (l *Layer) Pack(format quant.Format) error {
 // Forward dispatches by Exec.Backend.
 // pre and post are both probabilities y.
 func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalForward(l, input)
+	}
 	if l == nil || input == nil {
 		return nil, nil, fmt.Errorf("softmax: nil layer/input")
 	}
@@ -89,6 +92,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 // Backward: dx = (y/T) ⊙ (dy − ⟨dy,y⟩); gradW is always nil.
 // pre must be probabilities from Forward.
 func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalBackward(l, gradOut, input)
+	}
 	if l == nil {
 		return nil, nil, fmt.Errorf("softmax: nil layer")
 	}

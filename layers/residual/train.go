@@ -8,6 +8,9 @@ import (
 
 // ApplyGradSGD applies concatenated F child dWs.
 func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) error {
+	if l != nil && l.Exec.Backend == core.BackendMetal && wholePlacement(l) {
+		return core.MetalApplySGD(l, dW, lr)
+	}
 	if l == nil || dW == nil {
 		return fmt.Errorf("residual: ApplyGradSGD nil")
 	}

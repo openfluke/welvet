@@ -16,6 +16,8 @@ func FromCoreBackend(b core.Backend) string {
 	switch b {
 	case core.BackendNativeCPU:
 		return BackendNativeCPU
+	case core.BackendMetal:
+		return BackendMetal
 	case core.BackendQNN:
 		return "qnn"
 	case core.BackendSIMD:
@@ -34,6 +36,7 @@ func ApplyExecConfig(cfg ExecConfig, volume, sector, layer string, exec *core.Ex
 	}
 	name, _ := cfg.Resolve(volume, sector, layer)
 	exec.Backend = ToCoreBackend(name)
+	exec.BackendPinned = true
 }
 
 // PreferBackend returns core.PreferNativeCPU() — NativeCPU when lib loaded, else Go CPU.

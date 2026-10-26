@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/nativeqnn"
-	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/quant"
 )
 
@@ -22,7 +22,7 @@ type Layer struct {
 	Ops      []any // heterogeneous children; when set, ChildOps prefers this
 	Tanhi    any   // optional *tanhi.UDPConfig; synced from grid on Place
 
-	nativeMir *nativecpp.Mirror      // pending packed child W until SyncWeightsFromNative
+	nativeMir *nativecpp.Mirror     // pending packed child W until SyncWeightsFromNative
 	qnnSeq    *nativeqnn.Sequential // fused HTP stack after SyncToQNN
 	qnnSynced bool
 }
@@ -83,13 +83,13 @@ func (l *Layer) syncChildExec() {
 		return
 	}
 	// Parent CPU-tiled: children may keep independent backends (Go / nativecpp / QNN).
-	propagate := l.Exec.Backend != core.BackendCPUTiled
+	propagate := l.Exec.Backend != core.BackendCPUTiled || l.Exec.BackendPinned
 	for _, ch := range l.Children {
 		if ch == nil {
 			continue
 		}
 		if propagate {
-			ch.Exec = l.Exec
+			ch.Exec = core.InheritExec(ch.Exec, l.Exec)
 		}
 		ch.Core.TileSize = l.Core.TileSize
 		ch.Core.MultiCore = l.Core.MultiCore
@@ -130,10 +130,16 @@ func (l *Layer) Pack(format quant.Format) error {
 
 // Forward dispatches by Exec.Backend (propagated to children).
 func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal && wholePlacement(l) {
+		return core.MetalForward(l, input)
+	}
 	if l == nil || input == nil {
 		return nil, nil, fmt.Errorf("sequential: nil layer/input")
 	}
 	l.syncChildExec()
+	if l.Exec.Backend == core.BackendNativeCPU && !wholePlacement(l) {
+		return ForwardCPUTiled(l, input)
+	}
 	t0 := time.Now()
 	switch l.Exec.Backend {
 	case core.BackendSIMD:
@@ -164,10 +170,16 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 // Backward chains child Dense backwards; gradW is concat of child dWs.
 // pre is unused (tape recomputed from input); may be nil.
 func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal && wholePlacement(l) {
+		return core.MetalBackward(l, gradOut, input)
+	}
 	if l == nil {
 		return nil, nil, fmt.Errorf("sequential: nil layer")
 	}
 	l.syncChildExec()
+	if l.Exec.Backend == core.BackendNativeCPU && !wholePlacement(l) {
+		return BackwardCPUTiled(l, gradOut, input, pre)
+	}
 	t0 := time.Now()
 	switch l.Exec.Backend {
 	case core.BackendSIMD:

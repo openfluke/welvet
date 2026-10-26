@@ -8,6 +8,9 @@ import (
 
 // ApplyGradSGD applies dγ with SGD.
 func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) error {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalApplySGD(l, dW, lr)
+	}
 	if l == nil || l.Gamma == nil || dW == nil {
 		return fmt.Errorf("rmsnorm: ApplyGradSGD nil")
 	}

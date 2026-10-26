@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/layers/dense"
+	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/quant"
 )
 
@@ -17,16 +17,16 @@ type Layer struct {
 	Core        core.Layer
 	Cfg         Config
 	Exec        core.ExecConfig
-	Branches    []any        // branch Ops (Dense, MHA, Parallel, Stack, …)
-	Gate        *dense.Layer // Rows=Branches, Cols=Dim; used when CombineFilter
-	BranchModes []TrainMode  // optional per-hemisphere mode; empty ⇒ inherit parent
-	BranchLRs   []float64    // optional per-cam LR multipliers (empty ⇒ 1)
-	AltTimes    int          // TweenAlt: Split→Tween pairs per update (0 ⇒ 1)
+	Branches    []any          // branch Ops (Dense, MHA, Parallel, Stack, …)
+	Gate        *dense.Layer   // Rows=Branches, Cols=Dim; used when CombineFilter
+	BranchModes []TrainMode    // optional per-hemisphere mode; empty ⇒ inherit parent
+	BranchLRs   []float64      // optional per-cam LR multipliers (empty ⇒ 1)
+	AltTimes    int            // TweenAlt: Split→Tween pairs per update (0 ⇒ 1)
 	CamSync     *CamSyncConfig // optional inter-cameral weight averaging
 	CamKit      *CamKit        // Shadow / DNA / Memory / Dream / plasticity
 	Rotate      *RotateSchedule
-	Tanhi       any            // optional *tanhi.UDPConfig; synced from grid on Place
-	accel       splitAccel // LinearCache / HeadProxyAsync / Sparse
+	Tanhi       any               // optional *tanhi.UDPConfig; synced from grid on Place
+	accel       splitAccel        // LinearCache / HeadProxyAsync / Sparse
 	nativeMir   *nativecpp.Mirror // pending packed W until SyncWeightsFromNative
 }
 
@@ -140,7 +140,7 @@ func (l *Layer) SyncBranchExec() {
 		branchSyncExec(ch, l.Exec)
 	}
 	if l.Gate != nil {
-		l.Gate.Exec = l.Exec
+		l.Gate.Exec = core.InheritExec(l.Gate.Exec, l.Exec)
 		l.Gate.Core.TileSize = l.Core.TileSize
 		l.Gate.Core.MultiCore = l.Core.MultiCore
 	}
@@ -187,6 +187,9 @@ func (l *Layer) Pack(format quant.Format) error {
 
 // Forward dispatches by Exec.Backend.
 func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal && wholeBackend(l, core.BackendMetal) {
+		return core.MetalForward(l, input)
+	}
 	if l == nil || input == nil {
 		return nil, nil, fmt.Errorf("parallel: nil layer/input")
 	}
@@ -198,6 +201,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 	case core.BackendWebGPU:
 		pre, post, err = ForwardWebGPU(l, input)
 	case core.BackendNativeCPU:
+		if !wholeBackend(l, core.BackendNativeCPU) {
+			return ForwardCPUTiled(l, input)
+		}
 		if nativecpp.NativeCPUAvailable() {
 			pre, post, err = ForwardNativeCPU(l, input)
 		} else {
@@ -214,6 +220,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 
 // Backward distributes grads; gradW is concat of branch dWs (+ gate dW for filter).
 func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal && wholeBackend(l, core.BackendMetal) {
+		return core.MetalBackward(l, gradOut, input)
+	}
 	if l == nil {
 		return nil, nil, fmt.Errorf("parallel: nil layer")
 	}
@@ -225,6 +234,9 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 	case core.BackendWebGPU:
 		gradIn, gradW, err = BackwardWebGPU(l, gradOut, input, pre)
 	case core.BackendNativeCPU:
+		if !wholeBackend(l, core.BackendNativeCPU) {
+			return BackwardCPUTiled(l, gradOut, input, pre)
+		}
 		if nativecpp.NativeCPUAvailable() {
 			gradIn, gradW, err = BackwardNativeCPU(l, gradOut, input, pre)
 		} else {

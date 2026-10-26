@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"github.com/openfluke/welvet/core"
+	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/nativeqnn"
-	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/weights"
 )
@@ -94,6 +94,9 @@ func (l *Layer) Pack(format quant.Format) error {
 
 // Forward dispatches by Exec.Backend.
 func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalForward(l, input)
+	}
 	if l == nil || l.Gamma == nil || l.Beta == nil || input == nil {
 		return nil, nil, fmt.Errorf("layernorm: nil layer/input")
 	}
@@ -121,6 +124,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 // pre must be x̂ = (x−μ)/σ from Forward (before affine).
 // gradW is [dγ | dβ] length 2·Dim.
 func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalBackward(l, gradOut, input)
+	}
 	if l == nil || l.Gamma == nil || l.Beta == nil {
 		return nil, nil, fmt.Errorf("layernorm: nil layer")
 	}

@@ -9,6 +9,9 @@ import (
 // ApplyGradSGD applies dW (and optional per-row bias grad) with SGD.
 // Future layers mirror this method name so training can dispatch uniformly.
 func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) error {
+	if l != nil && l.Exec.Backend == core.BackendMetal {
+		return core.MetalApplySGD(l, dW, lr)
+	}
 	if l == nil || l.Weights == nil || dW == nil {
 		return fmt.Errorf("dense: ApplyGradSGD nil")
 	}

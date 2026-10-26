@@ -1,6 +1,8 @@
 # Welvet installation
 
-How to install Go Welvet and (optionally) enable the shipped **NativeCPU** C ABI (`libwelvet`) via cgo.
+How to install Go Welvet and optionally enable native acceleration. The current
+release target is **v1.3.0**, adding Apple Metal through `nativemetal`.
+Publication/tagging is separate from this working-tree update.
 
 | Platform | Native artifact | Go `nativecpp` cgo | Notes |
 | --- | --- | --- | --- |
@@ -15,10 +17,33 @@ How to install Go Welvet and (optionally) enable the shipped **NativeCPU** C ABI
 
 **Defaults:** pure Go `BackendCPUTiled` always works without a C compiler. Native acceleration needs cgo + the platform lib (or packaging that lib next to your binary).
 
-Pin the module (any OS):
+Once v1.3.0 is published, pin the module (any OS):
 
 ```bash
-go get github.com/openfluke/welvet@v1.2.0
+go get github.com/openfluke/welvet@v1.3.0
+```
+
+The existing platform walkthroughs below retain their validated **v1.2.0**
+pins and test history. When using another version, update both the module pin
+and any module-cache library paths together. Those historical walkthroughs are
+not new v1.3.0 platform sign-offs. Ordinary Linux use has no Apple requirement.
+
+### Optional Apple Metal in v1.3.0
+
+On macOS Apple silicon, the packaged library is
+`native/metal/darwin_arm64/libwelvet_metal.dylib` (engine **0.68**, model ABI **1**).
+Use `nativemetal.Mount(model)`, train/execute through the session, then call
+`SyncToGo()` before Go saving. Build Metal-only applications with
+`-tags welvet_metal`; Go/cgo and an Apple toolchain are required. The tag disables
+the CPU sibling binding for that build. Other platforms only report Metal
+unavailable when an explicit Metal mount is attempted.
+
+See [the Metal integration guide](native/metal/README.md) for library paths,
+configuration limits and the runnable `cmd/welvet-metal-example`. In a local Go
+checkout:
+
+```sh
+go run -tags welvet_metal ./cmd/welvet-metal-example -save trained.entity
 ```
 
 Engine pin for shipped natives: **0.67** (`native/cpp/MANIFEST.txt`).  

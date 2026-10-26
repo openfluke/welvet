@@ -422,6 +422,9 @@ func (s *Stack) SetChildModes(modes ...TrainMode) {
 // When BranchModes are set, hemispheres may mix any concrete TrainModes
 // (including Freeze: that cam still forwards/combines, but skips ApplyGrad).
 func Train[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T], parentMode TrainMode, lr float64) error {
+	if l != nil && l.Exec.Backend == core.BackendMetal && wholeBackend(l, core.BackendMetal) {
+		return core.MetalTrainCredit(l, gradOut, input, pre, int(parentMode), lr)
+	}
 	if l == nil {
 		return fmt.Errorf("parallel: Train nil")
 	}
@@ -690,6 +693,9 @@ func approxGateGrad[T core.Numeric](l *Layer, gradOut *core.Tensor[T], branchOut
 // Nested Parallel BranchModes also force the mixed walker so per-hemisphere
 // SGD∥Tween∥TweenChain is not silently collapsed into unified SGD.
 func TrainStack[T core.Numeric](s *Stack, gradOut, input, pre *core.Tensor[T], parentMode TrainMode, lr float64) error {
+	if s != nil && s.Exec.Backend == core.BackendMetal && wholeBackend(s, core.BackendMetal) {
+		return core.MetalTrainCredit(s, gradOut, input, pre, int(parentMode), lr)
+	}
 	if s == nil {
 		return fmt.Errorf("parallel: TrainStack nil")
 	}
@@ -840,7 +846,9 @@ func trainOpReturnGradIn[T core.Numeric](op any, gradOut, input, pre, post *core
 			}
 			return gIn, nil
 		case *Stack:
-			if hasMixedChildModes(v) {
+			// A nested Stack may inherit its own modes while containing
+			// Parallel branches with explicit cameral actor modes.
+			if needsMixedStackTrain(v) {
 				if err := trainStackMixed(v, gradOut, input, mode, lr); err != nil {
 					return nil, err
 				}

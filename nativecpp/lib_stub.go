@@ -1,4 +1,4 @@
-//go:build !((cgo && linux && (amd64 || arm64)) || (cgo && darwin && arm64) || (cgo && windows && (amd64 || arm64)))
+//go:build welvet_metal || !((cgo && linux && (amd64 || arm64)) || (cgo && darwin && arm64) || (cgo && windows && (amd64 || arm64)))
 
 package nativecpp
 
@@ -176,6 +176,6 @@ func StackLineTrainMSE(mode, nChildren, nTicks, batch int32, lr float64, dtype i
 	return 0, errNoNative
 }
 func SeqMixKindName(kind int32) (string, error) { return "", errNoNative }
-func SeqMixMHAKind() int32                       { return 0 }
-func SeqMixMambaKind() int32                     { return 0 }
-func SeqMixGDNKind() int32                       { return 0 }
+func SeqMixMHAKind() int32                      { return 0 }
+func SeqMixMambaKind() int32                    { return 0 }
+func SeqMixGDNKind() int32                      { return 0 }

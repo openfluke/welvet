@@ -1,24 +1,99 @@
 package convt3
 
 import (
+	"fmt"
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/nativecpp"
+	"github.com/openfluke/welvet/quant"
 )
 
-// ForwardNativeCPU prefers the welvet.cpp C ABI when a packed FormatNone path is
-// available; otherwise runs the Go CPU tiled implementation (projections/children
-// still inherit Exec.Backend == NativeCPU and may hit Dense C ABI).
-func ForwardNativeCPU[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
-	_ = nativecpp.NativeCPUAvailable
-	return ForwardCPUTiled(l, input)
+// ForwardNativeCPU calls the C ABI for the supported FormatNone baseline.
+func ForwardNativeCPU[T core.Numeric](l *Layer, input *core.Tensor[T]) (*core.Tensor[T], *core.Tensor[T], error) {
+	return nativePass(l, input, nil, nil, false)
 }
 
-// BackwardNativeCPU mirrors ForwardNativeCPU — Go CPU tiled / child NativeCPU Dense.
-func BackwardNativeCPU[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
-	_ = nativecpp.NativeCPUAvailable
-	return BackwardCPUTiled(l, gradOut, input, pre)
+// BackwardNativeCPU returns C++ dInput/dWeights without updating parameters.
+func BackwardNativeCPU[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (*core.Tensor[T], *core.Tensor[T], error) {
+	return nativePass(l, input, gradOut, pre, true)
 }
+func nativePass[T core.Numeric](l *Layer, input, gradOut, savedPre *core.Tensor[T], back bool) (*core.Tensor[T], *core.Tensor[T], error) {
+	host := func() (*core.Tensor[T], *core.Tensor[T], error) {
+		if back {
+			return BackwardCPUTiled(l, gradOut, input, savedPre)
+		}
+		return ForwardCPUTiled(l, input)
+	}
+	if l == nil || input == nil {
+		return nil, nil, fmt.Errorf("convt3: nil native input")
+	}
+	if !nativecpp.NativeCPUAvailable() || (l.Proj != nil && l.Proj.Weights != nil && l.Proj.Weights.Format != quant.FormatNone) {
+		return host()
+	}
 
+	if l == nil || l.Proj == nil || l.Proj.Weights == nil || input == nil {
+		return nil, nil, fmt.Errorf("convt3: NativeCPU nil")
+	}
+	if l.Proj.Weights.Format != quant.FormatNone || !nativecpp.NativeCPUAvailable() {
+		return nil, nil, fmt.Errorf("convt3: NativeCPU needs FormatNone + libwelvet")
+	}
+	lay, err := parseLayout(l.Cfg, input)
+	if err != nil {
+		return nil, nil, err
+	}
+	w, err := l.Proj.NativeMatrixF32()
+	if err != nil {
+		return nil, nil, err
+	}
+	sp := lay.outD * lay.outH * lay.outW
+	nOut := lay.batch * lay.filters * sp
+	nIn := lay.batch * lay.inC * lay.inD * lay.inH * lay.inW
+	nw := len(w)
+	xF := core.SliceAsFloat32(input.Data)
+	preF := make([]float32, nOut)
+	postF := make([]float32, nOut)
+
+	if !back {
+		err = nativecpp.ConvT3ForwardF32(
+			int32(lay.batch), int32(lay.inC), int32(lay.filters),
+			int32(lay.inD), int32(lay.inH), int32(lay.inW),
+			int32(l.Cfg.Kernel), int32(l.Cfg.Stride), int32(l.Cfg.Padding), int32(l.Cfg.OutputPadding),
+			int32(l.Cfg.Activation), int32(l.Proj.Weights.DType), nativecpp.CABBackendCPU,
+			w, xF, preF, postF,
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		pre := core.NewTensor[T](([]int{lay.batch, lay.filters, lay.outD, lay.outH, lay.outW})...)
+		post := core.NewTensor[T](([]int{lay.batch, lay.filters, lay.outD, lay.outH, lay.outW})...)
+		core.SliceFromFloat32(preF, pre.Data)
+		core.SliceFromFloat32(postF, post.Data)
+		return pre, post, nil
+	}
+	if gradOut == nil || len(gradOut.Data) != len(postF) {
+		return nil, nil, fmt.Errorf("convt3: native gradient shape mismatch")
+	}
+	gF := core.SliceAsFloat32(gradOut.Data)
+	dX := make([]float32, nIn)
+	dW := make([]float32, nw)
+	wAfter := make([]float32, nw)
+	_, err = nativecpp.ConvT3NormalBPF32(
+		int32(lay.batch), int32(lay.inC), int32(lay.filters),
+		int32(lay.inD), int32(lay.inH), int32(lay.inW),
+		int32(l.Cfg.Kernel), int32(l.Cfg.Stride), int32(l.Cfg.Padding), int32(l.Cfg.OutputPadding),
+		int32(l.Cfg.Activation), int32(l.Proj.Weights.DType), nativecpp.CABBackendCPU,
+		w, xF, gF, false, 0,
+		preF, postF, dX, dW, wAfter,
+	)
+
+	if err != nil {
+		return nil, nil, err
+	}
+	gx := core.NewTensor[T](input.Shape...)
+	dw := core.NewTensor[T](l.Proj.Weights.Rows, l.Proj.Weights.Cols)
+	core.SliceFromFloat32(dX, gx.Data)
+	core.SliceFromFloat32(dW, dw.Data)
+	return gx, dw, nil
+}
 
 // ApplyExecConfig resolves a nativecpp.ExecConfig onto this layer's Exec.Backend.
 func (l *Layer) ApplyExecConfig(cfg nativecpp.ExecConfig, volume, sector, layerKey string) {
@@ -27,4 +102,3 @@ func (l *Layer) ApplyExecConfig(cfg nativecpp.ExecConfig, volume, sector, layerK
 	}
 	nativecpp.ApplyExecConfig(cfg, volume, sector, layerKey, &l.Exec)
 }
-

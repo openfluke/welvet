@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/openfluke/welvet/core"
-	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/layers/dense"
+	"github.com/openfluke/welvet/nativecpp"
 	"github.com/openfluke/welvet/quant"
 )
 
@@ -80,7 +80,7 @@ func (l *Layer) syncChildExec() {
 		if ch == nil {
 			continue
 		}
-		ch.Exec = l.Exec
+		ch.Exec = core.InheritExec(ch.Exec, l.Exec)
 		ch.Core.TileSize = l.Core.TileSize
 		ch.Core.MultiCore = l.Core.MultiCore
 	}
@@ -118,10 +118,16 @@ func (l *Layer) Pack(format quant.Format) error {
 
 // Forward dispatches by Exec.Backend.
 func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal && wholePlacement(l) {
+		return core.MetalForward(l, input)
+	}
 	if l == nil || input == nil {
 		return nil, nil, fmt.Errorf("residual: nil layer/input")
 	}
 	l.syncChildExec()
+	if l.Exec.Backend == core.BackendNativeCPU && !wholePlacement(l) {
+		return ForwardCPUTiled(l, input)
+	}
 	switch l.Exec.Backend {
 	case core.BackendSIMD:
 		return ForwardSIMD(l, input)
@@ -139,10 +145,16 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 
 // Backward: gradIn = ∂F/∂x + ∂L/∂y; gradW concat of F child dWs.
 func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
+	if l != nil && l.Exec.Backend == core.BackendMetal && wholePlacement(l) {
+		return core.MetalBackward(l, gradOut, input)
+	}
 	if l == nil {
 		return nil, nil, fmt.Errorf("residual: nil layer")
 	}
 	l.syncChildExec()
+	if l.Exec.Backend == core.BackendNativeCPU && !wholePlacement(l) {
+		return BackwardCPUTiled(l, gradOut, input, pre)
+	}
 	switch l.Exec.Backend {
 	case core.BackendSIMD:
 		return BackwardSIMD(l, gradOut, input, pre)
