@@ -4,17 +4,18 @@
 
 | | |
 |--|--|
-| **Version** | **v1.3.1** |
+| **Version** | **v1.3.2** |
 | **Release state** | Prepared in this checkout; publishing/tagging is separate |
 | **Scorecard** | **100 / 100** pts (engine board — see [Version scorecard](#version-scorecard)) |
 | **NativeCPU** | welvet.cpp **0.67** (`nativecpp`) |
 | **Hexagon NPU** | welvet.qnn **1.0.0** (`nativeqnn` · Windows ARM64) |
-| **Apple Metal GPU** | welvet.metal **0.70**, model ABI **1** (`nativemetal` · macOS Apple silicon) |
+| **Apple Metal GPU** | welvet.metal **0.71**, model ABI **1** (`nativemetal` · macOS Apple silicon) |
 
-Engine board remains **100/100**. **v1.3.1** is a patch on **v1.3.0**: pin
-bundled Metal to **0.70** (View/Flatten wire + Mesh* sparse-host train) and
-encode `parallel.View` / `Flatten` in `nativemetal`. **v1.3.0** introduced the
-optional Apple Metal binding and mounted-model workflow (`Mount` → train/fwd →
+Engine board remains **100/100**. **v1.3.2** is a patch on **v1.3.1**: pin
+bundled Metal to **0.71** (`@autoreleasepool` OOM drain on Metal hot paths).
+**v1.3.1** pinned Metal **0.70** (View/Flatten + Mesh* sparse-host) and encoded
+`parallel.View` / `Flatten` in `nativemetal`. **v1.3.0** introduced the optional
+Apple Metal binding and mounted-model workflow (`Mount` → train/fwd →
 `SyncToGo()`). **v1.2.0** introduced Qualcomm HTP. Native backends retain their
 independent sibling versions and artifacts. Linux and other existing backends do
 not acquire an Apple hardware requirement.
@@ -23,7 +24,7 @@ not acquire an Apple hardware requirement.
 |------|------|
 | **[openfluke/welvet](https://github.com/openfluke/welvet)** (this tree) | **Go engine** — layers, quant, SIMD, WebGPU, ENTITY, `nativecpp` / `nativeqnn` / `nativemetal` bindings |
 | **[openfluke/welvet.cpp](https://github.com/openfluke/welvet.cpp)** | CPU C++ engine + C ABI (**0.67** — same 100-pt board as Go) |
-| **[openfluke/welvet.metal](https://github.com/openfluke/welvet.metal)** | Independent Apple Metal engine + C ABI (**0.70**, session ABI **1**) |
+| **[openfluke/welvet.metal](https://github.com/openfluke/welvet.metal)** | Independent Apple Metal engine + C ABI (**0.71**, session ABI **1**) |
 | **[openfluke/welvet.qnn](https://github.com/openfluke/welvet.qnn)** | Qualcomm Hexagon HTP (**1.0.0**) |
 | **[openfluke/w2a](https://github.com/openfluke/w2a)** | Tests / benches (`go_v_qnn` large matrix) — **never** in engine packages |
 | **[openfluke/octo](apps/octo/)** | Model shell — HF download, convert→ENTITY, quantize, run |
@@ -66,10 +67,10 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v1.3.1 release target.** Go's engine board remains **100/100**.
-`nativemetal` loads the bundled **welvet.metal 0.70** library (View/Flatten +
-Mesh* sparse-host train), mounts supported layers/Stack/Parallel/Grid models and
-runs native GPU training without modifying Go parameters until `SyncToGo()`.
+**Status: v1.3.2 release target.** Go's engine board remains **100/100**.
+`nativemetal` loads the bundled **welvet.metal 0.71** library (`@autoreleasepool`
+drain + View/Flatten + Mesh* sparse-host), mounts supported layers/Stack/Parallel/Grid
+models and runs native GPU training without modifying Go parameters until `SyncToGo()`.
 Validation in w2a covers 305 training/mesh groups, native dtype transfers, all
 34 dtype ENTITY save/reload roundtrips, lifecycle and race checks on Apple M5.
 GDN remains Float32-only; the Metal tensor bridge is Float32.
@@ -93,7 +94,7 @@ version-file update.
 
 ## Version scorecard
 
-**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. After v1.0, **patch** = bugfix / platform artifact; **minor** = real capability (NativeCPU train, WebGPU, **QNN**, **Metal**). Weights sum to **100**. The current release target is **v1.3.1** (Metal **0.70** pin + View/Flatten encode; **v1.3.0** shipped Apple Metal + nativemetal).
+**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. After v1.0, **patch** = bugfix / platform artifact; **minor** = real capability (NativeCPU train, WebGPU, **QNN**, **Metal**). Weights sum to **100**. The current release target is **v1.3.2** (Metal **0.71** pin / `@autoreleasepool` drain; **v1.3.1** = Metal **0.70** + View/Flatten encode; **v1.3.0** shipped Apple Metal + nativemetal).
 
 | # | Section | Wt | How scored today | Earned |
 |--:|---------|---:|------------------|-------:|
@@ -144,10 +145,10 @@ Status rollup — version points live in the [scorecard](#version-scorecard) onl
 | `stub/` seed · serialization · hardware · memory · fountain · donate | 🚧 off-board |
 | `nativeqnn` + welvet.qnn **1.0.0** — Hexagon HTP forward (Windows ARM64) | ✅ off-board (vendor repo) |
 | `nativecpp` + welvet.cpp **0.67** — NativeCPU C ABI | ✅ |
-| `nativemetal` + welvet.metal **0.70** — explicit model sessions and weight return | ✅ off-board; supported baseline contracts |
+| `nativemetal` + welvet.metal **0.71** — explicit model sessions and weight return | ✅ off-board; supported baseline contracts |
 | Full v1 matrix (every cell peak-fused, no host ALU) | 🚧 (peak fused ✅; nested Sequential/Residual still open) |
 
-### What Go Welvet can do now (v1.3.1)
+### What Go Welvet can do now (v1.3.2)
 
 | Path | Backend | What |
 |------|---------|------|
@@ -205,10 +206,10 @@ Accel SDKs stay in **separate repos** (no cross-vendor contamination). Go only g
 | welvet.xpu / welvet.intel_gpu | Intel GPU | Windows + Linux | planned |
 | welvet.intel_npu | Intel NPU | Windows + Linux | planned |
 | **welvet.cpp** | CPU + C ABI (Go-parity board) | Linux / Windows / macOS / Android / iOS | **0.67** |
-| **welvet.metal** | Apple Metal GPU + model-session C ABI | macOS Apple silicon | **0.70**, ABI **1** |
-| **welvet** (Go) | Engine + bindings | all | **v1.3.1** |
+| **welvet.metal** | Apple Metal GPU + model-session C ABI | macOS Apple silicon | **0.71**, ABI **1** |
+| **welvet** (Go) | Engine + bindings | all | **v1.3.2** |
 
-Policy: Go **minor** bumps when a new optional native binding ships; **patch** refreshes artifacts/pins. Backend versions stay independent: welvet.metal board remains 68/100 while the engine tag is **0.70** (View/Flatten + Mesh sparse-host), while welvet.qnn uses its documented vendor release gates.
+Policy: Go **minor** bumps when a new optional native binding ships; **patch** refreshes artifacts/pins. Backend versions stay independent: welvet.metal board remains 68/100 while the engine tag is **0.71** (`@autoreleasepool` drain + View/Flatten + Mesh sparse-host), while welvet.qnn uses its documented vendor release gates.
 
 ---
 

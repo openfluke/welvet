@@ -165,10 +165,13 @@ Pure Go AI engine — scorecard **@EARNED@/100** → **@VERSION@**.
 go get github.com/openfluke/welvet@@VERSION@
 ```
 
-### What's new in v1.3.1
-- Patch on **v1.3.0**: bundled **welvet.metal 0.70** (View/Flatten wire + Mesh* sparse-host TrainMSE fallback); mounted-model ABI **1**
+### What's new in v1.3.2
+- Patch on **v1.3.1**: bundled **welvet.metal 0.71** — `@autoreleasepool` on Metal hot paths (Shared MTLBuffer / command-buffer drain; long-matrix jetsam fix); mounted-model ABI **1**
+- Independent pins: **welvet.cpp 0.67**, **welvet.qnn 1.0.0**, **welvet.metal 0.71**; Go engine board remains **100/100**
+
+### From v1.3.1
+- Bundled **welvet.metal 0.70** (View/Flatten wire + Mesh* sparse-host TrainMSE fallback)
 - `nativemetal` encodes `parallel.View` / `Flatten` so MidDepth / creature stacks Mount
-- Independent pins: **welvet.cpp 0.67**, **welvet.qnn 1.0.0**, **welvet.metal 0.70**; Go engine board remains **100/100**
 
 ### From v1.3.0
 - **Apple Metal GPU integration** through Go's `nativemetal` package
