@@ -165,15 +165,19 @@ Pure Go AI engine — scorecard **@EARNED@/100** → **@VERSION@**.
 go get github.com/openfluke/welvet@@VERSION@
 ```
 
-### What's new in v1.3.0
-- **Apple Metal GPU integration** through Go's `nativemetal` package and bundled **welvet.metal 0.68** library (mounted-model ABI **1**)
+### What's new in v1.3.1
+- Patch on **v1.3.0**: bundled **welvet.metal 0.70** (View/Flatten wire + Mesh* sparse-host TrainMSE fallback); mounted-model ABI **1**
+- `nativemetal` encodes `parallel.View` / `Flatten` so MidDepth / creature stacks Mount
+- Independent pins: **welvet.cpp 0.67**, **welvet.qnn 1.0.0**, **welvet.metal 0.70**; Go engine board remains **100/100**
+
+### From v1.3.0
+- **Apple Metal GPU integration** through Go's `nativemetal` package
 - Mount supported Go layers / Stack / Parallel / Grid, run repeated `Forward` / `TrainMSE`, then explicitly `SyncToGo()` before saving through Go
 - Native parameter bytes, scales and Float64 biases preserved; all 34 dtype ENTITY save/reload roundtrips verified (GDN remains Float32-only)
 - w2a validation: **305 training/mesh groups**, CamSync boundaries, lifecycle, malformed-input and race checks on Apple M5
 - `-tags welvet_metal` builds Metal-only applications without the CPU sibling binding; supported Metal execution requires macOS Apple silicon + Go/cgo
 - Explicit JSON/Exec.Backend routing through `EnableRouting` and `runtime/placement`, including mixed Go/C++/Metal gradient handoff
 - Automatic hardware/performance selection and portable native-state checkpoints remain separate work
-- Independent pins: **welvet.cpp 0.67**, **welvet.qnn 1.0.0**, **welvet.metal 0.68**; Go engine board remains **100/100**
 
 ### Platform selection
 - Existing Go CPU / SIMD / WebGPU / NativeCPU / QNN behavior is preserved for ordinary builds
