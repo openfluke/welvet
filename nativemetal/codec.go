@@ -270,6 +270,19 @@ func (e *encoder) node(op any, depth int) {
 			e.ints(1)
 			e.node(l.Gate, depth+1)
 		}
+	case *parallel.View:
+		if l == nil || len(l.Shape) == 0 {
+			e.fail("mounted View needs a shape")
+			return
+		}
+		e.ints(24, len(l.Shape))
+		e.ints(l.Shape...)
+	case *parallel.Flatten:
+		feat := 0
+		if l != nil {
+			feat = l.Feat
+		}
+		e.ints(25, feat)
 	default:
 		e.fail(fmt.Sprintf("unsupported mounted operation %T", op))
 	}
