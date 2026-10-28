@@ -129,11 +129,11 @@ func (o Options) withDefaults() Options {
 
 // SoftAcc is SoftAcc for one pred/target pair at the given scale.
 func SoftAcc(pred, target, scale float64) float64 {
-	if scale <= 0 || math.IsNaN(pred) || math.IsInf(pred, 0) {
+	if scale <= 0 || math.IsNaN(pred) || math.IsInf(pred, 0) || math.IsNaN(target) || math.IsInf(target, 0) {
 		return 0
 	}
 	a := 100 * (1 - math.Abs(pred-target)/scale)
-	if a < 0 {
+	if math.IsNaN(a) || a < 0 {
 		return 0
 	}
 	if a > 100 {
