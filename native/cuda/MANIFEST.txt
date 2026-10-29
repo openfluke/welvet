@@ -4,4 +4,4 @@ model_abi=1
 segment_extension=1
 platform=linux_x86_64
 source_checkout=/home/openfluke/gs/welvet.cuda
-cc52f678fd88e0e41f220f3f1404d39fb0f6a281d180a5940133d96b98aad809  /home/openfluke/gs/welvet.cuda/../welvet/native/cuda/linux_x86_64/libwelvet_cuda.so
+06ffe7fd3fd72d8f2371a82328bcbae4087cbab45ac7cb30069132a0c7d1ae72  /home/openfluke/gs/welvet.cuda/../welvet/native/cuda/linux_x86_64/libwelvet_cuda.so
