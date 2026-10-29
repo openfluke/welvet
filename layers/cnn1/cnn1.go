@@ -91,6 +91,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 	if l != nil && l.Exec.Backend == core.BackendMetal {
 		return core.MetalForward(l, input)
 	}
+	if l != nil && l.Exec.Backend == core.BackendCuda {
+		return core.CudaForward(l, input)
+	}
 	if l == nil || l.Proj == nil || input == nil {
 		return nil, nil, fmt.Errorf("cnn1: nil layer/input")
 	}
@@ -114,6 +117,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
 	if l != nil && l.Exec.Backend == core.BackendMetal {
 		return core.MetalBackward(l, gradOut, input)
+	}
+	if l != nil && l.Exec.Backend == core.BackendCuda {
+		return core.CudaBackward(l, gradOut, input)
 	}
 	if l == nil || l.Proj == nil {
 		return nil, nil, fmt.Errorf("cnn1: nil layer")

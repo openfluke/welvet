@@ -11,6 +11,9 @@ func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) erro
 	if l != nil && l.Exec.Backend == core.BackendMetal {
 		return core.MetalApplySGD(l, dW, lr)
 	}
+	if l != nil && l.Exec.Backend == core.BackendCuda {
+		return core.CudaApplySGD(l, dW, lr)
+	}
 	if l == nil {
 		return fmt.Errorf("softmax: ApplyGradSGD nil layer")
 	}

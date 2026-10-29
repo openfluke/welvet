@@ -180,6 +180,9 @@ func ForwardStack[T core.Numeric](s *Stack, input *core.Tensor[T]) (pre, post *c
 	if s != nil && s.Exec.Backend == core.BackendMetal && wholeBackend(s, core.BackendMetal) {
 		return core.MetalForward(s, input)
 	}
+	if s != nil && s.Exec.Backend == core.BackendCuda && wholeBackend(s, core.BackendCuda) {
+		return core.CudaForward(s, input)
+	}
 	if s == nil || input == nil {
 		return nil, nil, fmt.Errorf("parallel: nil stack/input")
 	}
@@ -210,6 +213,9 @@ func ForwardStack[T core.Numeric](s *Stack, input *core.Tensor[T]) (pre, post *c
 func BackwardStack[T core.Numeric](s *Stack, gradOut, input, pre *core.Tensor[T]) (gradIn, gradW *core.Tensor[T], err error) {
 	if s != nil && s.Exec.Backend == core.BackendMetal && wholeBackend(s, core.BackendMetal) {
 		return core.MetalBackward(s, gradOut, input)
+	}
+	if s != nil && s.Exec.Backend == core.BackendCuda && wholeBackend(s, core.BackendCuda) {
+		return core.CudaBackward(s, gradOut, input)
 	}
 	_ = pre
 	if s == nil {
@@ -282,6 +288,9 @@ func (s *Stack) GradWSize() int {
 func ApplyGradSGDStack[T core.Numeric](s *Stack, dW *core.Tensor[T], lr float64) error {
 	if s != nil && s.Exec.Backend == core.BackendMetal && wholeBackend(s, core.BackendMetal) {
 		return core.MetalApplySGD(s, dW, lr)
+	}
+	if s != nil && s.Exec.Backend == core.BackendCuda && wholeBackend(s, core.BackendCuda) {
+		return core.CudaApplySGD(s, dW, lr)
 	}
 	if s == nil {
 		return fmt.Errorf("parallel: ApplyGradSGDStack nil")
