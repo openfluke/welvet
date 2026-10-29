@@ -1,4 +1,5 @@
-// Linux CUDA integration supports explicit sessions and optional routed execution.
+// CUDA integration supports explicit sessions and optional routed execution
+// on Linux/Windows amd64.
 // EnableRouting connects JSON/Exec.Backend CUDA placements to native sessions;
 // close the returned Router after the workload. Routed updates return to Go
 // automatically. Explicit sessions use the following ownership boundary:

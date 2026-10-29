@@ -2,6 +2,6 @@ engine=welvet.cuda
 version=0.79
 model_abi=1
 segment_extension=1
-platform=linux_x86_64
-source_checkout=/home/openfluke/gs/welvet.cuda
-06ffe7fd3fd72d8f2371a82328bcbae4087cbab45ac7cb30069132a0c7d1ae72  /home/openfluke/gs/welvet.cuda/../welvet/native/cuda/linux_x86_64/libwelvet_cuda.so
+platform=windows_amd64
+source_checkout=C:/git/welvet.cuda
+f23cb6a14d17fb07fd4aa01993b878812a0873cda47c9e7e59247433ecacdb6c  C:/git/welvet/native/cuda/windows_amd64/libwelvet_cuda.dll

@@ -1,5 +1,5 @@
-// Package nativecuda mounts Go Welvet models in the independent Linux CUDA
-// backend. Mount copies weights; training never silently changes Go stores.
+// Package nativecuda mounts Go Welvet models in the independent CUDA backend
+// (Linux/Windows amd64). Mount copies weights; training never silently changes Go stores.
 package nativecuda
 
 import (
@@ -51,18 +51,37 @@ type Session struct {
 	binding binding
 }
 
+func cudaLibraryName() string {
+	if runtime.GOOS == "windows" {
+		return "libwelvet_cuda.dll"
+	}
+	return "libwelvet_cuda.so"
+}
+
+func cudaArtifactDir() string {
+	switch {
+	case runtime.GOOS == "windows" && runtime.GOARCH == "amd64":
+		return "windows_amd64"
+	case runtime.GOOS == "linux" && runtime.GOARCH == "amd64":
+		return "linux_x86_64"
+	default:
+		return "linux_x86_64"
+	}
+}
+
 func defaultLibrary() string {
 	if p := os.Getenv("WELVET_CUDA_LIBRARY"); p != "" {
 		return p
 	}
+	name := cudaLibraryName()
 	if exe, e := os.Executable(); e == nil {
-		p := filepath.Join(filepath.Dir(exe), "libwelvet_cuda.so")
+		p := filepath.Join(filepath.Dir(exe), name)
 		if _, e = os.Stat(p); e == nil {
 			return p
 		}
 	}
 	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "native", "cuda", "linux_x86_64", "libwelvet_cuda.so")
+	return filepath.Join(filepath.Dir(file), "..", "native", "cuda", cudaArtifactDir(), name)
 }
 
 // Mount accepts a supported Go layer, parallel.Stack, parallel.Layer or Grid.

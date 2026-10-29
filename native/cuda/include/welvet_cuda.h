@@ -9,11 +9,15 @@
 extern "C" {
 #endif
 
-#if defined(_WIN32) && defined(WELVET_BUILD_SHARED)
-#  ifdef WELVET_EXPORTS
-#    define WELVET_API __declspec(dllexport)
+#if defined(_WIN32)
+#  if defined(WELVET_BUILD_SHARED)
+#    ifdef WELVET_EXPORTS
+#      define WELVET_API __declspec(dllexport)
+#    else
+#      define WELVET_API __declspec(dllimport)
+#    endif
 #  else
-#    define WELVET_API __declspec(dllimport)
+#    define WELVET_API
 #  endif
 #else
 #  define WELVET_API __attribute__((visibility("default")))
