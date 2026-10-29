@@ -1,9 +1,10 @@
 # Independent Apple Metal backend
 
-Go Welvet **v1.3.0** introduced this optional binding; **v1.3.2** pins the
-bundled engine to **welvet.metal 0.71** (`@autoreleasepool` OOM drain; **0.70**
-was View/Flatten + Mesh* sparse-host train)
-with model ABI **1**. Tagging/publication is separate from the working tree.
+Go Welvet **v1.3.0** introduced this optional binding; **v1.3.2** / **v1.4.0**
+pin the bundled engine to **welvet.metal 0.71** (`@autoreleasepool` OOM drain;
+**0.70** was View/Flatten + Mesh* sparse-host train) with model ABI **1**.
+**v1.4.0** also adds the sibling CUDA binding (`nativecuda`). Tagging/publication
+is separate from the working tree.
 
 `darwin_arm64/libwelvet_metal.dylib` is built from welvet.metal, not welvet.cpp.
 The public session ABI is in `include/welvet_metal.h`; version/checksum metadata

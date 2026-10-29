@@ -2,7 +2,8 @@
 
 `core.BackendCPUTiled` runs the Go implementation. `core.BackendNativeCPU`
 selects the independent C++ CPU backend through the C ABI. It does not select
-Metal. The Apple backend uses `core.BackendMetal` or explicit `nativemetal` sessions.
+Metal or CUDA. The Apple backend uses `core.BackendMetal` / `nativemetal`;
+NVIDIA uses `core.BackendCuda` / `nativecuda`.
 
 The FormatNone baseline now connects native forward and incoming-gradient
 backward for CNN1/2/3, ConvT1/2/3, Embedding, RNN, LSTM, MHA, Mamba, KMeans,

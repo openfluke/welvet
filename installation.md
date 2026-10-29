@@ -1,9 +1,9 @@
 # Welvet installation
 
 How to install Go Welvet and optionally enable native acceleration. The current
-release target is **v1.3.2** (Metal **0.71** `@autoreleasepool` drain pin;
-**v1.3.1** = Metal **0.70** + View/Flatten; **v1.3.0** added Apple Metal through
-`nativemetal`). Publication/tagging is separate from this working-tree update.
+release target is **v1.4.0** (CUDA **0.79** through `nativecuda`; Metal remains
+**0.71**; **v1.3.0** added Apple Metal through `nativemetal`). Publication/tagging
+is separate from this working-tree update.
 
 | Platform | Native artifact | Go `nativecpp` cgo | Notes |
 | --- | --- | --- | --- |
@@ -18,18 +18,38 @@ release target is **v1.3.2** (Metal **0.71** `@autoreleasepool` drain pin;
 
 **Defaults:** pure Go `BackendCPUTiled` always works without a C compiler. Native acceleration needs cgo + the platform lib (or packaging that lib next to your binary).
 
-Once v1.3.2 is published, pin the module (any OS):
+Once v1.4.0 is published, pin the module (any OS):
 
 ```bash
-go get github.com/openfluke/welvet@v1.3.2
+go get github.com/openfluke/welvet@v1.4.0
 ```
 
 The existing platform walkthroughs below retain their validated **v1.2.0**
 pins and test history. When using another version, update both the module pin
 and any module-cache library paths together. Those historical walkthroughs are
-not new v1.3.2 platform sign-offs. Ordinary Linux use has no Apple requirement.
+not new v1.4.0 platform sign-offs. Ordinary use has no Apple or NVIDIA
+requirement until you explicitly mount Metal or CUDA.
 
-### Optional Apple Metal in v1.3.2
+### Optional NVIDIA CUDA in v1.4.0
+
+On Linux x86_64 / Windows amd64 with an NVIDIA GPU, the packaged libraries are
+`native/cuda/linux_x86_64/libwelvet_cuda.so` and
+`native/cuda/windows_amd64/libwelvet_cuda.dll` (engine **0.79**, model ABI **1**).
+Use `nativecuda.Mount(model)`, train/execute through the session, then call
+`SyncToGo()` before Go saving. JSON/`Exec.Backend` placement:
+`nativecuda.EnableRouting()`. Build CUDA-only applications with
+`-tags welvet_cuda`; Go/cgo and a compatible NVIDIA driver/runtime are required.
+The tag disables the CPU sibling binding for that build. Other platforms only
+report CUDA unavailable when an explicit CUDA mount is attempted.
+
+See [the CUDA integration guide](native/cuda/README.md). Rebuild/install from the
+sibling CUDA checkout:
+
+```sh
+cd ../welvet.cuda && ./scripts/linux_install_go.sh   # or windows_install_go.ps1
+```
+
+### Optional Apple Metal in v1.4.0
 
 On macOS Apple silicon, the packaged library is
 `native/metal/darwin_arm64/libwelvet_metal.dylib` (engine **0.71**, model ABI **1**).
@@ -49,6 +69,7 @@ go run -tags welvet_metal ./cmd/welvet-metal-example -save trained.entity
 
 Engine pin for shipped natives: **0.67** (`native/cpp/MANIFEST.txt`).  
 Hexagon NPU (optional, Windows ARM64): welvet.qnn **1.0.0** → `native/qnn/windows_arm64/libwelvet_qnn.dll` + QAIRT on `PATH` (see welvet.qnn README).
+CUDA (optional): welvet.cuda **0.79** → `native/cuda/.../libwelvet_cuda` + NVIDIA runtime.
 
 ---
 
