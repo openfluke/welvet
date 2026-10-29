@@ -14,6 +14,9 @@ func LinearGradIn[T core.Numeric](l *Layer, gy, input *core.Tensor[T]) (*core.Te
 	if l != nil && l.Exec.Backend == core.BackendMetal {
 		return core.MetalDenseProxy(l, gy, input, nil, 0)
 	}
+	if l != nil && l.Exec.Backend == core.BackendCuda {
+		return core.CudaDenseProxy(l, gy, input, nil, 0)
+	}
 	if l == nil || l.Weights == nil || gy == nil || input == nil {
 		return nil, fmt.Errorf("dense: LinearGradIn nil")
 	}
@@ -39,6 +42,9 @@ func LinearGradIn[T core.Numeric](l *Layer, gy, input *core.Tensor[T]) (*core.Te
 func GradWOnly[T core.Numeric](l *Layer, gy, input, pre *core.Tensor[T]) (*core.Tensor[T], error) {
 	if l != nil && l.Exec.Backend == core.BackendMetal {
 		return core.MetalDenseProxy(l, gy, input, pre, 1)
+	}
+	if l != nil && l.Exec.Backend == core.BackendCuda {
+		return core.CudaDenseProxy(l, gy, input, pre, 1)
 	}
 	if l == nil || l.Weights == nil || gy == nil || input == nil {
 		return nil, fmt.Errorf("dense: GradWOnly nil")

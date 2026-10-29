@@ -425,6 +425,9 @@ func Train[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T], parent
 	if l != nil && l.Exec.Backend == core.BackendMetal && wholeBackend(l, core.BackendMetal) {
 		return core.MetalTrainCredit(l, gradOut, input, pre, int(parentMode), lr)
 	}
+	if l != nil && l.Exec.Backend == core.BackendCuda && wholeBackend(l, core.BackendCuda) {
+		return core.CudaTrainCredit(l, gradOut, input, pre, int(parentMode), lr)
+	}
 	if l == nil {
 		return fmt.Errorf("parallel: Train nil")
 	}
@@ -695,6 +698,9 @@ func approxGateGrad[T core.Numeric](l *Layer, gradOut *core.Tensor[T], branchOut
 func TrainStack[T core.Numeric](s *Stack, gradOut, input, pre *core.Tensor[T], parentMode TrainMode, lr float64) error {
 	if s != nil && s.Exec.Backend == core.BackendMetal && wholeBackend(s, core.BackendMetal) {
 		return core.MetalTrainCredit(s, gradOut, input, pre, int(parentMode), lr)
+	}
+	if s != nil && s.Exec.Backend == core.BackendCuda && wholeBackend(s, core.BackendCuda) {
+		return core.CudaTrainCredit(s, gradOut, input, pre, int(parentMode), lr)
 	}
 	if s == nil {
 		return fmt.Errorf("parallel: TrainStack nil")

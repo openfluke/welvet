@@ -194,6 +194,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 	if l != nil && l.Exec.Backend == core.BackendMetal {
 		return core.MetalForward(l, input)
 	}
+	if l != nil && l.Exec.Backend == core.BackendCuda {
+		return core.CudaForward(l, input)
+	}
 	if l == nil || input == nil {
 		return nil, nil, fmt.Errorf("gdn: nil")
 	}

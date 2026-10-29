@@ -18,6 +18,8 @@ func FromCoreBackend(b core.Backend) string {
 		return BackendNativeCPU
 	case core.BackendMetal:
 		return BackendMetal
+	case core.BackendCuda:
+		return BackendCUDA
 	case core.BackendQNN:
 		return "qnn"
 	case core.BackendSIMD:
