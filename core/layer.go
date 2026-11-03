@@ -132,6 +132,7 @@ const (
 	BackendMetal     Backend = 5 // independent welvet.metal session dispatcher
 	BackendCuda      Backend = 6 // independent welvet.cuda session dispatcher
 	BackendRocm      Backend = 7 // independent welvet.rocm session dispatcher
+	BackendVulkan    Backend = 8 // independent welvet.vulkan session dispatcher
 	BackendQNN       Backend = 4 // welvet.qnn Hexagon NPU via C ABI (nativeqnn)
 )
 
@@ -151,6 +152,8 @@ func (b Backend) String() string {
 		return "cuda"
 	case BackendRocm:
 		return "rocm"
+	case BackendVulkan:
+		return "vulkan"
 	case BackendQNN:
 		return "qnn"
 	default:

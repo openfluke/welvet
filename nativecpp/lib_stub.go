@@ -1,4 +1,4 @@
-//go:build welvet_metal || welvet_cuda || !((cgo && linux && (amd64 || arm64)) || (cgo && darwin && arm64) || (cgo && windows && (amd64 || arm64)))
+//go:build welvet_metal || welvet_cuda || welvet_vulkan || !((cgo && linux && (amd64 || arm64)) || (cgo && darwin && arm64) || (cgo && windows && (amd64 || arm64)))
 
 package nativecpp
 

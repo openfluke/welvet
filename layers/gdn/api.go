@@ -200,6 +200,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 	if l != nil && l.Exec.Backend == core.BackendRocm {
 		return core.RocmForward(l, input)
 	}
+	if l != nil && l.Exec.Backend == core.BackendVulkan {
+		return core.VulkanForward(l, input)
+	}
 	if l == nil || input == nil {
 		return nil, nil, fmt.Errorf("gdn: nil")
 	}

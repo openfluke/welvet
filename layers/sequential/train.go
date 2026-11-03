@@ -17,6 +17,9 @@ func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) erro
 	if l != nil && l.Exec.Backend == core.BackendRocm && wholePlacement(l) {
 		return core.RocmApplySGD(l, dW, lr)
 	}
+	if l != nil && l.Exec.Backend == core.BackendVulkan && wholePlacement(l) {
+		return core.VulkanApplySGD(l, dW, lr)
+	}
 	if l == nil || dW == nil {
 		return fmt.Errorf("sequential: ApplyGradSGD nil")
 	}

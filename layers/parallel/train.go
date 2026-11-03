@@ -18,6 +18,9 @@ func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) erro
 	if l != nil && l.Exec.Backend == core.BackendRocm && wholeBackend(l, core.BackendRocm) {
 		return core.RocmApplySGD(l, dW, lr)
 	}
+	if l != nil && l.Exec.Backend == core.BackendVulkan && wholeBackend(l, core.BackendVulkan) {
+		return core.VulkanApplySGD(l, dW, lr)
+	}
 	if l == nil {
 		return fmt.Errorf("parallel: ApplyGradSGD nil")
 	}

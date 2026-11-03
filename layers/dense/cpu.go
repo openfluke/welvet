@@ -129,6 +129,9 @@ func PermutationOK(dt core.DType, format quant.Format, backend core.Backend) boo
 	if backend == core.BackendRocm {
 		return format == quant.FormatNone && dt >= 0 && int(dt) < len(core.AllDTypes)
 	}
+	if backend == core.BackendVulkan {
+		return format == quant.FormatNone && dt >= 0 && int(dt) < len(core.AllDTypes)
+	}
 	switch backend {
 	case core.BackendCPUTiled, core.BackendSIMD, core.BackendWebGPU, core.BackendNativeCPU:
 		return true

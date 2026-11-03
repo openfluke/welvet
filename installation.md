@@ -1,9 +1,9 @@
 # Welvet installation
 
 How to install Go Welvet and optionally enable native acceleration. The current
-release target is **v1.5.0** (ROCm **0.79** through `nativerocm`; CUDA **0.79**
-through `nativecuda`; Metal remains **0.71**). Publication/tagging is separate
-from this working-tree update.
+release target is **v1.6.0** (Vulkan **0.79** through `nativevulkan`; ROCm **0.79**
+through `nativerocm`; CUDA **0.79** through `nativecuda`; Metal remains **0.71**).
+Publication/tagging is separate from this working-tree update.
 
 | Platform | Native artifact | Go `nativecpp` cgo | Notes |
 | --- | --- | --- | --- |
@@ -18,17 +18,31 @@ from this working-tree update.
 
 **Defaults:** pure Go `BackendCPUTiled` always works without a C compiler. Native acceleration needs cgo + the platform lib (or packaging that lib next to your binary).
 
-Once v1.5.0 is published, pin the module (any OS):
+Once v1.6.0 is published, pin the module (any OS):
 
 ```bash
-go get github.com/openfluke/welvet@v1.5.0
+go get github.com/openfluke/welvet@v1.6.0
 ```
 
 The existing platform walkthroughs below retain their validated **v1.2.0**
 pins and test history. When using another version, update both the module pin
 and any module-cache library paths together. Those historical walkthroughs are
-not new v1.5.0 platform sign-offs. Ordinary use has no Apple, NVIDIA, or AMD
-requirement until you explicitly mount Metal, CUDA, or ROCm.
+not new v1.6.0 platform sign-offs. Ordinary use has no Apple, NVIDIA, AMD, or
+Vulkan requirement until you explicitly mount that backend.
+
+### Optional Vulkan in v1.6.0
+
+On Linux x86_64 with a Vulkan 1.x-capable GPU, the packaged library is
+`native/vulkan/linux_x86_64/libwelvet_vulkan.so` (engine **0.79**, model ABI **1**).
+Use `nativevulkan.Mount(model)`, train/execute through the session, then call
+`SyncToGo()` before Go saving. JSON/`Exec.Backend` placement:
+`nativevulkan.EnableRouting()`. Build Vulkan-only applications with
+`-tags welvet_vulkan`; Go/cgo and a Vulkan loader/runtime are required.
+See [the Vulkan integration guide](native/vulkan/README.md). Rebuild/install:
+
+```sh
+cd ../welvet.vulkan && ./scripts/linux_install_go.sh
+```
 
 ### Optional AMD ROCm in v1.5.0
 
@@ -86,6 +100,7 @@ Engine pin for shipped natives: **0.67** (`native/cpp/MANIFEST.txt`).
 Hexagon NPU (optional, Windows ARM64): welvet.qnn **1.0.0** → `native/qnn/windows_arm64/libwelvet_qnn.dll` + QAIRT on `PATH` (see welvet.qnn README).
 CUDA (optional): welvet.cuda **0.79** → `native/cuda/.../libwelvet_cuda` + NVIDIA runtime.
 ROCm (optional): welvet.rocm **0.79** → `native/rocm/.../libwelvet_rocm` + ROCm/HIP runtime.
+Vulkan (optional): welvet.vulkan **0.79** → `native/vulkan/.../libwelvet_vulkan` + Vulkan loader.
 
 ---
 

@@ -4,7 +4,7 @@
 
 | | |
 |--|--|
-| **Version** | **v1.5.0** |
+| **Version** | **v1.6.0** |
 | **Release state** | Prepared in this checkout; publishing/tagging is separate |
 | **Scorecard** | **100 / 100** pts (engine board — see [Version scorecard](#version-scorecard)) |
 | **NativeCPU** | welvet.cpp **0.67** (`nativecpp`) |
@@ -12,25 +12,26 @@
 | **Apple Metal GPU** | welvet.metal **0.71**, model ABI **1** (`nativemetal` · macOS Apple silicon) |
 | **NVIDIA CUDA GPU** | welvet.cuda **0.79**, model ABI **1** (`nativecuda` · Linux/Windows amd64) |
 | **AMD ROCm GPU** | welvet.rocm **0.79**, model ABI **1** (`nativerocm` · Linux x86_64; **GPU compute untested** on non-HSA hosts) |
+| **Vulkan GPU** | welvet.vulkan **0.79**, model ABI **1** (`nativevulkan` · Linux x86_64) |
 
-Engine board remains **100/100**. **v1.5.0** adds the optional AMD ROCm / HIP
-binding (`nativerocm.Mount` → train/fwd → `SyncToGo()`, plus
+Engine board remains **100/100**. **v1.6.0** adds the optional **Vulkan**
+binding (`nativevulkan.Mount` → train/fwd → `SyncToGo()`, plus
 `EnableRouting` for JSON/`Exec.Backend` placement). Bundled engine pin is
-**welvet.rocm 0.79** (session ABI **1**). **GPU compute untested** until a
-ROCm-capable AMD GPU is available. **v1.4.0** shipped NVIDIA CUDA **0.79**;
-**v1.3.2** pinned Metal **0.71**; **v1.2.0** introduced Qualcomm HTP. Native
-backends keep independent sibling versions. Ordinary builds do not require
-AMD, NVIDIA, or Apple hardware.
+**welvet.vulkan 0.79** (session ABI **1**, Linux x86_64). **v1.5.0** shipped
+AMD ROCm **0.79**; **v1.4.0** NVIDIA CUDA **0.79**; **v1.3.2** Metal **0.71**;
+**v1.2.0** Qualcomm HTP. Native backends keep independent sibling versions.
+Ordinary builds do not require Vulkan, AMD, NVIDIA, or Apple hardware.
 
 | Repo | Role |
 |------|------|
-| **[openfluke/welvet](https://github.com/openfluke/welvet)** (this tree) | **Go engine** — layers, quant, SIMD, WebGPU, ENTITY, `nativecpp` / `nativeqnn` / `nativemetal` / `nativecuda` / `nativerocm` bindings |
+| **[openfluke/welvet](https://github.com/openfluke/welvet)** (this tree) | **Go engine** — layers, quant, SIMD, WebGPU, ENTITY, `nativecpp` / `nativeqnn` / `nativemetal` / `nativecuda` / `nativerocm` / `nativevulkan` bindings |
 | **[openfluke/welvet.cpp](https://github.com/openfluke/welvet.cpp)** | CPU C++ engine + C ABI (**0.67** — same 100-pt board as Go) |
 | **[openfluke/welvet.metal](https://github.com/openfluke/welvet.metal)** | Independent Apple Metal engine + C ABI (**0.71**, session ABI **1**) |
 | **[openfluke/welvet.cuda](https://github.com/openfluke/welvet.cuda)** | Independent NVIDIA CUDA engine + C ABI (**0.79**, session ABI **1**) |
 | **[openfluke/welvet.rocm](https://github.com/openfluke/welvet.rocm)** | Independent AMD ROCm / HIP engine + C ABI (**0.79**, session ABI **1**) |
+| **[openfluke/welvet.vulkan](https://github.com/openfluke/welvet.vulkan)** | Independent Vulkan compute engine + C ABI (**0.79**, session ABI **1**) |
 | **[openfluke/welvet.qnn](https://github.com/openfluke/welvet.qnn)** | Qualcomm Hexagon HTP (**1.0.0**) |
-| **[openfluke/w2a](https://github.com/openfluke/w2a)** | Tests / benches (`go_v_qnn` / `go_v_cuda` / `go_v_rocm` matrices) — **never** in engine packages |
+| **[openfluke/w2a](https://github.com/openfluke/w2a)** | Tests / benches (`go_v_qnn` / `go_v_cuda` / `go_v_rocm` / `go_v_vulkan` matrices) — **never** in engine packages |
 | **[openfluke/octo](apps/octo/)** | Model shell — HF download, convert→ENTITY, quantize, run |
 
 `loom/poly` is legacy reference only. Welvet is the rewrite.
@@ -69,27 +70,28 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `native/metal/`, `nativemetal` | Apple Metal model-session ABI; explicit `SyncToGo`, packaged dylib and example |
 | `native/cuda/`, `nativecuda` | NVIDIA CUDA model-session ABI; explicit `SyncToGo`, packaged `.so` / `.dll` |
 | `native/rocm/`, `nativerocm` | AMD ROCm / HIP model-session ABI; explicit `SyncToGo`, packaged `.so` |
+| `native/vulkan/`, `nativevulkan` | Vulkan model-session ABI; explicit `SyncToGo`, packaged Linux `.so` |
 | `native/qnn/`, `nativeqnn` | welvet.qnn Hexagon HTP C ABI (`BackendQNN`, user `SyncToQNN` / `SyncFromQNN`) |
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v1.5.0 release target.** Go's engine board remains **100/100**.
-`nativerocm` loads the bundled **welvet.rocm 0.79** library (model ABI **1**),
+**Status: v1.6.0 release target.** Go's engine board remains **100/100**.
+`nativevulkan` loads the bundled **welvet.vulkan 0.79** library (model ABI **1**),
 mounts supported layers/Stack/Parallel/Grid models, runs native GPU training
 without modifying Go parameters until `SyncToGo()`, and supports
-`EnableRouting` for explicit JSON/`Exec.Backend` ROCm placement.
-Linux x86_64 ships `libwelvet_rocm`; a **ROCm-capable** AMD GPU + HIP runtime
-are required for compute (build/load validated; **GPU compute untested** on
-Polaris/Picasso hosts). [Usage](native/rocm/README.md).
-CUDA remains at **welvet.cuda 0.79** ([usage](native/cuda/README.md)); Metal at
+`EnableRouting` for explicit JSON/`Exec.Backend` Vulkan placement.
+Linux x86_64 ships `libwelvet_vulkan`; a Vulkan 1.x GPU + loader are required
+for compute. [Usage](native/vulkan/README.md).
+ROCm remains at **welvet.rocm 0.79** ([usage](native/rocm/README.md)); CUDA at
+**welvet.cuda 0.79** ([usage](native/cuda/README.md)); Metal at
 **welvet.metal 0.71** ([usage](native/metal/README.md)).
 
-Build ROCm-only applications with `-tags welvet_rocm` (disables the CPU sibling
+Build Vulkan-only applications with `-tags welvet_vulkan` (disables the CPU sibling
 cgo binding for that build). Existing builds keep their platform/backend
 behavior. Automatic hardware/performance selection remains separate work.
 Pins: welvet.cpp **0.67**, welvet.qnn **1.0.0**, welvet.metal **0.71**,
-welvet.cuda **0.79**, welvet.rocm **0.79**. No tag or GitHub release is published
-by this version-file update.
+welvet.cuda **0.79**, welvet.rocm **0.79**, welvet.vulkan **0.79**. No tag or
+GitHub release is published by this version-file update.
 
 | Legend | Meaning | Pts credit |
 |--------|---------|------------|
@@ -101,7 +103,7 @@ by this version-file update.
 
 ## Version scorecard
 
-**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. After v1.0, **patch** = bugfix / platform artifact; **minor** = real capability (NativeCPU train, WebGPU, **QNN**, **Metal**, **CUDA**, **ROCm**). Weights sum to **100**. The current release target is **v1.5.0** (ROCm **0.79** + `nativerocm`; **v1.4.0** = CUDA **0.79** + `nativecuda`; **v1.3.2** = Metal **0.71** pin).
+**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. After v1.0, **patch** = bugfix / platform artifact; **minor** = real capability (NativeCPU train, WebGPU, **QNN**, **Metal**, **CUDA**, **ROCm**, **Vulkan**). Weights sum to **100**. The current release target is **v1.6.0** (Vulkan **0.79** + `nativevulkan`; **v1.5.0** = ROCm **0.79** + `nativerocm`; **v1.4.0** = CUDA **0.79** + `nativecuda`; **v1.3.2** = Metal **0.71** pin).
 
 | # | Section | Wt | How scored today | Earned |
 |--:|---------|---:|------------------|-------:|
@@ -156,7 +158,7 @@ Status rollup — version points live in the [scorecard](#version-scorecard) onl
 | `nativecuda` + welvet.cuda **0.79** — explicit model sessions and weight return | ✅ off-board; supported baseline contracts |
 | Full v1 matrix (every cell peak-fused, no host ALU) | 🚧 (peak fused ✅; nested Sequential/Residual still open) |
 
-### What Go Welvet can do now (v1.5.0)
+### What Go Welvet can do now (v1.6.0)
 
 | Path | Backend | What |
 |------|---------|------|
@@ -212,13 +214,14 @@ Accel SDKs stay in **separate repos** (no cross-vendor contamination). Go only g
 | **welvet.qnn** | Qualcomm Hexagon NPU | Windows ARM64 → Linux ARM64 | **1.0.0** |
 | **welvet.cuda** | NVIDIA GPU + model-session C ABI | Linux x86_64 + Windows amd64 | **0.79**, ABI **1** |
 | **welvet.rocm** | AMD GPU (HIP) + model-session C ABI | Linux x86_64 | **0.79**, ABI **1** |
+| **welvet.vulkan** | Vulkan GPU + model-session C ABI | Linux x86_64 | **0.79**, ABI **1** |
 | welvet.xpu / welvet.intel_gpu | Intel GPU | Windows + Linux | planned |
 | welvet.intel_npu | Intel NPU | Windows + Linux | planned |
 | **welvet.cpp** | CPU + C ABI (Go-parity board) | Linux / Windows / macOS / Android / iOS | **0.67** |
 | **welvet.metal** | Apple Metal GPU + model-session C ABI | macOS Apple silicon | **0.71**, ABI **1** |
-| **welvet** (Go) | Engine + bindings | all | **v1.5.0** |
+| **welvet** (Go) | Engine + bindings | all | **v1.6.0** |
 
-Policy: Go **minor** bumps when a new optional native binding ships; **patch** refreshes artifacts/pins. Backend versions stay independent: welvet.cuda / welvet.rocm tag from their own 100-pt boards (**0.79**); welvet.metal is **0.71**; welvet.qnn uses its documented vendor release gates.
+Policy: Go **minor** bumps when a new optional native binding ships; **patch** refreshes artifacts/pins. Backend versions stay independent: welvet.cuda / welvet.rocm / welvet.vulkan tag from their own 100-pt boards (**0.79**); welvet.metal is **0.71**; welvet.qnn uses its documented vendor release gates.
 
 ---
 

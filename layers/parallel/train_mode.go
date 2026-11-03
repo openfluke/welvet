@@ -431,6 +431,9 @@ func Train[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T], parent
 	if l != nil && l.Exec.Backend == core.BackendRocm && wholeBackend(l, core.BackendRocm) {
 		return core.RocmTrainCredit(l, gradOut, input, pre, int(parentMode), lr)
 	}
+	if l != nil && l.Exec.Backend == core.BackendVulkan && wholeBackend(l, core.BackendVulkan) {
+		return core.VulkanTrainCredit(l, gradOut, input, pre, int(parentMode), lr)
+	}
 	if l == nil {
 		return fmt.Errorf("parallel: Train nil")
 	}
@@ -707,6 +710,9 @@ func TrainStack[T core.Numeric](s *Stack, gradOut, input, pre *core.Tensor[T], p
 	}
 	if s != nil && s.Exec.Backend == core.BackendRocm && wholeBackend(s, core.BackendRocm) {
 		return core.RocmTrainCredit(s, gradOut, input, pre, int(parentMode), lr)
+	}
+	if s != nil && s.Exec.Backend == core.BackendVulkan && wholeBackend(s, core.BackendVulkan) {
+		return core.VulkanTrainCredit(s, gradOut, input, pre, int(parentMode), lr)
 	}
 	if s == nil {
 		return fmt.Errorf("parallel: TrainStack nil")
