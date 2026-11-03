@@ -186,6 +186,9 @@ func ForwardStack[T core.Numeric](s *Stack, input *core.Tensor[T]) (pre, post *c
 	if s != nil && s.Exec.Backend == core.BackendRocm && wholeBackend(s, core.BackendRocm) {
 		return core.RocmForward(s, input)
 	}
+	if s != nil && s.Exec.Backend == core.BackendVulkan && wholeBackend(s, core.BackendVulkan) {
+		return core.VulkanForward(s, input)
+	}
 	if s == nil || input == nil {
 		return nil, nil, fmt.Errorf("parallel: nil stack/input")
 	}
@@ -222,6 +225,9 @@ func BackwardStack[T core.Numeric](s *Stack, gradOut, input, pre *core.Tensor[T]
 	}
 	if s != nil && s.Exec.Backend == core.BackendRocm && wholeBackend(s, core.BackendRocm) {
 		return core.RocmBackward(s, gradOut, input)
+	}
+	if s != nil && s.Exec.Backend == core.BackendVulkan && wholeBackend(s, core.BackendVulkan) {
+		return core.VulkanBackward(s, gradOut, input)
 	}
 	_ = pre
 	if s == nil {
@@ -300,6 +306,9 @@ func ApplyGradSGDStack[T core.Numeric](s *Stack, dW *core.Tensor[T], lr float64)
 	}
 	if s != nil && s.Exec.Backend == core.BackendRocm && wholeBackend(s, core.BackendRocm) {
 		return core.RocmApplySGD(s, dW, lr)
+	}
+	if s != nil && s.Exec.Backend == core.BackendVulkan && wholeBackend(s, core.BackendVulkan) {
+		return core.VulkanApplySGD(s, dW, lr)
 	}
 	if s == nil {
 		return fmt.Errorf("parallel: ApplyGradSGDStack nil")

@@ -138,6 +138,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 	if l != nil && l.Exec.Backend == core.BackendRocm {
 		return core.RocmForward(l, input)
 	}
+	if l != nil && l.Exec.Backend == core.BackendVulkan {
+		return core.VulkanForward(l, input)
+	}
 	if l == nil || input == nil {
 		return nil, nil, fmt.Errorf("mamba: nil layer/input")
 	}
@@ -166,6 +169,9 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 	}
 	if l != nil && l.Exec.Backend == core.BackendRocm {
 		return core.RocmBackward(l, gradOut, input)
+	}
+	if l != nil && l.Exec.Backend == core.BackendVulkan {
+		return core.VulkanBackward(l, gradOut, input)
 	}
 	if l == nil {
 		return nil, nil, fmt.Errorf("mamba: nil layer")

@@ -24,6 +24,9 @@ func TrainStackMSE[T core.Numeric](s *Stack, input, target *core.Tensor[T], mode
 	if s != nil && s.Exec.Backend == core.BackendRocm && wholeBackend(s, core.BackendRocm) {
 		return core.RocmTrainMSE(s, input, target, int(mode), lr)
 	}
+	if s != nil && s.Exec.Backend == core.BackendVulkan && wholeBackend(s, core.BackendVulkan) {
+		return core.VulkanTrainMSE(s, input, target, int(mode), lr)
+	}
 	// BackendNativeCPU + Dense NestedStack → C ABI TrainMode dispatcher (no auto Sync).
 	if lossN, ok, errN := tryTrainStackNativeMSE(s, input, target, mode, lr); ok {
 		if errN == nil && s != nil {
@@ -89,6 +92,9 @@ func TrainMSE[T core.Numeric](l *Layer, input, target *core.Tensor[T], mode Trai
 	}
 	if l != nil && l.Exec.Backend == core.BackendRocm && wholeBackend(l, core.BackendRocm) {
 		return core.RocmTrainMSE(l, input, target, int(mode), lr)
+	}
+	if l != nil && l.Exec.Backend == core.BackendVulkan && wholeBackend(l, core.BackendVulkan) {
+		return core.VulkanTrainMSE(l, input, target, int(mode), lr)
 	}
 	if l == nil || input == nil || target == nil {
 		return 0, fmt.Errorf("parallel: TrainMSE nil")

@@ -1,0 +1,7 @@
+engine=welvet.vulkan
+version=0.79
+model_abi=1
+segment_extension=1
+platform=linux_x86_64
+source_checkout=/home/openfluke/gs/welvet.vulkan
+061ec28a6d57ea7a66ce8f4975449b5aaaef55709ac25cfc2a33611ba69b6324  /home/openfluke/gs/welvet.vulkan/../welvet/native/vulkan/linux_x86_64/libwelvet_vulkan.so

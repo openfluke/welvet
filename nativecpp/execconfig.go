@@ -12,6 +12,7 @@ const (
 	BackendNativeCPU = "native_cpu"
 	BackendCUDA      = "cuda"
 	BackendROCm      = "rocm"
+	BackendVulkan    = "vulkan"
 	BackendMetal     = "metal"
 	BackendNPU       = "npu"
 )
