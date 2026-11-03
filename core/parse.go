@@ -67,12 +67,14 @@ func ParseBackend(s string) Backend {
 		return BackendMetal
 	case "cuda", "6":
 		return BackendCuda
+	case "rocm", "hip", "amd", "7":
+		return BackendRocm
 	case "qnn", "htp", "npu", "hexagon", "4":
 		return BackendQNN
 	default:
 		if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
 			switch Backend(n) {
-			case BackendCPUTiled, BackendSIMD, BackendWebGPU, BackendNativeCPU, BackendQNN, BackendMetal, BackendCuda:
+			case BackendCPUTiled, BackendSIMD, BackendWebGPU, BackendNativeCPU, BackendQNN, BackendMetal, BackendCuda, BackendRocm:
 				return Backend(n)
 			}
 		}

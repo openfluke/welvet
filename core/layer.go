@@ -131,6 +131,7 @@ const (
 	BackendNativeCPU Backend = 3 // welvet.cpp via C ABI (nativecpp)
 	BackendMetal     Backend = 5 // independent welvet.metal session dispatcher
 	BackendCuda      Backend = 6 // independent welvet.cuda session dispatcher
+	BackendRocm      Backend = 7 // independent welvet.rocm session dispatcher
 	BackendQNN       Backend = 4 // welvet.qnn Hexagon NPU via C ABI (nativeqnn)
 )
 
@@ -148,6 +149,8 @@ func (b Backend) String() string {
 		return "metal"
 	case BackendCuda:
 		return "cuda"
+	case BackendRocm:
+		return "rocm"
 	case BackendQNN:
 		return "qnn"
 	default:

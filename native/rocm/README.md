@@ -1,6 +1,6 @@
 # Independent AMD ROCm / HIP backend
 
-Go Welvet **v1.4.0** introduces this optional binding and pins the bundled
+Go Welvet **v1.5.0** introduces this optional binding and pins the bundled
 engine to **welvet.rocm 0.79** with model ABI **1**. Tagging/publication is
 separate from the working tree.
 
@@ -50,3 +50,5 @@ Automatic execution of explicit JSON/`Exec.Backend` assignments is available via
 Use `runtime/placement.Stack` or `.Grid` to apply the existing execution JSON.
 Routed native updates synchronize to Go automatically; explicit `Mount` sessions
 retain the explicit `SyncToGo` contract.
+
+**Note:** GPU compute requires a ROCm-capable HSA device. Build/load is validated; compute remains **untested** on Polaris/Picasso-class GPUs.

@@ -41,7 +41,7 @@ func EnableRouting(options ...Options) (*Router, error) {
 		return nil, fmt.Errorf("nativerocm: at most one Options value")
 	}
 	r := &Router{options: options, models: make(map[any]*routedModel)}
-	unregister, err := core.RegisterCudaExecutor(r)
+	unregister, err := core.RegisterRocmExecutor(r)
 	if err != nil {
 		return nil, err
 	}

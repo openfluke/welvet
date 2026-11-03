@@ -15,6 +15,9 @@ func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) erro
 	if l != nil && l.Exec.Backend == core.BackendCuda && wholeBackend(l, core.BackendCuda) {
 		return core.CudaApplySGD(l, dW, lr)
 	}
+	if l != nil && l.Exec.Backend == core.BackendRocm && wholeBackend(l, core.BackendRocm) {
+		return core.RocmApplySGD(l, dW, lr)
+	}
 	if l == nil {
 		return fmt.Errorf("parallel: ApplyGradSGD nil")
 	}
