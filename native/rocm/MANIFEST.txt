@@ -1,0 +1,7 @@
+engine=welvet.rocm
+version=0.79
+model_abi=1
+segment_extension=1
+platform=linux_x86_64
+source_checkout=/home/nitro53/git/welvet.rocm
+4c07b104f297cfa132fd3bfface95a985dd07555853a7daa0ac41ec92a5f61e7  /home/nitro53/git/welvet.rocm/../welvet/native/rocm/linux_x86_64/libwelvet_rocm.so
