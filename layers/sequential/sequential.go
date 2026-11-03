@@ -136,6 +136,9 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 	if l != nil && l.Exec.Backend == core.BackendCuda && wholePlacement(l) {
 		return core.CudaForward(l, input)
 	}
+	if l != nil && l.Exec.Backend == core.BackendRocm && wholePlacement(l) {
+		return core.RocmForward(l, input)
+	}
 	if l == nil || input == nil {
 		return nil, nil, fmt.Errorf("sequential: nil layer/input")
 	}
@@ -178,6 +181,9 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 	}
 	if l != nil && l.Exec.Backend == core.BackendCuda && wholePlacement(l) {
 		return core.CudaBackward(l, gradOut, input)
+	}
+	if l != nil && l.Exec.Backend == core.BackendRocm && wholePlacement(l) {
+		return core.RocmBackward(l, gradOut, input)
 	}
 	if l == nil {
 		return nil, nil, fmt.Errorf("sequential: nil layer")

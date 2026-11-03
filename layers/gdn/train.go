@@ -543,6 +543,9 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 	if l != nil && l.Exec.Backend == core.BackendCuda {
 		return core.CudaBackward(l, gradOut, input)
 	}
+	if l != nil && l.Exec.Backend == core.BackendRocm {
+		return core.RocmBackward(l, gradOut, input)
+	}
 	if l == nil {
 		return nil, nil, fmt.Errorf("gdn: Backward nil")
 	}
@@ -645,6 +648,9 @@ func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) erro
 	}
 	if l != nil && l.Exec.Backend == core.BackendCuda {
 		return core.CudaApplySGD(l, dW, lr)
+	}
+	if l != nil && l.Exec.Backend == core.BackendRocm {
+		return core.RocmApplySGD(l, dW, lr)
 	}
 	if l == nil || dW == nil {
 		return fmt.Errorf("gdn: ApplyGradSGD nil")

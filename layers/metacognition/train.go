@@ -14,6 +14,9 @@ func ApplyGradSGD[T core.Numeric](l *Layer, dW *core.Tensor[T], lr float64) erro
 	if l != nil && l.Exec.Backend == core.BackendCuda {
 		return core.CudaApplySGD(l, dW, lr)
 	}
+	if l != nil && l.Exec.Backend == core.BackendRocm {
+		return core.RocmApplySGD(l, dW, lr)
+	}
 	if l == nil || l.Observed == nil {
 		return fmt.Errorf("metacognition: ApplyGradSGD nil")
 	}

@@ -37,4 +37,9 @@ apps/planetbridging
 !native/metal/**/*.a
 # Ship the independent NVIDIA CUDA backend with the Go module
 !native/cuda/**/*.so
+!native/cuda/**/*.dll
 !native/cuda/**/*.a
+# Ship the independent AMD ROCm backend with the Go module
+!native/rocm/**/*.so
+!native/rocm/**/*.dll
+!native/rocm/**/*.a

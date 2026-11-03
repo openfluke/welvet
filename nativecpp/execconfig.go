@@ -11,6 +11,7 @@ const (
 	BackendGoCPU     = "go_cpu"
 	BackendNativeCPU = "native_cpu"
 	BackendCUDA      = "cuda"
+	BackendROCm      = "rocm"
 	BackendMetal     = "metal"
 	BackendNPU       = "npu"
 )
