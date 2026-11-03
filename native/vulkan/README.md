@@ -39,8 +39,9 @@ native parameters across the dtype matrix Welvet.cuda validates, layer / Stack /
 Parallel / Grid mounting, explicit parameter return, and train-mode coverage
 through the Vulkan scoreboard (**0.79** = StepTweenSplitSparse). Transient native
 state is not exported as a checkpoint. Unsupported mounts return errors. See
-the Vulkan repository's `docs/GO_INTEGRATION.md` for ownership, lifecycle and
-precise limits. Close never implicitly saves or synchronizes Go weights.
+the Vulkan repository's `docs/VULKAN_ONLY.md` and `docs/TRAINING_CHECKLIST.md`
+for ownership, purity contract, and train-mode limits. Close never implicitly
+saves or synchronizes Go weights.
 
 Automatic execution of explicit JSON/`Exec.Backend` assignments is available via
 `nativevulkan.EnableRouting()`; close the returned router after the workload.

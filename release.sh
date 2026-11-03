@@ -165,34 +165,40 @@ Pure Go AI engine — scorecard **@EARNED@/100** → **@VERSION@**.
 go get github.com/openfluke/welvet@@VERSION@
 ```
 
-### What's new in v1.4.0
-- **NVIDIA CUDA GPU integration** through Go's `nativecuda` package
+### What's new in v1.6.0
+- **Vulkan GPU integration** through Go's `nativevulkan` package
 - Mount supported Go layers / Stack / Parallel / Grid, run repeated `Forward` / `TrainMSE`, then explicitly `SyncToGo()` before saving through Go
+- Bundled **welvet.vulkan 0.79** (model ABI **1**) for Linux x86_64
+- Explicit JSON/Exec.Backend routing through `EnableRouting` and `runtime/placement`, including mixed Go/C++/Vulkan handoff
+- `-tags welvet_vulkan` builds Vulkan-only applications without the CPU sibling binding; supported Vulkan execution needs a Vulkan loader/runtime + capable device
+- Independent pins: **welvet.cpp 0.67**, **welvet.qnn 1.0.0**, **welvet.metal 0.71**, **welvet.cuda 0.79**, **welvet.rocm 0.79**, **welvet.vulkan 0.79**; Go engine board remains **100/100**
+
+### From v1.5.0
+- **AMD ROCm GPU integration** through Go's `nativerocm` package
+- Bundled **welvet.rocm 0.79** (model ABI **1**) for Linux x86_64
+
+### From v1.4.0
+- **NVIDIA CUDA GPU integration** through Go's `nativecuda` package
 - Bundled **welvet.cuda 0.79** (model ABI **1**) for Linux x86_64 + Windows amd64
-- Explicit JSON/Exec.Backend routing through `EnableRouting` and `runtime/placement`, including mixed Go/C++/CUDA handoff
-- `-tags welvet_cuda` builds CUDA-only applications without the CPU sibling binding; supported CUDA execution needs an NVIDIA driver/runtime + Go/cgo
-- Independent pins: **welvet.cpp 0.67**, **welvet.qnn 1.0.0**, **welvet.metal 0.71**, **welvet.cuda 0.79**; Go engine board remains **100/100**
+- `-tags welvet_cuda`; mixed Go/C++/CUDA routing via `EnableRouting`
 
 ### From v1.3.2
-- Patch: bundled **welvet.metal 0.71** — `@autoreleasepool` on Metal hot paths (Shared MTLBuffer / command-buffer drain; long-matrix jetsam fix)
-
-### From v1.3.1
-- Bundled **welvet.metal 0.70** (View/Flatten wire + Mesh* sparse-host TrainMSE fallback)
-- `nativemetal` encodes `parallel.View` / `Flatten` so MidDepth / creature stacks Mount
+- Patch: bundled **welvet.metal 0.71** — `@autoreleasepool` on Metal hot paths
 
 ### From v1.3.0
 - **Apple Metal GPU integration** through Go's `nativemetal` package
-- Mount → `Forward` / `TrainMSE` → explicit `SyncToGo()`; `-tags welvet_metal`; mixed Go/C++/Metal routing
 
 ### Platform selection
-- Existing Go CPU / SIMD / WebGPU / NativeCPU / QNN / Metal behavior is preserved for ordinary builds
-- CUDA and Metal are optional: installing Go Welvet does not require NVIDIA or Apple hardware
-- Library resolution and supported model limits: see `native/cuda/README.md` and `native/metal/README.md`
+- Existing Go CPU / SIMD / WebGPU / NativeCPU / QNN / Metal / CUDA / ROCm behavior is preserved for ordinary builds
+- Vulkan, ROCm, CUDA and Metal are optional: installing Go Welvet does not require those GPUs
+- Library resolution and supported model limits: see `native/vulkan/README.md`, `native/rocm/README.md`, `native/cuda/README.md` and `native/metal/README.md`
 
 ### Related
 - NativeCPU / C++: https://github.com/openfluke/welvet.cpp
 - Apple Metal: https://github.com/openfluke/welvet.metal
 - NVIDIA CUDA: https://github.com/openfluke/welvet.cuda
+- AMD ROCm: https://github.com/openfluke/welvet.rocm
+- Vulkan: https://github.com/openfluke/welvet.vulkan
 - Hexagon HTP: https://github.com/openfluke/welvet.qnn
 - Validation: https://github.com/openfluke/w2a
 - Site: https://openfluke.github.io/welvet/
