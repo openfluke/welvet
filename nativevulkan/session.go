@@ -1,5 +1,6 @@
 // Package nativevulkan mounts Go Welvet models in the independent Vulkan backend
-// (Linux/Windows amd64). Mount copies weights; training never silently changes Go stores.
+// (Linux amd64, Android arm64/x86_64, Windows amd64). Mount copies weights;
+// training never silently changes Go stores.
 package nativevulkan
 
 import (
@@ -64,6 +65,10 @@ func vulkanArtifactDir() string {
 		return "windows_amd64"
 	case runtime.GOOS == "linux" && runtime.GOARCH == "amd64":
 		return "linux_x86_64"
+	case runtime.GOOS == "android" && runtime.GOARCH == "arm64":
+		return "android_arm64"
+	case runtime.GOOS == "android" && runtime.GOARCH == "amd64":
+		return "android_x86_64"
 	default:
 		return "linux_x86_64"
 	}

@@ -1,7 +1,9 @@
 engine=welvet.vulkan
-version=0.79
+version=0.79.1
 model_abi=1
 segment_extension=1
-platform=linux_x86_64
+platforms=linux_x86_64,android_arm64,android_x86_64
 source_checkout=/home/openfluke/gs/welvet.vulkan
-4f0bdedd94ebd4914dc094a2283605812935f847af12b11121f86af35dd8ff4d  /home/openfluke/gs/welvet.vulkan/../welvet/native/vulkan/linux_x86_64/libwelvet_vulkan.so
+bab408123eb7cb92f2a026f792214290df29417475ee420c03946a1b546190dc  /home/openfluke/gs/welvet.vulkan/../welvet/native/vulkan/linux_x86_64/libwelvet_vulkan.so
+47074a2bcc8035f324a2cb3745aa506a3cb128449173404a7b1e389d98f767a7  /home/openfluke/gs/welvet.vulkan/../welvet/native/vulkan/android_arm64/libwelvet_vulkan.so
+270aaba0f49746fd879c35822828df74727f65b33e86d9a71c5992009e63e4a2  /home/openfluke/gs/welvet.vulkan/../welvet/native/vulkan/android_x86_64/libwelvet_vulkan.so

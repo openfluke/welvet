@@ -2,12 +2,12 @@
 
 | Component | Tag now | Role |
 |-----------|---------|------|
-| **welvet** (Go) | **v1.6.0** | Engine + `nativecpp` / `nativeqnn` / `nativemetal` / `nativecuda` / `nativerocm` / `nativevulkan` bindings · scorecard **100/100** |
+| **welvet** (Go) | **v1.6.1** | Engine + `nativecpp` / `nativeqnn` / `nativemetal` / `nativecuda` / `nativerocm` / `nativevulkan` bindings · scorecard **100/100** |
 | **welvet.cpp** | **0.67** | CPU + C ABI — **same 100-pt board as Go**; `0.{round(earned)}` until 1.0 |
 | **welvet.metal** | **0.71**, ABI **1** | Independent Apple Metal backend; `@autoreleasepool` OOM drain (+ 0.70 Mesh* / 0.69 View) |
 | **welvet.cuda** | **0.79**, ABI **1** | Independent NVIDIA CUDA backend; train modes through StepTweenSplitSparse |
 | **welvet.rocm** | **0.79**, ABI **1** | Independent AMD ROCm / HIP backend; same train ladder as cuda (**GPU compute untested** on Polaris/Picasso hosts) |
-| **welvet.vulkan** | **0.79**, ABI **1** | Independent Vulkan compute backend; train ladder through StepTweenSplitSparse (Linux x86_64) |
+| **welvet.vulkan** | **0.79.1**, ABI **1** | Independent Vulkan compute backend; train ladder through StepTweenSplitSparse (Linux x86_64 + Android arm64/x86_64) |
 | **welvet.qnn** | **1.0.0** | Qualcomm Hexagon HTP (sibling; not on Go/cpp engine boards) |
 
 ## welvet.cpp vs Go
@@ -75,12 +75,18 @@ CUDA / Metal / QNN / cpp pins are unchanged.
 package. Mount supported layers / Stack / Parallel / Grid, run repeated
 `Forward` / `TrainMSE`, then explicitly `SyncToGo()` before saving through Go.
 JSON/`Exec.Backend` placement uses `EnableRouting` (mixed Go/C++/Vulkan handoff).
-Bundled engine pin: **welvet.vulkan 0.79**, mounted-model ABI **1**. Artifact:
-`native/vulkan/linux_x86_64/libwelvet_vulkan.so`. Vulkan-only apps select
-`-tags welvet_vulkan`. Ordinary builds do not load Vulkan or require a GPU.
-Engine board stays **100/100**. CUDA / ROCm / Metal / QNN / cpp pins are unchanged.
+Bundled engine pin started at **welvet.vulkan 0.79**, mounted-model ABI **1**.
+Vulkan-only apps select `-tags welvet_vulkan`. Ordinary builds do not load Vulkan
+or require a GPU. Engine board stays **100/100**. CUDA / ROCm / Metal / QNN / cpp
+pins are unchanged.
+
+## Go v1.6.0 → v1.6.1
+
+**v1.6.1** is a patch: pin bundled **welvet.vulkan 0.79.1** and ship Android
+arm64-v8a + x86_64 `libwelvet_vulkan.so` under `native/vulkan/android_*` beside
+Linux x86_64. Engine board stays **100/100**; no new Go API.
 
 This is the release target prepared in the working tree. Updating these files
 does not create a Git tag, push commits, publish a GitHub release or make
-`go get ...@v1.6.0` available. `release.sh` reads the README version when a
+`go get ...@v1.6.1` available. `release.sh` reads the README version when a
 separate publication is requested.

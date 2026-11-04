@@ -165,13 +165,16 @@ Pure Go AI engine — scorecard **@EARNED@/100** → **@VERSION@**.
 go get github.com/openfluke/welvet@@VERSION@
 ```
 
-### What's new in v1.6.0
+### What's new in v1.6.1
+- Patch: bundled **welvet.vulkan 0.79.1** — Android arm64-v8a + x86_64 `libwelvet_vulkan.so` under `native/vulkan/android_*` (API 28+), beside Linux x86_64
+- Go engine board remains **100/100**; `nativevulkan` API unchanged from v1.6.0
+
+### From v1.6.0
 - **Vulkan GPU integration** through Go's `nativevulkan` package
 - Mount supported Go layers / Stack / Parallel / Grid, run repeated `Forward` / `TrainMSE`, then explicitly `SyncToGo()` before saving through Go
-- Bundled **welvet.vulkan 0.79** (model ABI **1**) for Linux x86_64
-- Explicit JSON/Exec.Backend routing through `EnableRouting` and `runtime/placement`, including mixed Go/C++/Vulkan handoff
-- `-tags welvet_vulkan` builds Vulkan-only applications without the CPU sibling binding; supported Vulkan execution needs a Vulkan loader/runtime + capable device
-- Independent pins: **welvet.cpp 0.67**, **welvet.qnn 1.0.0**, **welvet.metal 0.71**, **welvet.cuda 0.79**, **welvet.rocm 0.79**, **welvet.vulkan 0.79**; Go engine board remains **100/100**
+- Bundled **welvet.vulkan** (model ABI **1**); JSON/Exec.Backend routing through `EnableRouting`
+- `-tags welvet_vulkan` builds Vulkan-only applications without the CPU sibling binding
+- Independent pins: **welvet.cpp 0.67**, **welvet.qnn 1.0.0**, **welvet.metal 0.71**, **welvet.cuda 0.79**, **welvet.rocm 0.79**, **welvet.vulkan 0.79.1**
 
 ### From v1.5.0
 - **AMD ROCm GPU integration** through Go's `nativerocm` package

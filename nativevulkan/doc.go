@@ -1,5 +1,5 @@
-// Vulkan integration supports explicit sessions and optional routed execution
-// on Linux amd64.
+// Vulkan integration supports explicit sessions on Linux amd64 and Android
+// (arm64 / x86_64), plus optional routed execution on Linux amd64.
 // EnableRouting connects JSON/Exec.Backend Vulkan placements to native sessions;
 // close the returned Router after the workload. Routed updates return to Go
 // automatically. Explicit sessions use the following ownership boundary:
