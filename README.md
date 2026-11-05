@@ -33,10 +33,31 @@ NVIDIA, or Apple hardware.
 | **[openfluke/welvet.rocm](https://github.com/openfluke/welvet.rocm)** | Independent AMD ROCm / HIP engine + C ABI (**0.79**, session ABI **1**) |
 | **[openfluke/welvet.vulkan](https://github.com/openfluke/welvet.vulkan)** | Independent Vulkan compute engine + C ABI (**0.79.1**, session ABI **1**) |
 | **[openfluke/welvet.qnn](https://github.com/openfluke/welvet.qnn)** | Qualcomm Hexagon HTP (**1.0.0**) |
-| **[openfluke/w2a](https://github.com/openfluke/w2a)** | Tests / benches (`go_v_qnn` / `go_v_mlx` / `go_v_cuda` / `go_v_rocm` / `go_v_vulkan` matrices) — **never** in engine packages |
+| **[openfluke/w2a](https://github.com/openfluke/w2a)** | **All automated tests** — **never** in engine packages. See [Testing (w2a)](#testing-w2a) |
 | **[openfluke/octo](apps/octo/)** | Model shell — HF download, convert→ENTITY, quantize, run |
 
 `loom/poly` is legacy reference only. Welvet is the rewrite.
+
+### Testing (w2a)
+
+Parity, timed matrices, and native Go↔backend checks live in the sibling **[w2a](https://github.com/openfluke/w2a)** repo (`go run .` menu + `go test ./tests/...`). Snapshot **2026-11-06**:
+
+| Bucket | Count |
+|--------|------:|
+| **w2a suite leaf cases** (`[]Case{ Name }`) | **6163** |
+| — layer / system suites | 474 |
+| — `go_v_*` native parity (cpp/cuda/metal/rocm/vulkan/mlx/qnn) | 5689 |
+| w2a `func Test*` entrypoints (wrappers around leaves) | 470 |
+| Interactive menu suites | 37 |
+| **Welvet family all-up automated** (w2a + engine leftovers + native smokes + rust/sweep) | **6227** |
+
+Native **cpp / cuda / metal / vulkan / rocm** do **not** ship separate gtest matrices — their parity is the w2a `go_v_*` leaf cases. TRAINING_CHECKLIST `[x]` marks in those repos are **sign-offs of the same work**, not extra tests.
+
+Full tables + every leaf name:
+
+- [w2a/README.md](https://github.com/openfluke/w2a/blob/main/README.md) — tallies + how to run  
+- [w2a/docs/WELVET_FAMILY_TEST_TALLY.md](https://github.com/openfluke/w2a/blob/main/docs/WELVET_FAMILY_TEST_TALLY.md) — every sibling repo → all-up  
+- [w2a/docs/TEST_INVENTORY.md](https://github.com/openfluke/w2a/blob/main/docs/TEST_INVENTORY.md) — every leaf + every `Test*`
 
 ### Architecture: Dense is the shared MatVec microkernel
 
@@ -171,35 +192,25 @@ Status rollup — version points live in the [scorecard](#version-scorecard) onl
 
 User owns sync — no silent offload. Caps reject unsupported layer×dtype on mount. Headline NPU time is DLL `graphExecute`; Go→NPU call includes cgo/pack (and graph build for online layers).
 
-Validate live:
+Validate live (sibling `w2a/` — **6163** leaf cases; see [Testing (w2a)](#testing-w2a)):
 ```bash
-cd w2a && go test ./tests/dense -v
-cd w2a && go test ./tests/mha -v
-cd w2a && go test ./tests/swiglu -v
-cd w2a && go test ./tests/rmsnorm -v
-cd w2a && go test ./tests/layernorm -v
-cd w2a && go test ./tests/cnn1 -v
-cd w2a && go test ./tests/cnn2 -v
-cd w2a && go test ./tests/cnn3 -v
-cd w2a && go test ./tests/rnn -v
-cd w2a && go test ./tests/lstm -v
-cd w2a && go test ./tests/embedding -v
-cd w2a && go test ./tests/softmax -v
-cd w2a && go test ./tests/sequential -v
-cd w2a && go test ./tests/residual -v
-cd w2a && go test ./tests/gdn -v
-cd w2a && go test ./tests/mamba -v
-cd w2a && go test ./tests/convt1 -v
-cd w2a && go test ./tests/convt2 -v
-cd w2a && go test ./tests/convt3 -v
-cd w2a && go test ./tests/kmeans -v
-cd w2a && go test ./tests/parallel -v
-cd w2a && go test ./tests/metacognition -v
-cd w2a && go test ./tests/dense -run LinearGradIn -v
-cd w2a && go test ./tests/entity -run Cameral -v
-cd w2a && go test ./tests/parallel -run 'Credit|AllCredit|AllStack|Combine|HemiN|Sparse|ParseTrain|RequiresGrid|WrappedCNN|Inherit|TrainMSE' -v
-# Hexagon HTP (Windows ARM64 + libwelvet_qnn + QAIRT on PATH):
-cd w2a && go test ./tests/go_v_qnn -v -count=1 -run TestGoVQNNMatrix -timeout 180m
+cd w2a
+go run .                              # interactive: 37 suites
+go test ./tests/dense -v              # FormatNone timed matrix + gap census
+go test ./tests/mha ./tests/swiglu ./tests/rmsnorm ./tests/layernorm -v
+go test ./tests/cnn1 ./tests/cnn2 ./tests/cnn3 ./tests/rnn ./tests/lstm -v
+go test ./tests/embedding ./tests/softmax ./tests/sequential ./tests/residual -v
+go test ./tests/gdn ./tests/mamba ./tests/kmeans ./tests/parallel ./tests/metacognition -v
+go test ./tests/convt1 ./tests/convt2 ./tests/convt3 -v
+go test ./tests/entity -run Cameral -v
+# Native Go ↔ backend parity (needs sibling build + tool on PATH / env):
+go test ./tests/go_v_cpp -v -count=1                  # welvet.cpp
+go test ./tests/go_v_vulkan -v -count=1               # welvet.vulkan
+go test ./tests/go_v_cuda -v -count=1                 # welvet.cuda
+go test ./tests/go_v_metal -v -count=1                # welvet.metal (macOS)
+go test ./tests/go_v_rocm -v -count=1                 # welvet.rocm
+go test ./tests/go_v_mlx -v -count=1                  # welvet.mlx (macOS)
+go test ./tests/go_v_qnn -v -count=1 -timeout 180m    # Hexagon HTP (Windows ARM64)
 ```
 
 ---
@@ -735,7 +746,7 @@ Octo is a nested shell repo. Stubs are future. NPU/Metal/QNN are 3rd-party C++ �
 
 | Package | Features | Status |
 |---------|----------|:------:|
-| `w2a/` | Interactive menu: **22 layer suites** + DNA/evolution/tween/step/seed/serialization/helpers; transformer stack has full 34×20×3 timed matrix | 🚧 |
+| `w2a/` (sibling) | **6163** leaf cases · **37** menu suites · **470** `Test*` · `go_v_{cpp,cuda,metal,rocm,vulkan,mlx,qnn}` · family all-up **6227** — [Testing (w2a)](#testing-w2a) | ✅ |
 
 ---
 
@@ -769,37 +780,19 @@ Dispatcher: `core.ExecConfig.Backend` ∈ {`BackendCPUTiled`, `BackendSIMD`, `Ba
 ## Build & validate
 
 ```bash
-# Engine only (no tests in welvet packages)
+# Engine only (checks live in sibling w2a — see Testing (w2a))
 cd welvet && go build ./...
 
-# Validation + timings
-cd w2a
-go run .                 # interactive
-go test ./tests/dense -v # FormatNone timed matrix + gap census
-go test ./tests/mha -v   # causal+RoPE+GQA; same coverage axes as Dense
-go test ./tests/swiglu -v # SiLU-gated FFN; same coverage axes as Dense
-go test ./tests/rmsnorm -v # RMSNorm γ; same coverage axes as Dense
-go test ./tests/layernorm -v # LayerNorm γ+β; same coverage axes as Dense
-go test ./tests/cnn1 -v    # Conv1d im2col→Dense; same coverage axes as Dense
-go test ./tests/cnn2 -v    # Conv2d im2col→Dense; same coverage axes as Dense
-go test ./tests/cnn3 -v    # Conv3d im2col→Dense; same coverage axes as Dense
-go test ./tests/rnn -v     # vanilla tanh RNN; same coverage axes as Dense
-go test ./tests/lstm -v    # LSTM i/f/g/o; same coverage axes as Dense
-go test ./tests/embedding -v # token gather/scatter; same coverage axes as Dense
-go test ./tests/softmax -v   # weightless Softmax; ALU harness (no weight store)
-go test ./tests/sequential -v # Dense→Dense Sequential compose; same coverage axes as Dense
-go test ./tests/residual -v  # Residual y=F(x)+x; same coverage axes as Dense
-go test ./tests/gdn -v       # Gated DeltaNet; Exec + truncated BPTT; full timed matrix
-go test ./tests/mamba -v     # SSM selective scan; full timed matrix
-go test ./tests/convt1 -v    # ConvTranspose1d; full timed matrix
-go test ./tests/convt2 -v    # ConvTranspose2d; full timed matrix
-go test ./tests/convt3 -v    # ConvTranspose3d; full timed matrix
-go test ./tests/kmeans -v    # Soft k-means; full timed matrix
-go test ./tests/parallel -v  # MoE Parallel; full timed matrix
-go test ./tests/metacognition -v # Observed Dense + rules; full timed matrix
+# Validation + timings (sibling checkout)
+cd ../w2a
+go run .                                    # interactive: 37 suites / 6163 leaves
+go test ./tests/dense -v                    # host FormatNone + gap census
+go test ./tests/go_v_cpp -v -count=1        # Go ↔ welvet.cpp
+go test ./tests/go_v_vulkan -v -count=1     # Go ↔ welvet.vulkan
+# … go_v_cuda / go_v_metal / go_v_rocm / go_v_mlx / go_v_qnn as above
 ```
 
-Docs: `w2a/docs/`.
+Tallies + leaf inventory: [w2a/README.md](https://github.com/openfluke/w2a/blob/main/README.md) · [WELVET_FAMILY_TEST_TALLY.md](https://github.com/openfluke/w2a/blob/main/docs/WELVET_FAMILY_TEST_TALLY.md) · [TEST_INVENTORY.md](https://github.com/openfluke/w2a/blob/main/docs/TEST_INVENTORY.md).
 
 ---
 
