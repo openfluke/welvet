@@ -1,0 +1,7 @@
+engine=welvet.metal
+version=0.71
+artifact=libwelvet_metal.a
+platform=ios_arm64
+minimum_ios=15.0
+source_checkout=/Users/openfluke/gs/welvet.metal
+80276916513a2c93a751da0edd5be54470d86f3712e88e0fe1f668f37ad35d95  /Users/openfluke/gs/welvet.metal/../welvet/native/metal/ios_arm64/libwelvet_metal.a

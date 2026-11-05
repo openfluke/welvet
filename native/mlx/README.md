@@ -4,13 +4,16 @@ Shipped `libwelvet_mlx` for Welvet Go `nativemlx` (cgo).
 
 | Path | Platform |
 |------|----------|
-| `darwin_arm64/` | Apple silicon macOS |
+| `darwin_arm64/` | Apple silicon macOS (shipped dylib) |
+| `ios_arm64/` | iPhoneOS — **not shipped** (MLX metallib ~140MB; build locally) |
 | `include/welvet_mlx_c.h` | C ABI |
 
 Install from the sibling engine checkout:
 
 ```bash
-../welvet.mlx/scripts/macos_install_go.sh
+../welvet.mlx/scripts/macos_install_go.sh   # → native/mlx/darwin_arm64/*.dylib
+# iOS: too big for the Go module — see ios_arm64/README.md
+#   xcodebuild -downloadComponent MetalToolchain && ../welvet.mlx/scripts/ios_install_go.sh
 ```
 
 ## User-owned weight sync

@@ -32,7 +32,8 @@ Rebuild/install from the sibling Metal checkout:
 
 ```sh
 cd ../welvet.metal
-./scripts/macos_install_go.sh
+./scripts/macos_install_go.sh          # → native/metal/darwin_arm64/*.dylib
+./scripts/ios_install_go.sh            # → native/metal/ios_arm64/*.a (iPhoneOS arm64)
 ./scripts/macos_build_w2a.sh --go-integration
 ```
 
