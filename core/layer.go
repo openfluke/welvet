@@ -134,6 +134,7 @@ const (
 	BackendRocm      Backend = 7 // independent welvet.rocm session dispatcher
 	BackendVulkan    Backend = 8 // independent welvet.vulkan session dispatcher
 	BackendQNN       Backend = 4 // welvet.qnn Hexagon NPU via C ABI (nativeqnn)
+	BackendMLX       Backend = 9 // welvet.mlx Apple MLX GPU via C ABI (nativemlx)
 )
 
 func (b Backend) String() string {
@@ -156,6 +157,8 @@ func (b Backend) String() string {
 		return "vulkan"
 	case BackendQNN:
 		return "qnn"
+	case BackendMLX:
+		return "mlx"
 	default:
 		return fmt.Sprintf("Backend(%d)", int(b))
 	}

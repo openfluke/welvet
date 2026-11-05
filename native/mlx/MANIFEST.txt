@@ -1,0 +1,7 @@
+engine=welvet.mlx
+version=1.0.0
+model_abi=1
+platform=darwin_arm64
+minimum_macos=13.0
+source_checkout=/Users/openfluke/gs/welvet.mlx
+7adb5fb652387c5efb560b4768d8c0cc492799f8b9266d8dd9623504be910ae9  /Users/openfluke/gs/welvet/native/mlx/darwin_arm64/libwelvet_mlx.dylib

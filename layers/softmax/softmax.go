@@ -6,6 +6,7 @@ import (
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/nativecpp"
+	"github.com/openfluke/welvet/nativemlx"
 	"github.com/openfluke/welvet/nativeqnn"
 	"github.com/openfluke/welvet/quant"
 )
@@ -16,6 +17,7 @@ type Layer struct {
 	Cfg    Config
 	Exec   core.ExecConfig
 	qnnMir *nativeqnn.WeightMirror
+	mlxMir *nativemlx.WeightMirror
 }
 
 // New creates Softmax with CPU tiled defaults.
@@ -93,6 +95,11 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 			return ForwardQNN(l, input)
 		}
 		return nil, nil, fmt.Errorf("softmax: BackendQNN but libwelvet_qnn unavailable")
+	case core.BackendMLX:
+		if nativemlx.Available() {
+			return ForwardMLX(l, input)
+		}
+		return nil, nil, fmt.Errorf("softmax: BackendMLX but libwelvet_mlx unavailable")
 	default:
 		return ForwardCPUTiled(l, input)
 	}
@@ -128,6 +135,8 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 		return BackwardCPUTiled(l, gradOut, input, pre)
 	case core.BackendQNN:
 		return nil, nil, fmt.Errorf("softmax: BackendQNN is forward-only")
+	case core.BackendMLX:
+		return nil, nil, fmt.Errorf("softmax: BackendMLX is forward-only")
 	default:
 		return BackwardCPUTiled(l, gradOut, input, pre)
 	}

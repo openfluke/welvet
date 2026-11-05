@@ -5,6 +5,7 @@ import (
 
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/nativecpp"
+	"github.com/openfluke/welvet/nativemlx"
 	"github.com/openfluke/welvet/nativeqnn"
 	"github.com/openfluke/welvet/quant"
 	"github.com/openfluke/welvet/weights"
@@ -25,6 +26,11 @@ type Layer struct {
 	qnnPrepB   int
 	qnnPrepIn  int
 	qnnPrepOut int
+	mlxMir     *nativemlx.WeightMirror // SyncToMLX / SyncFromMLX
+	mlxPrepOK  bool                    // MLX graph prepared for current Sync+shape
+	mlxPrepB   int
+	mlxPrepIn  int
+	mlxPrepOut int
 }
 
 // New creates a Dense layer with zero weights in the given dtype (FormatNone).
@@ -137,6 +143,11 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 			return ForwardQNN(l, input)
 		}
 		return nil, nil, fmt.Errorf("dense: BackendQNN but libwelvet_qnn unavailable")
+	case core.BackendMLX:
+		if nativemlx.Available() {
+			return ForwardMLX(l, input)
+		}
+		return nil, nil, fmt.Errorf("dense: BackendMLX but libwelvet_mlx unavailable")
 	default:
 		return ForwardCPUTiled(l, input)
 	}
@@ -171,6 +182,8 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 		return BackwardCPUTiled(l, gradOut, input, pre)
 	case core.BackendQNN:
 		return nil, nil, fmt.Errorf("dense: BackendQNN is forward-only (no backward on HTP)")
+	case core.BackendMLX:
+		return nil, nil, fmt.Errorf("dense: BackendMLX is forward-only (no backward on MLX GPU)")
 	default:
 		return BackwardCPUTiled(l, gradOut, input, pre)
 	}
