@@ -35,6 +35,9 @@ apps/planetbridging
 # Ship the independent Apple Metal backend with the Go module
 !native/metal/**/*.dylib
 !native/metal/**/*.a
+# Ship the independent Apple MLX backend with the Go module
+!native/mlx/**/*.dylib
+!native/mlx/**/*.a
 # Ship the independent NVIDIA CUDA backend with the Go module
 !native/cuda/**/*.so
 !native/cuda/**/*.dll
