@@ -1,10 +1,10 @@
 # Welvet installation
 
 How to install Go Welvet and optionally enable native acceleration. The current
-release target is **v1.6.1** (Vulkan **0.79.1** through `nativevulkan`, including
-Android arm64/x86_64 artifacts; ROCm **0.79** through `nativerocm`; CUDA **0.79**
-through `nativecuda`; Metal remains **0.71**). Publication/tagging is separate
-from this working-tree update.
+release target is **v1.7.0** (Apple MLX **1.0.0** through `nativemlx`; Vulkan
+**0.79.1** through `nativevulkan`, including Android arm64/x86_64 artifacts; ROCm
+**0.79** through `nativerocm`; CUDA **0.79** through `nativecuda`; Metal remains
+**0.71**). Publication/tagging is separate from this working-tree update.
 
 | Platform | Native artifact | Go `nativecpp` cgo | Notes |
 | --- | --- | --- | --- |
@@ -19,17 +19,34 @@ from this working-tree update.
 
 **Defaults:** pure Go `BackendCPUTiled` always works without a C compiler. Native acceleration needs cgo + the platform lib (or packaging that lib next to your binary).
 
-Once v1.6.1 is published, pin the module (any OS):
+Once v1.7.0 is published, pin the module (any OS):
 
 ```bash
-go get github.com/openfluke/welvet@v1.6.1
+go get github.com/openfluke/welvet@v1.7.0
 ```
 
 The existing platform walkthroughs below retain their validated **v1.2.0**
 pins and test history. When using another version, update both the module pin
 and any module-cache library paths together. Those historical walkthroughs are
-not new v1.6.1 platform sign-offs. Ordinary use has no Apple, NVIDIA, AMD, or
-Vulkan requirement until you explicitly mount that backend.
+not new v1.7.0 platform sign-offs. Ordinary use has no Apple MLX, Metal,
+NVIDIA, AMD, or Vulkan requirement until you explicitly select that backend.
+
+### Optional Apple MLX in v1.7.0
+
+Packaged library (engine **1.0.0**, forward-only):
+
+| Artifact | Platform |
+|----------|----------|
+| `native/mlx/darwin_arm64/libwelvet_mlx.dylib` | macOS Apple silicon |
+
+Use `layer.SyncToMLX()`, set `Exec.Backend = core.BackendMLX` (or
+`core.PreferMLX()`), run forward, then optional `SyncFromMLX()`. Caps reject
+unsupported layer×dtype. Requires Homebrew **mlx** / `libmlx` at runtime. See
+[the MLX integration guide](native/mlx/README.md). Rebuild/install:
+
+```sh
+cd ../welvet.mlx && ./scripts/macos_install_go.sh
+```
 
 ### Optional Vulkan in v1.6.1
 

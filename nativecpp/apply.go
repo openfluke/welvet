@@ -26,6 +26,8 @@ func FromCoreBackend(b core.Backend) string {
 		return BackendVulkan
 	case core.BackendQNN:
 		return "qnn"
+	case core.BackendMLX:
+		return "mlx"
 	case core.BackendSIMD:
 		return "simd"
 	case core.BackendWebGPU:

@@ -7,6 +7,7 @@ import (
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/dense"
 	"github.com/openfluke/welvet/nativecpp"
+	"github.com/openfluke/welvet/nativemlx"
 	"github.com/openfluke/welvet/nativeqnn"
 	"github.com/openfluke/welvet/quant"
 )
@@ -25,6 +26,8 @@ type Layer struct {
 	nativeMir *nativecpp.Mirror     // pending packed child W until SyncWeightsFromNative
 	qnnSeq    *nativeqnn.Sequential // fused HTP stack after SyncToQNN
 	qnnSynced bool
+	mlxSeq    *nativemlx.Sequential // MLX Sequential after SyncToMLX
+	mlxSynced bool
 }
 
 // New creates Sequential with Depth square Dense children (FormatNone Float32).
@@ -167,6 +170,12 @@ func Forward[T core.Numeric](l *Layer, input *core.Tensor[T]) (pre, post *core.T
 		} else {
 			err = fmt.Errorf("sequential: BackendQNN but libwelvet_qnn unavailable")
 		}
+	case core.BackendMLX:
+		if nativemlx.Available() {
+			pre, post, err = ForwardMLX(l, input)
+		} else {
+			err = fmt.Errorf("sequential: BackendMLX but libwelvet_mlx unavailable")
+		}
 	default:
 		pre, post, err = ForwardCPUTiled(l, input)
 	}
@@ -212,6 +221,8 @@ func Backward[T core.Numeric](l *Layer, gradOut, input, pre *core.Tensor[T]) (gr
 		}
 	case core.BackendQNN:
 		err = fmt.Errorf("sequential: BackendQNN is forward-only")
+	case core.BackendMLX:
+		err = fmt.Errorf("sequential: BackendMLX is forward-only")
 	default:
 		gradIn, gradW, err = BackwardCPUTiled(l, gradOut, input, pre)
 	}

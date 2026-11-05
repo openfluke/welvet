@@ -6,3 +6,4 @@ platform=darwin_arm64
 minimum_macos=13.0
 source_checkout=/Users/openfluke/gs/welvet.metal
 659c854aecdbfa1154321c900edd5f0ae8ba3865cd4183ac974e5dca95e390ed  /Users/openfluke/gs/welvet.metal/../welvet/native/metal/darwin_arm64/libwelvet_metal.dylib
+ios_arm64=present
