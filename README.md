@@ -1,6 +1,6 @@
 # Welvet
 
-**Welvet** is the AI engine: layers, numerical types, quants / k-quants, and backends (CPU tiled · Plan 9 SIMD · WebGPU).
+**Welvet** is the Go AI engine: layers, numerical types, quants / k-quants, and backends (CPU tiled · Plan 9 SIMD · WebGPU).
 
 | | |
 |--|--|
