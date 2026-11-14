@@ -5,6 +5,7 @@ Shipped `libwelvet_qnn` for Welvet Go `nativeqnn` (cgo).
 | Path | Platform |
 |------|----------|
 | `windows_arm64/` | Snapdragon X / Windows ARM64 |
+| `android_arm64/` | Android arm64-v8a (API 28+) |
 | `include/welvet_qnn_c.h` | C ABI |
 
 ## User-owned weight sync
@@ -23,4 +24,10 @@ Unsupported mounts (`RequireLayer` / `LayerSupported`) **reject** — see `nativ
 
 Heterogeneous Sequential: leave parent on `BackendCPUTiled`, SyncToQNN + `BackendQNN` on individual children (Dense / RMSNorm / LayerNorm / Softmax). Or SyncToQNN on the Sequential and set parent `BackendQNN` for a fused stack.
 
-Runtime: put `windows_arm64` on `PATH` (or next to the binary). Needs QAIRT + Memory Integrity **OFF** for HTP create.
+Runtime: put `windows_arm64` on `PATH` (or next to the binary), or package `android_arm64/libwelvet_qnn.so` + QAIRT HTP/skels into the APK. Needs QAIRT + (Windows) Memory Integrity **OFF** for HTP create.
+
+Rebuild Android artifact from the sibling repo:
+
+```bash
+cd ../welvet.qnn && ./scripts/android_install_go.sh
+```

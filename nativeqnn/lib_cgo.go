@@ -1,10 +1,11 @@
-//go:build cgo && windows && arm64
+//go:build cgo && ((windows && arm64) || (android && arm64))
 
 package nativeqnn
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../native/qnn/include
-#cgo LDFLAGS: -L${SRCDIR}/../native/qnn/windows_arm64 -lwelvet_qnn
+#cgo windows,arm64 LDFLAGS: -L${SRCDIR}/../native/qnn/windows_arm64 -lwelvet_qnn
+#cgo android,arm64 LDFLAGS: -L${SRCDIR}/../native/qnn/android_arm64 -lwelvet_qnn -llog
 #include "welvet_qnn_c.h"
 #include <stdlib.h>
 */

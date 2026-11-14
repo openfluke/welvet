@@ -11,5 +11,6 @@
 //
 // Caps: LayerSupported(name, dtype) / SupportedLayers() — Offload rejects unsupported mounts.
 //
-// Platform: windows/arm64 + cgo + shipped native/qnn/windows_arm64. Other builds stub.
+// Platform: (windows/arm64 or android/arm64) + cgo + shipped native/qnn/{windows_arm64,android_arm64}.
+// Other builds stub.
 package nativeqnn

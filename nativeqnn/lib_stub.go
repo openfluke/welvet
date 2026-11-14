@@ -1,10 +1,10 @@
-//go:build !cgo || !windows || !arm64
+//go:build !cgo || !((windows && arm64) || (android && arm64))
 
 package nativeqnn
 
 import "fmt"
 
-var errNoQNN = fmt.Errorf("nativeqnn: libwelvet_qnn not available (need cgo + windows/arm64 + shipped DLL)")
+var errNoQNN = fmt.Errorf("nativeqnn: libwelvet_qnn not available (need cgo + windows/arm64 or android/arm64 + shipped lib)")
 
 func Available() bool { return false }
 

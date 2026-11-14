@@ -4,24 +4,25 @@
 
 | | |
 |--|--|
-| **Version** | **v1.7.0** |
+| **Version** | **v1.7.1** |
 | **Release state** | Prepared in this checkout; publishing/tagging is separate |
 | **Scorecard** | **100 / 100** pts (engine board — see [Version scorecard](#version-scorecard)) |
 | **NativeCPU** | welvet.cpp **0.67** (`nativecpp`) |
-| **Hexagon NPU** | welvet.qnn **1.0.0** (`nativeqnn` · Windows ARM64) |
+| **Hexagon NPU** | welvet.qnn **1.1.0** (`nativeqnn` · Windows ARM64 + Android arm64) |
 | **Apple Metal GPU** | welvet.metal **0.71**, model ABI **1** (`nativemetal` · macOS Apple silicon) |
 | **Apple MLX GPU** | welvet.mlx **1.0.0** (`nativemlx` · macOS Apple silicon; forward-only) |
 | **NVIDIA CUDA GPU** | welvet.cuda **0.79**, model ABI **1** (`nativecuda` · Linux/Windows amd64) |
 | **AMD ROCm GPU** | welvet.rocm **0.79**, model ABI **1** (`nativerocm` · Linux x86_64; **GPU compute untested** on non-HSA hosts) |
 | **Vulkan GPU** | welvet.vulkan **0.79.1**, model ABI **1** (`nativevulkan` · Linux x86_64 + Android arm64/x86_64) |
 
-Engine board remains **100/100**. **v1.7.0** is a minor: optional **Apple MLX**
-(`nativemlx` / `BackendMLX` / `PreferMLX`, user-owned `SyncToMLX` → forward →
-`SyncFromMLX`; pin **welvet.mlx 1.0.0**). **v1.6.1** patched Vulkan Android
-artifacts; **v1.6.0** introduced Vulkan; **v1.5.0** ROCm **0.79**; **v1.4.0** CUDA
-**0.79**; **v1.3.2** Metal **0.71**; **v1.2.0** Qualcomm HTP. Native backends keep
-independent sibling versions. Ordinary builds do not require MLX, Vulkan, AMD,
-NVIDIA, or Apple hardware.
+Engine board remains **100/100**. **v1.7.1** patches QNN Android arm64
+artifacts (`native/qnn/android_arm64`, pin **welvet.qnn 1.1.0**). **v1.7.0** is a
+minor: optional **Apple MLX** (`nativemlx` / `BackendMLX` / `PreferMLX`,
+user-owned `SyncToMLX` → forward → `SyncFromMLX`; pin **welvet.mlx 1.0.0**).
+**v1.6.1** patched Vulkan Android artifacts; **v1.6.0** introduced Vulkan;
+**v1.5.0** ROCm **0.79**; **v1.4.0** CUDA **0.79**; **v1.3.2** Metal **0.71**;
+**v1.2.0** Qualcomm HTP. Native backends keep independent sibling versions.
+Ordinary builds do not require MLX, Vulkan, AMD, NVIDIA, or Apple hardware.
 
 | Repo | Role |
 |------|------|
@@ -32,7 +33,7 @@ NVIDIA, or Apple hardware.
 | **[openfluke/welvet.cuda](https://github.com/openfluke/welvet.cuda)** | Independent NVIDIA CUDA engine + C ABI (**0.79**, session ABI **1**) |
 | **[openfluke/welvet.rocm](https://github.com/openfluke/welvet.rocm)** | Independent AMD ROCm / HIP engine + C ABI (**0.79**, session ABI **1**) |
 | **[openfluke/welvet.vulkan](https://github.com/openfluke/welvet.vulkan)** | Independent Vulkan compute engine + C ABI (**0.79.1**, session ABI **1**) |
-| **[openfluke/welvet.qnn](https://github.com/openfluke/welvet.qnn)** | Qualcomm Hexagon HTP (**1.0.0**) |
+| **[openfluke/welvet.qnn](https://github.com/openfluke/welvet.qnn)** | Qualcomm Hexagon HTP (**1.1.0** · Windows ARM64 + Android arm64) |
 | **[openfluke/w2a](https://github.com/openfluke/w2a)** | **All automated tests** — **never** in engine packages. See [Testing (w2a)](#testing-w2a) |
 | **[openfluke/octo](apps/octo/)** | Model shell — HF download, convert→ENTITY, quantize, run |
 
@@ -99,15 +100,16 @@ Remaining work: [`docs/loom_2_welvet_todolist.md`](../docs/loom_2_welvet_todolis
 | `w2a/`, `tools/` | harness (not engine) |
 
 
-**Status: v1.7.0 release target.** Go's engine board remains **100/100**.
+**Status: v1.7.1 release target.** Go's engine board remains **100/100**.
 `nativemlx` loads bundled **welvet.mlx 1.0.0** (`native/mlx/darwin_arm64`),
 exposes `BackendMLX` / `PreferMLX`, and runs forward-only Metal GPU via MLX after
 user-owned `SyncToMLX` (optional `SyncFromMLX`). Caps reject unsupported
 layer×dtype. [Usage](native/mlx/README.md). Vulkan remains at **0.79.1**
 ([usage](native/vulkan/README.md)); ROCm **0.79**; CUDA **0.79**; Metal **0.71**.
+QNN is **1.1.0** (Windows ARM64 + Android arm64; [usage](native/qnn/README.md)).
 
 Existing builds keep their platform/backend behavior. Ordinary installs do not
-require MLX or Apple silicon. Pins: welvet.cpp **0.67**, welvet.qnn **1.0.0**,
+require MLX or Apple silicon. Pins: welvet.cpp **0.67**, welvet.qnn **1.1.0**,
 welvet.metal **0.71**, welvet.mlx **1.0.0**, welvet.cuda **0.79**, welvet.rocm
 **0.79**, welvet.vulkan **0.79.1**. No tag or GitHub release is published by this
 version-file update.
@@ -122,7 +124,7 @@ version-file update.
 
 ## Version scorecard
 
-**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. After v1.0, **patch** = bugfix / platform artifact; **minor** = real capability (NativeCPU train, WebGPU, **QNN**, **Metal**, **CUDA**, **ROCm**, **Vulkan**, **MLX**). Weights sum to **100**. The current release target is **v1.7.0** (**MLX** **1.0.0** + `nativemlx`; **v1.6.1** = Vulkan Android artifacts; **v1.6.0** = Vulkan binding; **v1.5.0** = ROCm **0.79**; **v1.4.0** = CUDA **0.79**; **v1.3.2** = Metal **0.71** pin).
+**Formula:** `version = 0.{round(earned)}` until 100 → **v1.0**. After v1.0, **patch** = bugfix / platform artifact; **minor** = real capability (NativeCPU train, WebGPU, **QNN**, **Metal**, **CUDA**, **ROCm**, **Vulkan**, **MLX**). Weights sum to **100**. The current release target is **v1.7.1** (**welvet.qnn 1.1.0** Android arm64 artifacts; **v1.7.0** = **MLX** **1.0.0** + `nativemlx`; **v1.6.1** = Vulkan Android artifacts; **v1.6.0** = Vulkan binding; **v1.5.0** = ROCm **0.79**; **v1.4.0** = CUDA **0.79**; **v1.3.2** = Metal **0.71** pin).
 
 | # | Section | Wt | How scored today | Earned |
 |--:|---------|---:|------------------|-------:|
@@ -171,13 +173,13 @@ Status rollup — version points live in the [scorecard](#version-scorecard) onl
 | `fusedgpu/` decoder fuse (WebGPU + optional Android Vulkan) | ✅ |
 | `apps/octo/` interactive model shell (download / convert / chat) | 🚧 off-board |
 | `stub/` seed · serialization · hardware · memory · fountain · donate | 🚧 off-board |
-| `nativeqnn` + welvet.qnn **1.0.0** — Hexagon HTP forward (Windows ARM64) | ✅ off-board (vendor repo) |
+| `nativeqnn` + welvet.qnn **1.1.0** — Hexagon HTP forward (Windows ARM64 + Android arm64) | ✅ off-board (vendor repo) |
 | `nativecpp` + welvet.cpp **0.67** — NativeCPU C ABI | ✅ |
 | `nativemetal` + welvet.metal **0.71** — explicit model sessions and weight return | ✅ off-board; supported baseline contracts |
 | `nativecuda` + welvet.cuda **0.79** — explicit model sessions and weight return | ✅ off-board; supported baseline contracts |
 | Full v1 matrix (every cell peak-fused, no host ALU) | 🚧 (peak fused ✅; nested Sequential/Residual still open) |
 
-### What Go Welvet can do now (v1.7.0)
+### What Go Welvet can do now (v1.7.1)
 
 | Path | Backend | What |
 |------|---------|------|
@@ -210,7 +212,7 @@ go test ./tests/go_v_cuda -v -count=1                 # welvet.cuda
 go test ./tests/go_v_metal -v -count=1                # welvet.metal (macOS)
 go test ./tests/go_v_rocm -v -count=1                 # welvet.rocm
 go test ./tests/go_v_mlx -v -count=1                  # welvet.mlx (macOS)
-go test ./tests/go_v_qnn -v -count=1 -timeout 180m    # Hexagon HTP (Windows ARM64)
+go test ./tests/go_v_qnn -v -count=1 -timeout 180m    # Hexagon HTP (Windows / Android ARM64)
 ```
 
 ---
@@ -221,7 +223,7 @@ Accel SDKs stay in **separate repos** (no cross-vendor contamination). Go only g
 
 | Repo | Compute | OS roadmap | First tag |
 |------|---------|------------|-----------|
-| **welvet.qnn** | Qualcomm Hexagon NPU | Windows ARM64 → Linux ARM64 | **1.0.0** |
+| **welvet.qnn** | Qualcomm Hexagon NPU | Windows ARM64 · Android arm64 → Linux ARM64 | **1.1.0** |
 | **welvet.cuda** | NVIDIA GPU + model-session C ABI | Linux x86_64 + Windows amd64 | **0.79**, ABI **1** |
 | **welvet.rocm** | AMD GPU (HIP) + model-session C ABI | Linux x86_64 | **0.79**, ABI **1** |
 | **welvet.vulkan** | Vulkan GPU + model-session C ABI | Linux x86_64 · Android arm64/x86_64 | **0.79.1**, ABI **1** |
@@ -230,7 +232,7 @@ Accel SDKs stay in **separate repos** (no cross-vendor contamination). Go only g
 | **welvet.cpp** | CPU + C ABI (Go-parity board) | Linux / Windows / macOS / Android / iOS | **0.67** |
 | **welvet.metal** | Apple Metal GPU + model-session C ABI | macOS Apple silicon | **0.71**, ABI **1** |
 | **welvet.mlx** | Apple MLX forward-only GPU + C ABI | macOS Apple silicon | **1.0.0** |
-| **welvet** (Go) | Engine + bindings | all | **v1.7.0** |
+| **welvet** (Go) | Engine + bindings | all | **v1.7.1** |
 
 Policy: Go **minor** bumps when a new optional native binding ships; **patch** refreshes artifacts/pins. Backend versions stay independent: welvet.cuda / welvet.rocm / welvet.vulkan tag from their own 100-pt boards (**0.79**); welvet.metal is **0.71**; welvet.mlx is **1.0.0**; welvet.qnn uses its documented vendor release gates.
 
@@ -739,7 +741,7 @@ Octo is a nested shell repo. Stubs are future. NPU/Metal/QNN are 3rd-party C++ �
 |---------|----------|:------:|
 | `apps/octo/` | Interactive model shell (download / convert / chat) | 🚧 |
 | `stub/seed/` · `serialization/` · `hardware/` · `memory/` · `fountain/` · `donate/` | Future engine surfaces | 🚧 |
-| `nativeqnn` / future `nativecuda`… | Vendor accel via sibling repos (qnn **1.0.0** shipped) | ✅ / ⬜ |
+| `nativeqnn` / future `nativecuda`… | Vendor accel via sibling repos (qnn **1.1.0** shipped) | ✅ / ⬜ |
 | `fusedgpu/` | Q4_0 Engine + BinaryG128 HybridEngine; Android Vulkan optional (`WELVET_NATIVE_VK`) | ✅ (in §10) |
 
 ### Harness (not engine — does not count toward v1 pts)

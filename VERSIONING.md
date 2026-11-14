@@ -2,14 +2,14 @@
 
 | Component | Tag now | Role |
 |-----------|---------|------|
-| **welvet** (Go) | **v1.7.0** | Engine + `nativecpp` / `nativeqnn` / `nativemetal` / `nativecuda` / `nativerocm` / `nativevulkan` / `nativemlx` bindings · scorecard **100/100** |
+| **welvet** (Go) | **v1.7.1** | Engine + `nativecpp` / `nativeqnn` / `nativemetal` / `nativecuda` / `nativerocm` / `nativevulkan` / `nativemlx` bindings · scorecard **100/100** |
 | **welvet.cpp** | **0.67** | CPU + C ABI — **same 100-pt board as Go**; `0.{round(earned)}` until 1.0 |
 | **welvet.metal** | **0.71**, ABI **1** | Independent Apple Metal backend; `@autoreleasepool` OOM drain (+ 0.70 Mesh* / 0.69 View) |
 | **welvet.mlx** | **1.0.0** | Independent Apple MLX forward-only GPU backend (libmlx / Metal; no CPU fallback) |
 | **welvet.cuda** | **0.79**, ABI **1** | Independent NVIDIA CUDA backend; train modes through StepTweenSplitSparse |
 | **welvet.rocm** | **0.79**, ABI **1** | Independent AMD ROCm / HIP backend; same train ladder as cuda (**GPU compute untested** on Polaris/Picasso hosts) |
 | **welvet.vulkan** | **0.79.1**, ABI **1** | Independent Vulkan compute backend; train ladder through StepTweenSplitSparse (Linux x86_64 + Android arm64/x86_64) |
-| **welvet.qnn** | **1.0.0** | Qualcomm Hexagon HTP (sibling; not on Go/cpp engine boards) |
+| **welvet.qnn** | **1.1.0** | Qualcomm Hexagon HTP (Windows ARM64 + Android arm64; sibling; not on Go/cpp engine boards) |
 
 ## welvet.cpp vs Go
 
@@ -96,7 +96,14 @@ siblings). Bundled engine pin: **welvet.mlx 1.0.0** (`native/mlx/darwin_arm64`).
 Ordinary builds do not require MLX or Apple silicon. Engine board stays
 **100/100**. Vulkan / CUDA / ROCm / Metal / QNN / cpp pins are unchanged.
 
+## Go v1.7.0 → v1.7.1
+
+**v1.7.1** is a patch: pin **welvet.qnn 1.1.0** and ship Android arm64-v8a
+`libwelvet_qnn.so` under `native/qnn/android_arm64/` beside Windows ARM64.
+`nativeqnn` builds on `cgo && (windows/arm64 || android/arm64)`. Engine board
+stays **100/100**; no new Go API beyond the android build tag.
+
 This is the release target prepared in the working tree. Updating these files
 does not create a Git tag, push commits, publish a GitHub release or make
-`go get ...@v1.7.0` available. `release.sh` reads the README version when a
+`go get ...@v1.7.1` available. `release.sh` reads the README version when a
 separate publication is requested.

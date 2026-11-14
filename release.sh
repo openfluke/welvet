@@ -165,12 +165,16 @@ Pure Go AI engine — scorecard **@EARNED@/100** → **@VERSION@**.
 go get github.com/openfluke/welvet@@VERSION@
 ```
 
-### What's new in v1.7.0
+### What's new in v1.7.1
+- Patch: bundled **welvet.qnn 1.1.0** — Android arm64-v8a `libwelvet_qnn.so` under `native/qnn/android_arm64/` (API 28+), beside Windows ARM64
+- Go `nativeqnn` now builds on `cgo && (windows/arm64 || android/arm64)`
+- Go engine board remains **100/100**
+- Independent pins: **welvet.cpp 0.67**, **welvet.qnn 1.1.0**, **welvet.metal 0.71**, **welvet.mlx 1.0.0**, **welvet.cuda 0.79**, **welvet.rocm 0.79**, **welvet.vulkan 0.79.1**
+
+### From v1.7.0
 - **Apple MLX GPU integration** through Go's `nativemlx` package (`BackendMLX` / `PreferMLX`)
 - User-owned `SyncToMLX` / `SyncFromMLX`; forward-only Dense prepare/exec + Softmax / RMSNorm / LayerNorm / Sequential (and capped siblings)
 - Bundled **welvet.mlx 1.0.0** (`native/mlx/darwin_arm64/libwelvet_mlx.dylib`); runtime needs Homebrew **mlx** / Metal GPU (no CPU fallback)
-- Go engine board remains **100/100**
-- Independent pins: **welvet.cpp 0.67**, **welvet.qnn 1.0.0**, **welvet.metal 0.71**, **welvet.mlx 1.0.0**, **welvet.cuda 0.79**, **welvet.rocm 0.79**, **welvet.vulkan 0.79.1**
 
 ### From v1.6.1
 - Patch: bundled **welvet.vulkan 0.79.1** — Android arm64-v8a + x86_64 `libwelvet_vulkan.so` under `native/vulkan/android_*` (API 28+), beside Linux x86_64

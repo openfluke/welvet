@@ -1,6 +1,6 @@
 # nativeqnn
 
-Go FFI for **welvet.qnn** (`libwelvet_qnn`). Build tag: `cgo && windows && arm64`.
+Go FFI for **welvet.qnn** (`libwelvet_qnn`). Build tags: `cgo && (windows/arm64 || android/arm64)`.
 
 ```go
 import (
@@ -19,8 +19,13 @@ _ = nativeqnn.SupportedLayers()
 
 | API | Role |
 |-----|------|
-| `Available` / `Version` / `HasSDK` | DLL / build |
+| `Available` / `Version` / `HasSDK` | DLL/so / build |
 | `LayerSupported` / `SupportedLayers` | HTP caps |
 | `OpenHTP` / `DefaultSession` | NPU session |
 | `WeightMirror` / layer `SyncToQNN` | user weight push |
 | `Sequential` | fused stack push/forward |
+
+| Artifact | Path |
+|----------|------|
+| Windows ARM64 | `native/qnn/windows_arm64/libwelvet_qnn.dll` |
+| Android arm64 | `native/qnn/android_arm64/libwelvet_qnn.so` |
