@@ -1,11 +1,12 @@
 # Welvet installation
 
 How to install Go Welvet and optionally enable native acceleration. The current
-release target is **v1.7.1** (welvet.qnn **1.1.0** Windows ARM64 + Android arm64;
-Apple MLX **1.0.0** through `nativemlx`; Vulkan **0.79.1** through `nativevulkan`,
-including Android arm64/x86_64 artifacts; ROCm **0.79** through `nativerocm`;
-CUDA **0.79** through `nativecuda`; Metal remains **0.71**). Publication/tagging
-is separate from this working-tree update.
+release target is **v1.7.2** (QAIRT-built Android QNN HTP artifact; welvet.qnn
+**1.1.0** Windows ARM64 + Android arm64; Apple MLX **1.0.0** through `nativemlx`;
+Vulkan **0.79.1** through `nativevulkan`, including Android arm64/x86_64
+artifacts; ROCm **0.79** through `nativerocm`; CUDA **0.79** through `nativecuda`;
+Metal remains **0.71**). Publication/tagging is separate from this working-tree
+update.
 
 | Platform | Native artifact | Go `nativecpp` cgo | Notes |
 | --- | --- | --- | --- |
@@ -20,16 +21,16 @@ is separate from this working-tree update.
 
 **Defaults:** pure Go `BackendCPUTiled` always works without a C compiler. Native acceleration needs cgo + the platform lib (or packaging that lib next to your binary).
 
-Once v1.7.1 is published, pin the module (any OS):
+Once v1.7.2 is published, pin the module (any OS):
 
 ```bash
-go get github.com/openfluke/welvet@v1.7.1
+go get github.com/openfluke/welvet@v1.7.2
 ```
 
 The existing platform walkthroughs below retain their validated **v1.2.0**
 pins and test history. When using another version, update both the module pin
 and any module-cache library paths together. Those historical walkthroughs are
-not new v1.7.1 platform sign-offs. Ordinary use has no Apple MLX, Metal,
+not new v1.7.2 platform sign-offs. Ordinary use has no Apple MLX, Metal,
 NVIDIA, AMD, Vulkan, or QNN requirement until you explicitly select that backend.
 
 ### Optional Apple MLX in v1.7.0+

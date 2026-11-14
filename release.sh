@@ -165,11 +165,14 @@ Pure Go AI engine — scorecard **@EARNED@/100** → **@VERSION@**.
 go get github.com/openfluke/welvet@@VERSION@
 ```
 
-### What's new in v1.7.1
-- Patch: bundled **welvet.qnn 1.1.0** — Android arm64-v8a `libwelvet_qnn.so` under `native/qnn/android_arm64/` (API 28+), beside Windows ARM64
-- Go `nativeqnn` now builds on `cgo && (windows/arm64 || android/arm64)`
+### What's new in v1.7.2
+- Patch: refresh `native/qnn/android_arm64/libwelvet_qnn.so` to a **QAIRT-built** HTP binary (pin still **welvet.qnn 1.1.0**)
 - Go engine board remains **100/100**
 - Independent pins: **welvet.cpp 0.67**, **welvet.qnn 1.1.0**, **welvet.metal 0.71**, **welvet.mlx 1.0.0**, **welvet.cuda 0.79**, **welvet.rocm 0.79**, **welvet.vulkan 0.79.1**
+
+### From v1.7.1
+- Patch: bundled **welvet.qnn 1.1.0** — Android arm64-v8a `libwelvet_qnn.so` under `native/qnn/android_arm64/` (API 28+), beside Windows ARM64
+- Go `nativeqnn` builds on `cgo && (windows/arm64 || android/arm64)`
 
 ### From v1.7.0
 - **Apple MLX GPU integration** through Go's `nativemlx` package (`BackendMLX` / `PreferMLX`)

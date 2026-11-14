@@ -2,7 +2,7 @@
 
 | Component | Tag now | Role |
 |-----------|---------|------|
-| **welvet** (Go) | **v1.7.1** | Engine + `nativecpp` / `nativeqnn` / `nativemetal` / `nativecuda` / `nativerocm` / `nativevulkan` / `nativemlx` bindings · scorecard **100/100** |
+| **welvet** (Go) | **v1.7.2** | Engine + `nativecpp` / `nativeqnn` / `nativemetal` / `nativecuda` / `nativerocm` / `nativevulkan` / `nativemlx` bindings · scorecard **100/100** |
 | **welvet.cpp** | **0.67** | CPU + C ABI — **same 100-pt board as Go**; `0.{round(earned)}` until 1.0 |
 | **welvet.metal** | **0.71**, ABI **1** | Independent Apple Metal backend; `@autoreleasepool` OOM drain (+ 0.70 Mesh* / 0.69 View) |
 | **welvet.mlx** | **1.0.0** | Independent Apple MLX forward-only GPU backend (libmlx / Metal; no CPU fallback) |
@@ -103,7 +103,13 @@ Ordinary builds do not require MLX or Apple silicon. Engine board stays
 `nativeqnn` builds on `cgo && (windows/arm64 || android/arm64)`. Engine board
 stays **100/100**; no new Go API beyond the android build tag.
 
+## Go v1.7.1 → v1.7.2
+
+**v1.7.2** is a patch: refresh `native/qnn/android_arm64/libwelvet_qnn.so` to a
+**QAIRT-built** HTP binary (same pin **welvet.qnn 1.1.0**). Engine board stays
+**100/100**.
+
 This is the release target prepared in the working tree. Updating these files
 does not create a Git tag, push commits, publish a GitHub release or make
-`go get ...@v1.7.1` available. `release.sh` reads the README version when a
+`go get ...@v1.7.2` available. `release.sh` reads the README version when a
 separate publication is requested.
