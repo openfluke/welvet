@@ -65,6 +65,15 @@ func defaultLibrary() string {
 	return filepath.Join(filepath.Dir(file), "..", "native", "metal", "darwin_arm64", "libwelvet_metal.dylib")
 }
 
+// DefaultLibraryPath is the resolved libwelvet_metal path.
+func DefaultLibraryPath() string { return defaultLibrary() }
+
+// LibraryPresent reports whether DefaultLibraryPath exists on disk.
+func LibraryPresent() bool {
+	_, err := os.Stat(defaultLibrary())
+	return err == nil
+}
+
 // Mount accepts a supported Go layer, parallel.Stack, parallel.Layer or Grid.
 // Options selects the library; no CPU fallback occurs if loading/mounting fails.
 func Mount(model any, options ...Options) (*Session, error) {
