@@ -122,7 +122,7 @@ smoke_build() {
   # Explicit roots — apps/w2a/book may exist on disk but are gitignored / not engine.
   # Module deps resolve from the proxy (webgpu / go-sentencepiece) — no local replaces.
   local roots=(
-    ./core/... ./weights/... ./quant/... ./simd/... ./webgpu/... ./tiling/...
+    . ./core/... ./weights/... ./quant/... ./simd/... ./webgpu/... ./tiling/...
     ./architecture/... ./layers/... ./runtime/... ./systems/... ./model/...
     ./fusedgpu/... ./stub/...
   )
@@ -165,10 +165,16 @@ Pure Go AI engine — scorecard **@EARNED@/100** → **@VERSION@**.
 go get github.com/openfluke/welvet@@VERSION@
 ```
 
-### What's new in v1.7.2
-- Patch: refresh `native/qnn/android_arm64/libwelvet_qnn.so` to a **QAIRT-built** HTP binary (pin still **welvet.qnn 1.1.0**)
+### What's new in v1.7.4
+- Patch: root `doc.go` (`package welvet`) with keyword-rich docs so [pkg.go.dev](https://pkg.go.dev/github.com/openfluke/welvet) indexes the module for AI engine / neural network / quantization / GPU·NPU search
 - Go engine board remains **100/100**
-- Independent pins: **welvet.cpp 0.67**, **welvet.qnn 1.1.0**, **welvet.metal 0.71**, **welvet.mlx 1.0.0**, **welvet.cuda 0.79**, **welvet.rocm 0.79**, **welvet.vulkan 0.79.1**
+- Independent pins unchanged: **welvet.cpp 0.67**, **welvet.qnn 1.1.0**, **welvet.metal 0.71**, **welvet.mlx 1.0.0**, **welvet.cuda 0.79**, **welvet.rocm 0.79**, **welvet.vulkan 0.79.1**
+
+### From v1.7.3
+- Patch: `runtime/accel` — process-wide `Ensure` / `EnableRouting` for Cuda / Metal / ROCm / Vulkan, plus `Probe` for polyglot CABI/Python
+
+### From v1.7.2
+- Patch: refresh `native/qnn/android_arm64/libwelvet_qnn.so` to a **QAIRT-built** HTP binary (pin still **welvet.qnn 1.1.0**)
 
 ### From v1.7.1
 - Patch: bundled **welvet.qnn 1.1.0** — Android arm64-v8a `libwelvet_qnn.so` under `native/qnn/android_arm64/` (API 28+), beside Windows ARM64
@@ -204,19 +210,21 @@ go get github.com/openfluke/welvet@@VERSION@
 - **Apple Metal GPU integration** through Go's `nativemetal` package
 
 ### Platform selection
-- Existing Go CPU / SIMD / WebGPU / NativeCPU / QNN / Metal / CUDA / ROCm / Vulkan behavior is preserved for ordinary builds
+- Existing Go CPU / SIMD / WebGPU / NativeCPU / QNN / Metal / MLX / CUDA / ROCm / Vulkan behavior is preserved for ordinary builds
 - MLX, Vulkan, ROCm, CUDA and Metal are optional: installing Go Welvet does not require those GPUs
 - Library resolution and supported model limits: see `native/mlx/README.md`, `native/vulkan/README.md`, `native/rocm/README.md`, `native/cuda/README.md` and `native/metal/README.md`
 
 ### Related
+- Docs: https://pkg.go.dev/github.com/openfluke/welvet
 - NativeCPU / C++: https://github.com/openfluke/welvet.cpp
 - Apple Metal: https://github.com/openfluke/welvet.metal
+- Apple MLX: https://github.com/openfluke/welvet.mlx
 - NVIDIA CUDA: https://github.com/openfluke/welvet.cuda
 - AMD ROCm: https://github.com/openfluke/welvet.rocm
 - Vulkan: https://github.com/openfluke/welvet.vulkan
 - Hexagon HTP: https://github.com/openfluke/welvet.qnn
 - Validation: https://github.com/openfluke/w2a
-- Site: https://openfluke.github.io/welvet/
+- Site: https://openfluke.com
 
 Prior v1.2.0: Qualcomm HTP / nativeqnn. Earlier tags (v1.0…v1.1.10): CamSync, multi-OS `libwelvet`, NativeCPU train modes — see older GitHub releases.
 
@@ -387,8 +395,10 @@ echo " Done · ${VERSION}"
 echo " Repo:    https://github.com/${REPO_SLUG}"
 echo " Release: https://github.com/${REPO_SLUG}/releases/tag/${VERSION}"
 echo " Module:  go get github.com/openfluke/welvet@${VERSION}"
+echo " Docs:    https://pkg.go.dev/github.com/openfluke/welvet@${VERSION}"
 echo "════════════════════════════════════════"
 echo ""
 echo "Next (optional):"
+echo "  open https://pkg.go.dev/github.com/openfluke/welvet@${VERSION}  # request index refresh if stale"
 echo "  cd w2a && ./release.sh"
 echo "  cd openfluke.github.io && ./release.sh"
