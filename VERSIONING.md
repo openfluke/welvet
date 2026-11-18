@@ -2,7 +2,7 @@
 
 | Component | Tag now | Role |
 |-----------|---------|------|
-| **welvet** (Go) | **v1.7.3** | Engine + `nativecpp` / `nativeqnn` / `nativemetal` / `nativecuda` / `nativerocm` / `nativevulkan` / `nativemlx` bindings · scorecard **100/100** |
+| **welvet** (Go) | **v1.7.4** | Engine + `nativecpp` / `nativeqnn` / `nativemetal` / `nativecuda` / `nativerocm` / `nativevulkan` / `nativemlx` bindings · scorecard **100/100** |
 | **welvet.cpp** | **0.67** | CPU + C ABI — **same 100-pt board as Go**; `0.{round(earned)}` until 1.0 |
 | **welvet.metal** | **0.71**, ABI **1** | Independent Apple Metal backend; `@autoreleasepool` OOM drain (+ 0.70 Mesh* / 0.69 View) |
 | **welvet.mlx** | **1.0.0** | Independent Apple MLX forward-only GPU backend (libmlx / Metal; no CPU fallback) |
@@ -116,7 +116,15 @@ stays **100/100**; no new Go API beyond the android build tag.
 CABI/Python (`w2a` **1.1.2**). Engine board stays **100/100**; no new native
 engine pins.
 
+## Go v1.7.3 → v1.7.4
+
+**v1.7.4** is a patch: add root `doc.go` (`package welvet`) with keyword-rich
+package docs so pkg.go.dev indexes the module path
+`github.com/openfluke/welvet` for AI engine / neural network / quantization /
+GPU acceleration searches (alongside subpackages like `weights`). Engine board
+stays **100/100**; no API or native pin changes.
+
 This is the release target prepared in the working tree. Updating these files
 does not create a Git tag, push commits, publish a GitHub release or make
-`go get ...@v1.7.3` available. `release.sh` reads the README version when a
+`go get ...@v1.7.4` available. `release.sh` reads the README version when a
 separate publication is requested.
